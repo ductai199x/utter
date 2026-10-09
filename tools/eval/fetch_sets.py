@@ -72,29 +72,105 @@ class TarSet:
 
 SETS: list[ParquetSet | TarSet] = [
     # English: the Open ASR Leaderboard's own test sets (hf-audio/open-asr-leaderboard).
-    ParquetSet("en-ami", "en", "datasets/hf-audio/open-asr-leaderboard", "ami_cleaned/test-*.parquet",
-               "text", "id", "meetings, spontaneous, disfluent"),
-    ParquetSet("en-earnings22", "en", "datasets/hf-audio/open-asr-leaderboard", "earnings22/test-*.parquet",
-               "text", "id", "earnings calls, accented, spontaneous"),
-    ParquetSet("en-gigaspeech", "en", "datasets/hf-audio/open-asr-leaderboard", "gigaspeech_cleaned/test-*.parquet",
-               "text", "id", "podcasts and YouTube"),
-    ParquetSet("en-voxpopuli", "en", "datasets/hf-audio/open-asr-leaderboard", "voxpopuli_cleaned_aa/test-*.parquet",
-               "text", "id", "parliament speeches"),
-    ParquetSet("en-urgent24", "en", "datasets/hf-audio/open-asr-leaderboard", "urgent2024/test-*.parquet",
-               "text", "id", "noise and reverberation added (research use only)"),
-    ParquetSet("en-monsoon", "en", "datasets/VoiceArena/Monsoon_en_IN_test", "data/test-*.parquet",
-               "text", "id", "conversations, Indian English"),
-    ParquetSet("en-libri-other", "en", "datasets/hf-audio/open-asr-leaderboard", "librispeech/test.other-*.parquet",
-               "text", "id", "read audiobooks, the harder half (a sanity baseline)"),
+    ParquetSet(
+        "en-ami",
+        "en",
+        "datasets/hf-audio/open-asr-leaderboard",
+        "ami_cleaned/test-*.parquet",
+        "text",
+        "id",
+        "meetings, spontaneous, disfluent",
+    ),
+    ParquetSet(
+        "en-earnings22",
+        "en",
+        "datasets/hf-audio/open-asr-leaderboard",
+        "earnings22/test-*.parquet",
+        "text",
+        "id",
+        "earnings calls, accented, spontaneous",
+    ),
+    ParquetSet(
+        "en-gigaspeech",
+        "en",
+        "datasets/hf-audio/open-asr-leaderboard",
+        "gigaspeech_cleaned/test-*.parquet",
+        "text",
+        "id",
+        "podcasts and YouTube",
+    ),
+    ParquetSet(
+        "en-voxpopuli",
+        "en",
+        "datasets/hf-audio/open-asr-leaderboard",
+        "voxpopuli_cleaned_aa/test-*.parquet",
+        "text",
+        "id",
+        "parliament speeches",
+    ),
+    ParquetSet(
+        "en-urgent24",
+        "en",
+        "datasets/hf-audio/open-asr-leaderboard",
+        "urgent2024/test-*.parquet",
+        "text",
+        "id",
+        "noise and reverberation added (research use only)",
+    ),
+    ParquetSet(
+        "en-monsoon",
+        "en",
+        "datasets/VoiceArena/Monsoon_en_IN_test",
+        "data/test-*.parquet",
+        "text",
+        "id",
+        "conversations, Indian English",
+    ),
+    ParquetSet(
+        "en-libri-other",
+        "en",
+        "datasets/hf-audio/open-asr-leaderboard",
+        "librispeech/test.other-*.parquet",
+        "text",
+        "id",
+        "read audiobooks, the harder half (a sanity baseline)",
+    ),
     # Vietnamese.
-    ParquetSet("vi-vimd", "vi", "datasets/nguyendv02/ViMD_Dataset", "data/test-*.parquet",
-               "text", "filename", "63 provincial dialects"),
-    ParquetSet("vi-fleurs", "vi", "datasets/google/fleurs", "parquet-data/vi_vn/test-*.parquet",
-               "raw_transcription", "id", "read Wikipedia sentences"),
-    ParquetSet("vi-bud500", "vi", "datasets/linhtran92/viet_bud500", "data/test-*.parquet",
-               "transcription", None, "podcasts and more (gated)"),
-    TarSet("vi-gigaspeech2", "vi", "speechcolab/gigaspeech2", "data/vi/test.tar.gz", "data/vi/test.tsv",
-           "YouTube and podcasts, in the wild (gated)"),
+    ParquetSet(
+        "vi-vimd",
+        "vi",
+        "datasets/nguyendv02/ViMD_Dataset",
+        "data/test-*.parquet",
+        "text",
+        "filename",
+        "63 provincial dialects",
+    ),
+    ParquetSet(
+        "vi-fleurs",
+        "vi",
+        "datasets/google/fleurs",
+        "parquet-data/vi_vn/test-*.parquet",
+        "raw_transcription",
+        "id",
+        "read Wikipedia sentences",
+    ),
+    ParquetSet(
+        "vi-bud500",
+        "vi",
+        "datasets/linhtran92/viet_bud500",
+        "data/test-*.parquet",
+        "transcription",
+        None,
+        "podcasts and more (gated)",
+    ),
+    TarSet(
+        "vi-gigaspeech2",
+        "vi",
+        "speechcolab/gigaspeech2",
+        "data/vi/test.tar.gz",
+        "data/vi/test.tsv",
+        "YouTube and podcasts, in the wild (gated)",
+    ),
 ]
 
 
@@ -162,7 +238,8 @@ def fetch(spec: ParquetSet | TarSet, per_set: int) -> None:
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(f"utter-eval-{spec.name}")
     source: Callable[[], Iterator[Clip]] = (
-        (lambda: parquet_clips(spec, per_set, rng)) if isinstance(spec, ParquetSet)
+        (lambda: parquet_clips(spec, per_set, rng))
+        if isinstance(spec, ParquetSet)
         else (lambda: tar_clips(spec, per_set, rng))
     )
     kept: list[dict] = []
@@ -182,8 +259,16 @@ def fetch(spec: ParquetSet | TarSet, per_set: int) -> None:
             safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in clip.id)
             path = out / f"{safe}.wav"
             sf.write(path, audio, SAMPLE_RATE, subtype="PCM_16")
-            kept.append({"id": clip.id, "audio": path.name, "text": clip.text, "lang": spec.lang,
-                         "duration_s": round(duration, 3), "source": spec.name})
+            kept.append(
+                {
+                    "id": clip.id,
+                    "audio": path.name,
+                    "text": clip.text,
+                    "lang": spec.lang,
+                    "duration_s": round(duration, 3),
+                    "source": spec.name,
+                }
+            )
             if len(kept) >= per_set:
                 break
     tmp = manifest.with_suffix(".jsonl.part")
@@ -192,8 +277,10 @@ def fetch(spec: ParquetSet | TarSet, per_set: int) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     tmp.replace(manifest)
     hours = sum(r["duration_s"] for r in kept) / 3600
-    console.print(f"{spec.name}: {len(kept)} clips, {hours:.2f} h ({skipped} outside {MIN_S:g}-{MAX_S:g} s or undecodable)"
-                  + ("" if len(kept) >= per_set else f" [yellow]-- short of {per_set}[/yellow]"))
+    console.print(
+        f"{spec.name}: {len(kept)} clips, {hours:.2f} h ({skipped} outside {MIN_S:g}-{MAX_S:g} s or undecodable)"
+        + ("" if len(kept) >= per_set else f" [yellow]-- short of {per_set}[/yellow]")
+    )
 
 
 @app.command()

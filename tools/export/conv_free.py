@@ -33,17 +33,29 @@ class ConvModuleFixedConv(nn.Module):
     def __init__(self, m, max_frames: int) -> None:
         super().__init__()
         self.w1 = nn.Parameter(m.pointwise_conv1.weight[:, :, 0].clone(), requires_grad=False)
-        self.b1 = None if m.pointwise_conv1.bias is None else nn.Parameter(m.pointwise_conv1.bias.clone(), requires_grad=False)
+        self.b1 = (
+            None
+            if m.pointwise_conv1.bias is None
+            else nn.Parameter(m.pointwise_conv1.bias.clone(), requires_grad=False)
+        )
         bn = m.norm
         scale = bn.weight / torch.sqrt(bn.running_var + bn.eps)
-        b = (m.depthwise_conv.bias if m.depthwise_conv.bias is not None else torch.zeros_like(scale))
-        self.dw = nn.Parameter((m.depthwise_conv.weight * scale[:, None, None]).clone(), requires_grad=False)  # [C, 1, K]
-        self.dw_b = nn.Parameter(((b - bn.running_mean) * scale + bn.bias).clone(), requires_grad=False)
+        b = m.depthwise_conv.bias if m.depthwise_conv.bias is not None else torch.zeros_like(scale)
+        self.dw = nn.Parameter(
+            (m.depthwise_conv.weight * scale[:, None, None]).clone(), requires_grad=False
+        )  # [C, 1, K]
+        self.dw_b = nn.Parameter(
+            ((b - bn.running_mean) * scale + bn.bias).clone(), requires_grad=False
+        )
         self.pad = m.padding
         self.max_frames = max_frames
         self.act = m.activation
         self.w2 = nn.Parameter(m.pointwise_conv2.weight[:, :, 0].clone(), requires_grad=False)
-        self.b2 = None if m.pointwise_conv2.bias is None else nn.Parameter(m.pointwise_conv2.bias.clone(), requires_grad=False)
+        self.b2 = (
+            None
+            if m.pointwise_conv2.bias is None
+            else nn.Parameter(m.pointwise_conv2.bias.clone(), requires_grad=False)
+        )
 
     def forward(self, x: torch.Tensor, attention_mask=None) -> torch.Tensor:  # x: [B, T, C]
         x = F.linear(x, self.w1, self.b1)
@@ -59,18 +71,28 @@ class ConvModuleNoConv(nn.Module):
     def __init__(self, m) -> None:
         super().__init__()
         self.w1 = nn.Parameter(m.pointwise_conv1.weight[:, :, 0].clone(), requires_grad=False)
-        self.b1 = None if m.pointwise_conv1.bias is None else nn.Parameter(m.pointwise_conv1.bias.clone(), requires_grad=False)
+        self.b1 = (
+            None
+            if m.pointwise_conv1.bias is None
+            else nn.Parameter(m.pointwise_conv1.bias.clone(), requires_grad=False)
+        )
         # Fold eval-mode BatchNorm into the depthwise kernel: y = (conv(x) - mean) * scale + beta.
         bn = m.norm
         scale = bn.weight / torch.sqrt(bn.running_var + bn.eps)
         k = m.depthwise_conv.weight[:, 0, :] * scale[:, None]  # [C, K]
-        b = (m.depthwise_conv.bias if m.depthwise_conv.bias is not None else torch.zeros_like(scale))
+        b = m.depthwise_conv.bias if m.depthwise_conv.bias is not None else torch.zeros_like(scale)
         self.dw = nn.Parameter(k.t().contiguous().clone(), requires_grad=False)  # [K, C]
-        self.dw_b = nn.Parameter(((b - bn.running_mean) * scale + bn.bias).clone(), requires_grad=False)
+        self.dw_b = nn.Parameter(
+            ((b - bn.running_mean) * scale + bn.bias).clone(), requires_grad=False
+        )
         self.pad = m.padding
         self.act = m.activation
         self.w2 = nn.Parameter(m.pointwise_conv2.weight[:, :, 0].clone(), requires_grad=False)
-        self.b2 = None if m.pointwise_conv2.bias is None else nn.Parameter(m.pointwise_conv2.bias.clone(), requires_grad=False)
+        self.b2 = (
+            None
+            if m.pointwise_conv2.bias is None
+            else nn.Parameter(m.pointwise_conv2.bias.clone(), requires_grad=False)
+        )
 
     def forward(self, x: torch.Tensor, attention_mask=None) -> torch.Tensor:  # x: [B, T, C]
         x = F.linear(x, self.w1, self.b1)
@@ -80,13 +102,15 @@ class ConvModuleNoConv(nn.Module):
         xp = F.pad(x, (0, 0, self.pad, self.pad))
         y = self.dw_b
         for k in range(self.dw.shape[0]):
-            y = y + xp[:, k:k + t, :] * self.dw[k]
+            y = y + xp[:, k : k + t, :] * self.dw[k]
         return F.linear(self.act(y), self.w2, self.b2)
 
 
-def _strided_taps(xp: torch.Tensor, t_out: torch.Tensor, f_out: torch.Tensor, di: int, dj: int) -> torch.Tensor:
+def _strided_taps(
+    xp: torch.Tensor, t_out: torch.Tensor, f_out: torch.Tensor, di: int, dj: int
+) -> torch.Tensor:
     """xp[..., di + 2i, dj + 2j] for i < t_out, j < f_out (a stride-2 3x3 window's tap)."""
-    return xp[..., di:di + 2 * t_out - 1:2, dj:dj + 2 * f_out - 1:2]
+    return xp[..., di : di + 2 * t_out - 1 : 2, dj : dj + 2 * f_out - 1 : 2]
 
 
 class SubsamplingNoConv(nn.Module):
@@ -100,11 +124,20 @@ class SubsamplingNoConv(nn.Module):
         first = convs[0]
         self.first_w = nn.Parameter(first.weight[:, 0].clone(), requires_grad=False)  # [C, 3, 3]
         self.first_b = nn.Parameter(first.bias.clone(), requires_grad=False)
-        self.dw_w, self.dw_b, self.pw_w, self.pw_b = nn.ParameterList(), nn.ParameterList(), nn.ParameterList(), nn.ParameterList()
+        self.dw_w, self.dw_b, self.pw_w, self.pw_b = (
+            nn.ParameterList(),
+            nn.ParameterList(),
+            nn.ParameterList(),
+            nn.ParameterList(),
+        )
         for dw, pw in zip(convs[1::2], convs[2::2], strict=True):
-            self.dw_w.append(nn.Parameter(dw.weight[:, 0].clone(), requires_grad=False))  # [C, 3, 3]
+            self.dw_w.append(
+                nn.Parameter(dw.weight[:, 0].clone(), requires_grad=False)
+            )  # [C, 3, 3]
             self.dw_b.append(nn.Parameter(dw.bias.clone(), requires_grad=False))
-            self.pw_w.append(nn.Parameter(pw.weight[:, :, 0, 0].clone(), requires_grad=False))  # [C, C]
+            self.pw_w.append(
+                nn.Parameter(pw.weight[:, :, 0, 0].clone(), requires_grad=False)
+            )  # [C, C]
             self.pw_b.append(nn.Parameter(pw.bias.clone(), requires_grad=False))
         self.linear = s.linear
 
@@ -119,7 +152,11 @@ class SubsamplingNoConv(nn.Module):
         x = self.first_b[None, :, None, None]
         for di in range(3):
             for dj in range(3):
-                x = x + _strided_taps(xp, t1, f1, di, dj)[:, None] * self.first_w[None, :, di, dj, None, None]
+                x = (
+                    x
+                    + _strided_taps(xp, t1, f1, di, dj)[:, None]
+                    * self.first_w[None, :, di, dj, None, None]
+                )
         x = torch.relu(x)  # [B, C, T1, F1]
         for dw_w, dw_b, pw_w, pw_b in zip(self.dw_w, self.dw_b, self.pw_w, self.pw_b, strict=True):
             t, f = x.shape[2], x.shape[3]
@@ -145,4 +182,8 @@ def rewrite(model, depthwise: str = "fixed", max_frames: int = 512) -> None:
     enc = model.encoder
     enc.subsampling = SubsamplingNoConv(enc.subsampling)
     for layer in enc.layers:
-        layer.conv = ConvModuleFixedConv(layer.conv, max_frames) if depthwise == "fixed" else ConvModuleNoConv(layer.conv)
+        layer.conv = (
+            ConvModuleFixedConv(layer.conv, max_frames)
+            if depthwise == "fixed"
+            else ConvModuleNoConv(layer.conv)
+        )
