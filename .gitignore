@@ -1,0 +1,23 @@
+# Rust
+target/
+
+# Node / Svelte
+node_modules/
+app/build/
+app/.svelte-kit/
+
+# Python tools
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Models, recordings and local data are never committed
+models/
+data/
+*.gguf
+*.onnx
+*.wav
+
+# Local tooling
+.claude/settings.local.json
