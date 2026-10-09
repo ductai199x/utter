@@ -39,6 +39,8 @@ models = [
     "librosa>=1.0",
     "sentencepiece>=0.2",
     "protobuf>=5",
+    # moondream/parakeet-ultra runs only in its own engine (Photon, from the kestrel package).
+    "moondream>=2.6",
 ]
 
 [tool.uv]
