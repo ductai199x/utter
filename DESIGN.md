@@ -111,12 +111,17 @@ idle ──key down──► listening ──key up──► finishing ──►
 1. **Key down.** The hook thread records the time and signals the pipeline. Nothing else
    happens inside the hook callback. The mic stream is already open and recording into the
    ring buffer: Utter keeps a pre-roll of about 300 ms so the first word is never cut off.
-   The Bar appears within one frame.
+   The Bar appears within one frame. The recognizer starts a warm-up pass at once: an idle
+   GPU drops its clocks, and a cold pass takes about 5 times as long as a warm one
+   (docs/eval-results.md, "Idle GPU"). From then until key up, the live preview's passes keep
+   it busy.
 2. **Focus capture.** On key down, Utter records the focused window, and the selection if
    there is one. Insertion goes to that window and nowhere else.
 3. **Streaming transcription while the key is held.** Silero marks pauses. Each finished
    speech segment is sent to Parakeet straight away, while the user is still talking. When
-   the key comes up, only the last segment is left to recognize.
+   the key comes up, only the last segment is left to recognize. A segment is at most 41 s
+   (512 encoder frames, a limit of the exported encoder); longer speech is cut at its
+   quietest point before that.
 4. **Mode.** Plain dictation, Command Mode, or hands-free (section 4.1).
    While the key is held, the Bar shows the words as they are recognized (section 4.2).
 5. **Text pass (no model).** Snippet triggers, spoken punctuation ("comma", "new line") and
@@ -175,6 +180,7 @@ Measured on the development machine (RTX 3090 Ti). Each row has a trace span. p9
 |---|---|---|
 | Key down → Bar visible and audio confirmed | 16 ms | 33 ms |
 | Key up → last segment transcribed | 60 ms | 120 ms |
+| (measured 2026-10-09, warm: parakeet-ultra on the eval clips) | 34 ms | 59 ms |
 | Key up → text inserted, gate skips the LLM | 120 ms | 250 ms |
 | Key up → text inserted, LLM cleanup of ~30 words | 400 ms | 800 ms |
 | Command Mode, rewrite of a short paragraph | 700 ms | 1.5 s |
@@ -388,5 +394,6 @@ utter/
 | 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
 | 2026-10-09 | Languages: English and Vietnamese, with code-switching. Parakeet v3 alone no longer fits (no Vietnamese). | 6 |
 | 2026-10-09 | Eval on public datasets, no recordings from Tai. | 12 |
+| 2026-10-09 | The recognizer runs in the Rust core: encoder on the GPU (convolutions rewritten for fixed shapes), decoder on the CPU. Same accuracy as Transformers, 34 ms p50 warm. The pipeline warms the GPU on key down. | 4, docs/eval-results.md |
 | 2026-10-09 | English speech recognition: parakeet-ultra weights (CC-BY-4.0) in Utter's own ONNX runtime. Ties the most accurate open model at a fraction of its latency; never Moondream's Photon engine, which sends telemetry. Vietnamese candidates: Qwen3-ASR-1.7B, Cohere. Evidence: docs/eval-results.md. | 6 |
 | 2026-10-09 | English first. If no model does English and Vietnamese both well, v1 ships the best English model; Vietnamese follows (a second, routed model or a later single one). Tai's English is a standard American accent. | 6 |

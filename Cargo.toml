@@ -1,0 +1,34 @@
+[workspace]
+resolver = "3"
+members = ["crates/utter-core", "crates/utter-asr", "crates/utter-cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+authors = ["Tai Duc Nguyen"]
+rust-version = "1.98"
+
+[workspace.dependencies]
+utter-core = { path = "crates/utter-core" }
+utter-asr = { path = "crates/utter-asr" }
+
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+hound = "3.5.1"
+# onnxruntime is loaded at run time (load-dynamic): development uses the DLLs of tools/'s
+# onnxruntime-gpu, the installer will ship its own copy. docs/local-setup.md.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "cuda"] }
+ndarray = "0.17.2"
+realfft = "3.5.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+debug = "line-tables-only"

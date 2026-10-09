@@ -1,0 +1,18 @@
+[package]
+name = "utter-cli"
+description = "Utter's developer command line: transcribe files, bench the core against the eval sets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+utter-core.workspace = true
+utter-asr.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+hound.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
