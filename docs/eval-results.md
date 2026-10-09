@@ -6,6 +6,66 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-09: parakeet-ultra in Utter's Rust runtime
+
+### What was built
+
+- `tools/export/export_parakeet.py` exports the weights from Transformers into ONNX graphs:
+  encoder (projection folded in), decoder step, joint, and a fused decoder-step-plus-joint.
+  `tools/export/check_parakeet.py` checks them: 70 of 70 clips give the same tokens and text
+  as Transformers.
+- `crates/utter-asr`: the audio front end in Rust (matches Transformers' features; test
+  `tests/frontend.rs`), and greedy TDT decoding on onnxruntime (CUDA for the encoder).
+- `utter-cli bench` writes results that `tools/eval/asr_bench.py` scores, so the Rust
+  runtime is measured by the same yardstick as the Python candidates.
+
+### Accuracy
+
+**The same as Transformers:** pooled English WER difference +0.00 points (95% interval +0.00
+to +0.01) over 2,095 clips; 7.3% mean English WER.
+
+### Latency (RTX 3090 Ti, per clip, batch 1, clips back to back)
+
+| | median of set p50 | median of set p95 | all clips p50 / p95 |
+|---|---|---|---|
+| Photon (Moondream's engine, Python bench) | 31 ms | 40 ms | — |
+| **Utter, Rust** | **33 ms** | **46 ms** | 34.3 / 59.4 ms |
+
+Per stage, all clips, p50: front end 1.0 ms, encoder 20.5 ms, decode 12.5 ms. Short clips
+(AMI, 1–5 s) take 27.5 ms in total. The target was Photon's 31 ms; Utter is about 2 ms behind
+on medians. The two runs are not under identical load: the GPU showed 31–35% utilization
+from other applications (Moonlight, Teams, browsers, LM Studio) during the Rust runs.
+
+### What moved the numbers (each measured on the eval clips)
+
+| Change | Effect |
+|---|---|
+| First working runtime | 75.8 ms p50 |
+| Encoder convolutions rewritten (`tools/export/conv_free.py`) | onnxruntime's cuDNN Conv redoes its setup on every new input length: 2.3 ms on a repeated length, about 42 ms on a new one, and every utterance is a new length. Pointwise convs became MatMuls; each depthwise conv runs on an input padded to a fixed 512 frames (41 s) and is sliced back, which is exact and keeps cuDNN's setup to once. Writing the depthwise conv as 9 shifted multiply-adds instead removed the setup but launched about 650 more small kernels: slower. |
+| Sparse mel filterbank | Front end 7–19 ms -> 0.3–1.9 ms. |
+| Decoder and joint on the CPU | 12.6 ms decode p50, against 20.1 ms for the fused GPU step (one call per emitted token, with IoBinding). Per-call overhead on the GPU outweighs the small graphs' arithmetic. The GPU path stays as an option. |
+| Not used | cuDNN's default convolution algorithm (750 ms per clip); memory-pattern planning off (no effect); one CPU thread (decode 20 ms); no spinning (encoder faster, decode slower). |
+
+### Idle GPU: the finding that matters for the product
+
+Clips spaced like real utterances are much slower than clips back to back. After 1.5 s idle
+the GPU drops to P5 (525 MHz of 2,115) and the next encoder pass takes about 108 ms instead
+of 20 (AMI). Keep-alive passes every 100 ms during the gap bring short clips back to warm
+speed (28.7 ms) but long ones only part of the way (62 ms against 32).
+
+So the pipeline must keep the GPU busy from the key press on: a warm-up pass on key down,
+then the live preview's passes while the user speaks. The final pass, after key up, then runs
+warm. Measuring this end to end belongs to the pipeline's bench (phase 1, next).
+
+### Left on the table (in order of expected gain)
+
+1. CUDA graphs per length bucket for the encoder (launch overhead is now the encoder's cost).
+2. FP16 encoder weights.
+3. The subsampling convolutions still use the 9-tap rewrite (about 135 small launches); the
+   fixed-length padding used for the depthwise convs applies to them too.
+
+---
+
 ## 2026-10-09: speech recognition, first bench
 
 ### Method

@@ -1,0 +1,347 @@
+//! Parakeet TDT on ONNX Runtime: the encoder once per clip, then greedy token-and-duration
+//! decoding over the encoder frames with the decoder (prediction network) and joint graphs.
+//!
+//! Two decoding loops make the same decisions:
+//! - on the GPU, [`ParakeetTdt::greedy_batched`] calls the fused `step` graph once per
+//!   emitted token, scoring every remaining frame at once;
+//! - on the CPU, [`ParakeetTdt::greedy_per_frame`] calls the joint once per frame, where
+//!   scoring all remaining frames each time would cost more than it saves.
+//!
+//! The graphs come from `tools/export/export_parakeet.py`; `tools/export/check_parakeet.py`
+//! checks them, and the per-frame loop in Python, against Transformers token for token.
+
+use std::path::Path;
+use std::time::Instant;
+
+use ort::ep::{self, cuda::ConvAlgorithmSearch};
+use ort::memory::{AllocationDevice, AllocatorType, MemoryInfo, MemoryType};
+use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
+use ort::value::{Tensor, TensorRef};
+
+use crate::frontend::MelFrontEnd;
+use crate::{AsrError, ModelConfig, Vocab};
+
+/// Where a graph runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Device {
+    Cuda,
+    Cpu,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParakeetOptions {
+    pub encoder: Device,
+    /// The decoder and joint run once per emitted token and once per encoder frame: small
+    /// graphs, where a GPU round trip costs more than the arithmetic. On the RTX 3090 Ti,
+    /// warm, the CPU decodes in 12.6 ms p50 against 20.1 ms for the fused GPU step
+    /// (docs/eval-results.md, 2026-10-09), so the CPU is the default.
+    pub decoder: Device,
+    /// TensorFloat-32 matrix math on the GPU: faster, slightly less precise.
+    pub tf32: bool,
+    /// How cuDNN picks a convolution algorithm for each new input shape.
+    pub conv_search: ConvSearch,
+    /// onnxruntime's memory-pattern planning. It plans for the last input shape only, and
+    /// every utterance has a new length.
+    pub memory_pattern: bool,
+    /// Threads for graphs on the CPU (0: onnxruntime's default, one per core).
+    pub cpu_threads: usize,
+    /// Let idle CPU worker threads spin-wait for the next call instead of sleeping.
+    pub cpu_spinning: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConvSearch {
+    Exhaustive,
+    Heuristic,
+    Default,
+}
+
+impl Default for ParakeetOptions {
+    fn default() -> Self {
+        Self {
+            encoder: Device::Cuda,
+            decoder: Device::Cpu,
+            tf32: true,
+            conv_search: ConvSearch::Heuristic,
+            memory_pattern: true,
+            cpu_threads: 0,
+            cpu_spinning: true,
+        }
+    }
+}
+
+/// Wall time of each stage of one transcription.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Timings {
+    pub frontend_s: f64,
+    pub encoder_s: f64,
+    pub decode_s: f64,
+    pub encoder_frames: usize,
+    pub joint_calls: usize,
+    pub decoder_calls: usize,
+}
+
+impl Timings {
+    pub fn total_s(&self) -> f64 {
+        self.frontend_s + self.encoder_s + self.decode_s
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Transcript {
+    pub text: String,
+    pub tokens: Vec<u32>,
+    pub timings: Timings,
+}
+
+pub struct ParakeetTdt {
+    cfg: ModelConfig,
+    frontend: MelFrontEnd,
+    vocab: Vocab,
+    encoder: Session,
+    decoder: Session,
+    joint: Session,
+    /// The fused decoder step and joint, used when decoding runs on the GPU.
+    step: Option<Session>,
+    /// Width of the projected encoder frames and the decoder output (they are added).
+    hidden: usize,
+}
+
+impl ParakeetTdt {
+    pub fn load(dir: &Path, opts: ParakeetOptions) -> Result<Self, AsrError> {
+        crate::runtime::init()?;
+        let cfg = ModelConfig::load(dir)?;
+        let frontend = MelFrontEnd::load(dir, &cfg)?;
+        let vocab = Vocab::load(dir, cfg.vocab_size)?;
+        let encoder = session(&dir.join("encoder.onnx"), opts.encoder, &opts)?;
+        let decoder = session(&dir.join("decoder.onnx"), opts.decoder, &opts)?;
+        let joint = session(&dir.join("joint.onnx"), opts.decoder, &opts)?;
+        let step = match opts.decoder {
+            Device::Cuda => Some(session(&dir.join("step.onnx"), Device::Cuda, &opts)?),
+            Device::Cpu => None,
+        };
+        let hidden = cfg.decoder_hidden;
+        tracing::info!(dir = %dir.display(), ?opts, "parakeet loaded");
+        Ok(Self { cfg, frontend, vocab, encoder, decoder, joint, step, hidden })
+    }
+
+    /// Transcribes one clip of 16 kHz mono samples.
+    pub fn transcribe(&mut self, audio: &[f32]) -> Result<Transcript, AsrError> {
+        let mut t = Timings::default();
+
+        if let Some(max) = self.cfg.max_encoder_frames {
+            let frames = self.cfg.encoder_frames(self.frontend.frames_for(audio.len()));
+            if frames > max {
+                return Err(AsrError::TooLong { frames, max });
+            }
+        }
+
+        let start = Instant::now();
+        let features = self.frontend.compute(audio)?;
+        t.frontend_s = start.elapsed().as_secs_f64();
+
+        let start = Instant::now();
+        let encoded = {
+            let input = TensorRef::from_array_view(([1usize, features.frames, features.mels], &features.data[..]))?;
+            let outputs = self.encoder.run(ort::inputs!["features" => input])?;
+            let (shape, data) = outputs["encoded"].try_extract_tensor::<f32>()?;
+            if shape.len() != 3 || shape[2] as usize != self.hidden {
+                return Err(AsrError::Model(format!("encoder output shape {shape:?}")));
+            }
+            data.to_vec()
+        };
+        t.encoder_s = start.elapsed().as_secs_f64();
+        t.encoder_frames = encoded.len() / self.hidden;
+
+        let start = Instant::now();
+        let tokens = if self.step.is_some() {
+            self.greedy_batched(encoded, &mut t)?
+        } else {
+            self.greedy_per_frame(&encoded, &mut t)?
+        };
+        t.decode_s = start.elapsed().as_secs_f64();
+
+        let text = self.vocab.decode(&tokens);
+        tracing::debug!(frames = t.encoder_frames, tokens = tokens.len(), total_ms = t.total_s() * 1e3, "transcribed");
+        Ok(Transcript { text, tokens, timings: t })
+    }
+
+    /// Greedy TDT decoding with the fused `step` graph: one call per emitted token.
+    ///
+    /// Each call feeds the last emitted token (blank at the start) to the decoder and scores
+    /// every frame from `frame` on with the resulting decoder output. Until a token is
+    /// emitted the decoder output does not change, so walking those per-frame results on the
+    /// CPU, with the same rules as [`Self::greedy_per_frame`], makes the same decisions. The
+    /// encoder frames are bound once and stay on the device across calls.
+    fn greedy_batched(&mut self, encoded: Vec<f32>, t: &mut Timings) -> Result<Vec<u32>, AsrError> {
+        let (blank, hidden) = (self.cfg.blank_id as i64, self.hidden);
+        let frames = encoded.len() / hidden;
+        let layers = self.cfg.decoder_layers;
+        let max_symbols = self.cfg.max_symbols_per_step;
+        let step = self.step.as_mut().expect("greedy_batched needs the step graph");
+
+        let mut binding = step.create_binding()?;
+        binding.bind_input("encoded", &Tensor::from_array(([frames, hidden], encoded))?)?;
+        let host = MemoryInfo::new(AllocationDevice::CPU, 0, AllocatorType::Device, MemoryType::Default)?;
+
+        let mut h = vec![0.0f32; layers * hidden];
+        let mut c = vec![0.0f32; layers * hidden];
+        let mut token = blank;
+        let mut tokens = Vec::new();
+        let (mut frame, mut emitted) = (0usize, 0usize);
+        while frame < frames {
+            binding.bind_input("token", &Tensor::from_array(([1usize, 1], vec![token]))?)?;
+            binding.bind_input("h", &Tensor::from_array(([layers, 1, hidden], h.clone()))?)?;
+            binding.bind_input("c", &Tensor::from_array(([layers, 1, hidden], c.clone()))?)?;
+            binding.bind_input("start", &Tensor::from_array(([1usize], vec![frame as i64]))?)?;
+            // A bound output keeps its buffer across runs, and the scored frames shrink with
+            // every call: bind the outputs afresh so each run allocates them at their size.
+            binding.clear_outputs();
+            for name in ["tokens", "durations", "h_out", "c_out"] {
+                binding.bind_output_to_device(name, &host)?;
+            }
+            let outputs = step.run_binding(&binding)?;
+            t.joint_calls += 1;
+            t.decoder_calls += 1;
+            let (_, scored) = outputs["tokens"].try_extract_tensor::<i64>()?;
+            let (_, durations) = outputs["durations"].try_extract_tensor::<i64>()?;
+            h.copy_from_slice(outputs["h_out"].try_extract_tensor::<f32>()?.1);
+            c.copy_from_slice(outputs["c_out"].try_extract_tensor::<f32>()?.1);
+
+            // Walk from `frame` until a token is emitted (the decoder must then run again).
+            let base = frame;
+            let mut emitted_token = None;
+            while frame < frames {
+                let i = frame - base;
+                let (tok, dur) = (scored[i], self.cfg.durations[durations[i] as usize]);
+                if tok == blank {
+                    frame += dur.max(1);
+                    emitted = 0;
+                    continue;
+                }
+                tokens.push(tok as u32);
+                emitted += 1;
+                if dur > 0 {
+                    frame += dur;
+                    emitted = 0;
+                } else if emitted >= max_symbols {
+                    frame += 1;
+                    emitted = 0;
+                }
+                emitted_token = Some(tok);
+                break;
+            }
+            match emitted_token {
+                Some(tok) => token = tok,
+                None => break,
+            }
+        }
+        Ok(tokens)
+    }
+
+    /// Greedy TDT decoding, one encoder frame per joint call. At each step the joint scores a
+    /// token and a duration; a token other than blank is emitted and fed to the decoder; the
+    /// frame pointer moves by the duration, by one on a blank with duration 0, and by one
+    /// after `max_symbols_per_step` tokens on the same frame.
+    fn greedy_per_frame(&mut self, encoded: &[f32], t: &mut Timings) -> Result<Vec<u32>, AsrError> {
+        let (blank, vocab_size) = (self.cfg.blank_id, self.cfg.vocab_size);
+        let frames = encoded.len() / self.hidden;
+        let state_len = self.cfg.decoder_layers * self.hidden;
+        let mut h = vec![0.0f32; state_len];
+        let mut c = vec![0.0f32; state_len];
+        let mut dec = self.decoder_step(blank as i64, &mut h, &mut c)?;
+        t.decoder_calls += 1;
+
+        let mut tokens = Vec::new();
+        let (mut frame, mut emitted) = (0usize, 0usize);
+        while frame < frames {
+            let enc = &encoded[frame * self.hidden..(frame + 1) * self.hidden];
+            let (token, step) = {
+                let enc = TensorRef::from_array_view(([1usize, self.hidden], enc))?;
+                let d = TensorRef::from_array_view(([1usize, self.hidden], &dec[..]))?;
+                let outputs = self.joint.run(ort::inputs!["encoded" => enc, "decoded" => d])?;
+                let (_, logits) = outputs["logits"].try_extract_tensor::<f32>()?;
+                (argmax(&logits[..vocab_size]), self.cfg.durations[argmax(&logits[vocab_size..])])
+            };
+            t.joint_calls += 1;
+            if token != blank {
+                tokens.push(token as u32);
+                emitted += 1;
+                dec = self.decoder_step(token as i64, &mut h, &mut c)?;
+                t.decoder_calls += 1;
+            }
+            if step > 0 {
+                frame += step;
+                emitted = 0;
+            } else if token == blank || emitted >= self.cfg.max_symbols_per_step {
+                frame += 1;
+                emitted = 0;
+            }
+        }
+        Ok(tokens)
+    }
+
+    /// One prediction-network step: feeds `token`, updates `h` and `c` in place, returns the
+    /// decoder output.
+    fn decoder_step(&mut self, token: i64, h: &mut [f32], c: &mut [f32]) -> Result<Vec<f32>, AsrError> {
+        let layers = self.cfg.decoder_layers;
+        let token = [token];
+        let outputs = {
+            let tok = TensorRef::from_array_view(([1usize, 1], &token[..]))?;
+            let hs = TensorRef::from_array_view(([layers, 1, self.hidden], &*h))?;
+            let cs = TensorRef::from_array_view(([layers, 1, self.hidden], &*c))?;
+            self.decoder.run(ort::inputs!["token" => tok, "h" => hs, "c" => cs])?
+        };
+        let (_, decoded) = outputs["decoded"].try_extract_tensor::<f32>()?;
+        let (_, h_out) = outputs["h_out"].try_extract_tensor::<f32>()?;
+        let (_, c_out) = outputs["c_out"].try_extract_tensor::<f32>()?;
+        h.copy_from_slice(h_out);
+        c.copy_from_slice(c_out);
+        Ok(decoded.to_vec())
+    }
+}
+
+fn session(path: &Path, device: Device, opts: &ParakeetOptions) -> Result<Session, AsrError> {
+    let mut builder = Session::builder()?
+        .with_optimization_level(GraphOptimizationLevel::Level3)?
+        .with_memory_pattern(opts.memory_pattern)?;
+    if device == Device::Cuda {
+        // A failed CUDA registration is an error, never a silent fall back to the CPU.
+        let search = match opts.conv_search {
+            ConvSearch::Exhaustive => ConvAlgorithmSearch::Exhaustive,
+            ConvSearch::Heuristic => ConvAlgorithmSearch::Heuristic,
+            ConvSearch::Default => ConvAlgorithmSearch::Default,
+        };
+        let cuda =
+            ep::CUDA::default().with_conv_algorithm_search(search).with_tf32(opts.tf32).build().error_on_failure();
+        builder = builder.with_execution_providers([cuda])?;
+    } else {
+        if opts.cpu_threads > 0 {
+            builder = builder.with_intra_threads(opts.cpu_threads)?;
+        }
+        builder = builder.with_intra_op_spinning(opts.cpu_spinning)?;
+    }
+    builder.commit_from_file(path).map_err(|e| AsrError::Model(format!("{}: {e}", path.display())))
+}
+
+fn argmax(values: &[f32]) -> usize {
+    let mut best = 0;
+    for (i, &v) in values.iter().enumerate() {
+        if v > values[best] {
+            best = i;
+        }
+    }
+    best
+}
+
+#[cfg(test)]
+mod tests {
+    use super::argmax;
+
+    #[test]
+    fn argmax_takes_the_first_of_equal_maxima() {
+        // numpy's argmax, which the Python reference uses, does the same.
+        assert_eq!(argmax(&[0.1, 0.9, 0.9, 0.2]), 1);
+    }
+}

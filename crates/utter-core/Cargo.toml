@@ -1,0 +1,12 @@
+[package]
+name = "utter-core"
+description = "Shared types, paths and tracing setup for Utter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tracing.workspace = true
+tracing-subscriber.workspace = true
