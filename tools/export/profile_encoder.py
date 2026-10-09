@@ -29,30 +29,23 @@ def main(name: str = "parakeet-ultra", frames_a: int = 300, frames_b: int = 437)
     so.enable_profiling = True
     so.profile_file_prefix = str(data_dir() / "profile-encoder")
     cuda = ("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC", "use_tf32": "1"})
-    sess = ort.InferenceSession(str(data_dir() / "models" / name / "encoder.onnx"), so, providers=[cuda])
+    sess = ort.InferenceSession(
+        str(data_dir() / "models" / name / "encoder.onnx"), so, providers=[cuda]
+    )
     rng = np.random.default_rng(0)
     order = [frames_a, frames_a, frames_b, frames_b, frames_a]
     for n in order:
         sess.run(None, {"features": rng.standard_normal((1, n, 128)).astype(np.float32)})
-    trace = json.loads(open(sess.end_profiling(), encoding="utf-8").read())
+    with open(sess.end_profiling(), encoding="utf-8") as f:
+        trace = json.load(f)
 
-    runs: list[dict[str, float]] = []
-    current: dict[str, float] | None = None
-    totals: list[float] = []
-    for ev in trace:
-        if ev.get("cat") == "Session" and ev.get("name") == "model_run":
-            totals.append(ev["dur"] / 1e3)
-        if ev.get("cat") != "Node" or not ev.get("name", "").endswith("_kernel_time"):
-            continue
-        op = ev.get("args", {}).get("op_name", "?")
-        if current is None or ev["ts"] < last_ts:  # noqa: F821 -- set below on first event
-            pass
-        last_ts = ev["ts"]  # noqa: F841
-        current = current if current is not None else {}
-    # Group node events by which model_run they fall inside.
-    run_spans = [(ev["ts"], ev["ts"] + ev["dur"]) for ev in trace if ev.get("cat") == "Session" and ev.get("name") == "model_run"]
-    for _ in run_spans:
-        runs.append(defaultdict(float))
+    # Group node events by the model_run they fall inside.
+    run_events = [
+        ev for ev in trace if ev.get("cat") == "Session" and ev.get("name") == "model_run"
+    ]
+    totals = [ev["dur"] / 1e3 for ev in run_events]
+    run_spans = [(ev["ts"], ev["ts"] + ev["dur"]) for ev in run_events]
+    runs: list[dict[str, float]] = [defaultdict(float) for _ in run_spans]
     for ev in trace:
         if ev.get("cat") != "Node" or not ev.get("name", "").endswith("_kernel_time"):
             continue

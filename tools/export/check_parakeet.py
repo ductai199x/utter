@@ -39,14 +39,18 @@ def decode_tokens(ids: list[int], vocab: list[str]) -> str:
 def greedy_tdt(enc: np.ndarray, dec_sess, joint_sess, cfg: dict) -> list[int]:
     """Greedy TDT decoding, one frame at a time: the loop utter-asr implements."""
     blank, vocab_size, durations = cfg["blank_id"], cfg["vocab_size"], cfg["durations"]
-    layers, hidden, max_symbols = cfg["decoder_layers"], cfg["decoder_hidden"], cfg["max_symbols_per_step"]
+    layers, hidden, max_symbols = (
+        cfg["decoder_layers"],
+        cfg["decoder_hidden"],
+        cfg["max_symbols_per_step"],
+    )
     h = np.zeros((layers, 1, hidden), np.float32)
     c = np.zeros((layers, 1, hidden), np.float32)
     dec, h, c = dec_sess.run(None, {"token": np.array([[blank]], np.int64), "h": h, "c": c})
     tokens: list[int] = []
     t, emitted, frames = 0, 0, enc.shape[0]
     while t < frames:
-        logits = joint_sess.run(None, {"encoded": enc[t:t + 1], "decoded": dec})[0][0]
+        logits = joint_sess.run(None, {"encoded": enc[t : t + 1], "decoded": dec})[0][0]
         token = int(logits[:vocab_size].argmax())
         step = durations[int(logits[vocab_size:].argmax())]
         if token != blank:
@@ -69,14 +73,21 @@ def write_fixture(proc, folder: Path) -> None:
     sr, n = 16_000, 21_937
     t = np.arange(n) / sr
     rng = np.random.default_rng(7)
-    audio = (0.3 * np.sin(2 * np.pi * (200 + 900 * t) * t) + 0.1 * np.sin(2 * np.pi * 1234 * t)
-             + 0.01 * rng.standard_normal(n)).astype(np.float32)
+    audio = (
+        0.3 * np.sin(2 * np.pi * (200 + 900 * t) * t)
+        + 0.1 * np.sin(2 * np.pi * 1234 * t)
+        + 0.01 * rng.standard_normal(n)
+    ).astype(np.float32)
     feats = proc.feature_extractor(audio, sampling_rate=sr, return_tensors="np")
     valid = int(feats["attention_mask"][0].sum())
     np.asarray(audio, "<f4").tofile(folder / "frontend_audio.f32")
     np.asarray(feats["input_features"][0, :valid], "<f4").tofile(folder / "frontend_features.f32")
-    (folder / "frontend.json").write_text(json.dumps({"samples": n, "frames": valid, "mels": feats["input_features"].shape[2]}) + "\n",
-                                          encoding="utf-8", newline="\n")
+    (folder / "frontend.json").write_text(
+        json.dumps({"samples": n, "frames": valid, "mels": feats["input_features"].shape[2]})
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     console.print(f"fixture: {n} samples -> {valid} frames, in {folder}")
 
 
@@ -108,13 +119,17 @@ def main(
     per_set = max(1, clips // len(sets))
     worst_enc, token_match, text_match, total = 0.0, 0, 0, 0
     for s in sets:
-        rows = [json.loads(line) for line in (eval_dir() / s / "manifest.jsonl").open(encoding="utf-8")][:per_set]
+        rows = [
+            json.loads(line) for line in (eval_dir() / s / "manifest.jsonl").open(encoding="utf-8")
+        ][:per_set]
         for r in rows:
             audio = sf.read(eval_dir() / s / r["audio"], dtype="float32")[0]
             x = proc(audio, sampling_rate=16_000, return_tensors="pt").to("cuda")
             valid = int(x["attention_mask"][0].sum())
             with torch.inference_mode():
-                ref = model.get_audio_features(input_features=x["input_features"], attention_mask=x["attention_mask"])
+                ref = model.get_audio_features(
+                    input_features=x["input_features"], attention_mask=x["attention_mask"]
+                )
                 out = model.generate(**x)
             seq = out.sequences if hasattr(out, "sequences") else out
             ref_ids = [int(i) for i in seq[0].tolist() if int(i) not in (cfg["blank_id"], 2)]
@@ -123,9 +138,15 @@ def main(
             feats = x["input_features"][:, :valid].cpu().numpy()
             enc = enc_sess.run(None, {"features": feats})[0][0]
             ref_enc = ref.pooler_output[0].cpu().numpy()
-            ref_valid = int(ref.attention_mask[0].sum()) if ref.attention_mask is not None else ref_enc.shape[0]
+            ref_valid = (
+                int(ref.attention_mask[0].sum())
+                if ref.attention_mask is not None
+                else ref_enc.shape[0]
+            )
             if enc.shape[0] != ref_valid:
-                console.print(f"[red]{s}/{r['id']}: {enc.shape[0]} encoder frames, reference {ref_valid}[/red]")
+                console.print(
+                    f"[red]{s}/{r['id']}: {enc.shape[0]} encoder frames, reference {ref_valid}[/red]"
+                )
             n = min(enc.shape[0], ref_valid)
             worst_enc = max(worst_enc, float(np.abs(enc[:n] - ref_enc[:n]).max()))
 
@@ -136,8 +157,10 @@ def main(
             text_match += text == ref_text
             if ids != ref_ids or text != ref_text:
                 console.print(f"[yellow]{s}/{r['id']}[/yellow]\n  ref : {ref_text}\n  onnx: {text}")
-    console.print(f"{total} clips: tokens identical {token_match}, text identical {text_match}, "
-                  f"worst encoder difference {worst_enc:.2e}")
+    console.print(
+        f"{total} clips: tokens identical {token_match}, text identical {text_match}, "
+        f"worst encoder difference {worst_enc:.2e}"
+    )
 
 
 if __name__ == "__main__":
