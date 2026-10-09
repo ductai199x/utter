@@ -4,3 +4,4 @@
 *.onnx binary
 *.gguf binary
 *.wav binary
+*.f32 binary
