@@ -1,5 +1,7 @@
 //! `utter-cli`: the developer command line of Utter's core.
 //!
+//! - `setup`: download, verify and install the runtime components.
+//! - `doctor`: show what is installed.
 //! - `transcribe <wav>...`: print each file's transcript and per-stage timings.
 //! - `bench`: run the core's recognizer over the eval sets that `tools/eval/fetch_sets.py`
 //!   fetched, and write results in the format `tools/eval/asr_bench.py report|compare`
@@ -78,6 +80,27 @@ impl From<DeviceArg> for Device {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Download, verify and install Utter's runtime components (crates/utter-runtime/components.json).
+    Setup {
+        /// Only these components (default: all).
+        ids: Vec<String>,
+    },
+    /// Show which runtime components and models are installed.
+    Doctor,
+    /// Start Utter's llama-server on a GGUF model and send one chat message.
+    Chat {
+        /// The GGUF model file.
+        #[arg(long)]
+        gguf: PathBuf,
+        /// System prompt.
+        #[arg(long, default_value = "You are a helpful assistant.")]
+        system: String,
+        /// The user message.
+        message: String,
+        /// Extra arguments for llama-server, e.g. --server-arg=--spec-type --server-arg=ngram-mod.
+        #[arg(long = "server-arg", allow_hyphen_values = true)]
+        server_args: Vec<String>,
+    },
     /// Transcribe 16 kHz mono WAV files.
     Transcribe { files: Vec<PathBuf> },
     /// Transcribe eval sets and write results for tools/eval/asr_bench.py.
@@ -130,6 +153,12 @@ struct ResultRow<'a> {
 fn main() -> Result<()> {
     utter_core::init_tracing();
     let cli = Cli::parse();
+    match &cli.command {
+        Command::Setup { ids } => return setup(ids),
+        Command::Doctor => return doctor(&cli.model),
+        Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
+        _ => {}
+    }
     let opts = ParakeetOptions {
         decoder: cli.decoder_device.into(),
         tf32: !cli.no_tf32,
@@ -146,7 +175,89 @@ fn main() -> Result<()> {
         Command::Bench { sets, limit, name, gap_ms, keepalive_ms } => {
             bench(&mut asr, &sets, limit, &name, Pacing { gap_ms, keepalive_ms })
         }
+        Command::Setup { .. } | Command::Doctor | Command::Chat { .. } => {
+            unreachable!("handled before the speech model loads")
+        }
     }
+}
+
+fn chat(gguf: &Path, system: &str, message: &str, server_args: &[String]) -> Result<()> {
+    use utter_llm::{ChatParams, LlamaServer, Message, ServerOptions};
+
+    let mut opts = ServerOptions::new(gguf);
+    opts.extra_args = server_args.to_vec();
+    let start = std::time::Instant::now();
+    let server = LlamaServer::start(&opts).with_context(|| format!("starting llama-server on {}", gguf.display()))?;
+    println!(
+        "llama-server ready in {:.1} s at {} (log: {})",
+        start.elapsed().as_secs_f64(),
+        server.base_url(),
+        server.log_path().display()
+    );
+    let messages = [Message::system(system), Message::user(message)];
+    for round in 1..=2 {
+        let out = server.chat(&messages, &ChatParams::default())?;
+        let s = out.server;
+        println!(
+            "round {round}: {:.1} ms wall | prompt {} tokens ({} cached) in {:.1} ms | {} tokens in {:.1} ms ({:.0} tok/s)",
+            out.wall.as_secs_f64() * 1e3,
+            s.prompt_n,
+            s.cache_n,
+            s.prompt_ms,
+            s.predicted_n,
+            s.predicted_ms,
+            s.predicted_n as f64 / (s.predicted_ms / 1e3).max(1e-9)
+        );
+        if round == 1 {
+            println!("{}", out.text);
+        }
+    }
+    Ok(())
+}
+
+fn setup(ids: &[String]) -> Result<()> {
+    let chosen: Vec<&utter_runtime::Component> = if ids.is_empty() {
+        utter_runtime::components().iter().collect()
+    } else {
+        ids.iter().map(|id| utter_runtime::component(id)).collect::<Result<_, _>>()?
+    };
+    let pending: u64 = chosen.iter().filter(|c| !c.is_installed()).map(|c| c.size).sum();
+    println!("Runtime folder: {}", utter_runtime::runtime_dir().display());
+    println!("To download: {:.2} GB", pending as f64 / 1e9);
+    for c in chosen {
+        if c.is_installed() {
+            println!("  {} {}: installed", c.id, c.version);
+            continue;
+        }
+        let mut last_pct = u64::MAX;
+        utter_runtime::install(c, |p| match p {
+            utter_runtime::Progress::Downloading { done, total } => {
+                let pct = done * 100 / total.max(1);
+                if pct / 10 != last_pct / 10 {
+                    println!("  {} {}: downloading {pct}%", c.id, c.version);
+                    last_pct = pct;
+                }
+            }
+            utter_runtime::Progress::Verifying => println!("  {} {}: verifying SHA-256", c.id, c.version),
+            utter_runtime::Progress::Extracting => println!("  {} {}: extracting", c.id, c.version),
+        })
+        .with_context(|| format!("installing {}", c.id))?;
+        println!("  {} {}: installed", c.id, c.version);
+    }
+    Ok(())
+}
+
+fn doctor(model: &str) -> Result<()> {
+    println!("Data folder: {}", utter_core::data_dir().display());
+    println!("Runtime components:");
+    for c in utter_runtime::components() {
+        let state = if c.is_installed() { "installed" } else { "MISSING (utter-cli setup)" };
+        println!("  {:<16} {:<12} {state}  -- {}", c.id, c.version, c.purpose);
+    }
+    let dir = utter_core::model_dir(model);
+    let state = if dir.join("config.json").is_file() { "present" } else { "MISSING" };
+    println!("Speech model {model}: {state} ({})", dir.display());
+    Ok(())
 }
 
 fn transcribe(asr: &mut ParakeetTdt, files: &[PathBuf]) -> Result<()> {

@@ -9,7 +9,9 @@ rust-version.workspace = true
 
 [dependencies]
 utter-core.workspace = true
+utter-runtime.workspace = true
 utter-asr.workspace = true
+utter-llm.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 hound.workspace = true

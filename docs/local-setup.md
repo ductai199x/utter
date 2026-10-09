@@ -27,12 +27,29 @@ The Hugging Face account is `ductai199x`. Its terms were accepted for the gated 
 Set `PYTHONUTF8=1` on Windows: Vietnamese text does not survive the console's default code
 page.
 
-## The Rust core in development
+## The Rust core: standalone
 
-`utter-asr` loads onnxruntime at run time. In development it finds `tools/.venv`'s
-onnxruntime-gpu by itself (walking up from the current folder) and puts the nvidia wheels'
-CUDA and cuDNN DLLs on the process's search path. `UTTER_ORT_DYLIB` overrides the library.
-So `uv sync` in `tools/` is all the Rust side needs.
+Utter depends on nothing installed on the machine except the GPU driver (Tai, 2026-10-09).
+Everything else is a runtime component pinned in `crates/utter-runtime/components.json` to a
+version, a publisher's URL and that publisher's SHA-256:
+
+| Component | Source | What for |
+|---|---|---|
+| onnxruntime-gpu 1.31.0 | Microsoft's GitHub release | The speech model |
+| cuda-runtime 13.4 (cudart, cuBLAS) | ggml-org's llama.cpp release | Both onnxruntime and llama.cpp |
+| cudnn 9.27 | NVIDIA's PyPI package | onnxruntime's convolutions |
+| llama-cpp b11535 (llama-server) | ggml-org's GitHub release | The language model, as Utter's child process |
+
+`utter-cli setup` downloads, verifies and installs them into
+`C:\Users\Tai\.cache\utter\runtime\` (about 1.3 GB); `utter-cli doctor` lists them. The same
+path serves development and release; nothing is loaded from `tools/.venv`, LM Studio or any
+other application. Checked by running with a PATH holding only Windows' own folders.
+
+llama-server runs as Utter's child process and is tied to it with a Windows job object: if
+Utter crashes or is killed, Windows ends the server too (checked by force-killing the CLI
+mid-request). Its log is `C:\Users\Tai\.cache\utter\logs\llama-server.log`.
+
+`UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build.
 
 ## Commands
 
@@ -47,7 +64,10 @@ uv run python -m export.check_parakeet         # check the export against Transf
 
 cd ..
 cargo test --workspace --release
+cargo run --release -p utter-cli -- setup      # install the runtime components (once)
+cargo run --release -p utter-cli -- doctor     # what is installed
 cargo run --release -p utter-cli -- transcribe some.wav
+cargo run --release -p utter-cli -- chat --gguf model.gguf "message"
 cargo run --release -p utter-cli -- bench      # the Rust runtime on the English sets
 ```
 

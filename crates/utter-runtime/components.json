@@ -1,0 +1,78 @@
+{
+  "_comment": "Everything Utter runs on besides the GPU driver, pinned to a version and the SHA-256 its publisher lists. `extract` picks files out of the archive (globs over archive paths); they land flat in <data_dir>/runtime/<id>-<version>/. Checked 2026-10-09 against the GitHub release API and PyPI. cuFFT and cuRAND were tested and dropped (2026-10-09): 100 of 100 transcripts identical without them, under a PATH with nothing but Windows.",
+  "components": [
+    {
+      "id": "onnxruntime-gpu",
+      "version": "1.31.0",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-gpu_cuda13-1.31.0.zip",
+      "sha256": "d332ccf84acb769a11364cddd4e8d2992a168d16be472d5ba70b279b644552f5",
+      "size": 309484217,
+      "extract": [
+        "*/lib/onnxruntime.dll",
+        "*/lib/onnxruntime_providers_cuda.dll",
+        "*/lib/onnxruntime_providers_shared.dll",
+        "*/LICENSE",
+        "*/ThirdPartyNotices.txt"
+      ],
+      "license": "MIT (Microsoft)",
+      "purpose": "Runs the speech model (ONNX graphs) on the GPU."
+    },
+    {
+      "id": "cuda-runtime",
+      "version": "13.4",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/cudart-llama-bin-win-cuda-13.4-x64.zip",
+      "sha256": "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
+      "size": 423535356,
+      "extract": [
+        "**cudart64_13.dll",
+        "**cublas64_13.dll",
+        "**cublasLt64_13.dll"
+      ],
+      "license": "NVIDIA CUDA EULA, redistributable files (as shipped by ggml-org's llama.cpp release)",
+      "purpose": "The CUDA runtime and cuBLAS, shared by onnxruntime and llama.cpp."
+    },
+    {
+      "id": "cudnn",
+      "version": "9.27.0.42",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://files.pythonhosted.org/packages/87/6a/e55ff0ac26a5c6e2b21f41c9d04ad096b4ed6da593fba7e25845c61b0532/nvidia_cudnn_cu13-9.27.0.42-py3-none-win_amd64.whl",
+      "sha256": "7d96f634adafd55c72231eb0500ca77ab109ec8ebff7b33000b76e081bc4558e",
+      "size": 436469905,
+      "extract": [
+        "nvidia/cudnn/bin/*.dll",
+        "nvidia_cudnn_cu13-*.dist-info/licenses/*"
+      ],
+      "license": "NVIDIA cuDNN license, redistributable (NVIDIA's own PyPI package)",
+      "purpose": "cuDNN, for onnxruntime's convolutions."
+    },
+    {
+      "id": "llama-cpp",
+      "version": "b11535",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/llama-b11535-bin-win-cuda-13.4-x64.zip",
+      "sha256": "5e75b22316de01034e370946dbd357a75b7ba118d648877a01cbae294229d194",
+      "size": 153459294,
+      "extract": [
+        "**llama-server.exe",
+        "**llama-server-impl.dll",
+        "**llama-common.dll",
+        "**llama.dll",
+        "**mtmd.dll",
+        "**ggml.dll",
+        "**ggml-base.dll",
+        "**ggml-cuda.dll",
+        "**ggml-cpu-*.dll",
+        "**libomp.dll",
+        "**LICENSE*"
+      ],
+      "license": "MIT (ggml-org)",
+      "purpose": "llama-server, which runs the cleanup and Command Mode model as Utter's child process."
+    }
+  ]
+}

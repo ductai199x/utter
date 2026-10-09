@@ -16,10 +16,9 @@ dependencies = [
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pyright>=1.1.380", "pytest>=8.3"]
-# The development runtime of the Rust core: onnxruntime-gpu's DLLs and the CUDA 13 / cuDNN 9
-# DLLs it loads, from the nvidia-* wheels. `utter-asr` loads onnxruntime.dll from this
-# environment (UTTER_ORT_DYLIB, set by tools/env.ps1). onnx-asr is the Python reference the
-# Rust transcriber is checked against, word for word.
+# onnxruntime-gpu with the CUDA 13 / cuDNN 9 DLLs from the nvidia-* wheels, for the Python
+# side only: the eval candidates, the export checks, onnx-asr. The Rust core never loads from
+# this environment; it runs on its own pinned components (crates/utter-runtime).
 runtime = [
     "onnxruntime-gpu>=1.27",
     "nvidia-cudnn-cu13>=9.0",
