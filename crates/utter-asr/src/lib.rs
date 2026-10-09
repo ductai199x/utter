@@ -29,6 +29,15 @@ pub enum AsrError {
     TooLong { frames: usize, max: usize },
 }
 
+/// The runtime component holding the English speech model (crates/utter-runtime/components.json).
+pub const MODEL_COMPONENT: &str = "parakeet-ultra-onnx";
+
+/// The installed speech model's folder, or an error naming how to install it.
+pub fn installed_model_dir() -> Result<PathBuf, AsrError> {
+    let c = utter_runtime::component(MODEL_COMPONENT).map_err(|e| AsrError::Runtime(e.to_string()))?;
+    c.installed_dir().map_err(|e| AsrError::Runtime(e.to_string()))
+}
+
 impl AsrError {
     pub(crate) fn io(path: &Path, source: std::io::Error) -> Self {
         Self::Io { path: path.to_path_buf(), source }
