@@ -42,7 +42,7 @@ version, a publisher's URL and that publisher's SHA-256:
 | llama-cpp b11535 (llama-server) | ggml-org's GitHub release | The language model, as Utter's child process |
 
 `utter-cli setup` downloads, verifies and installs them, and the speech model (2.6 GB, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx`), into
-`C:\Users\Tai\.cache\utter\runtime\` (about 1.3 GB); `utter-cli doctor` lists them. The same
+`C:\Users\Tai\.cache\utter\runtime\` (about 3.9 GB in all); `utter-cli doctor` lists them. The same
 path serves development and release; nothing is loaded from `tools/.venv`, LM Studio or any
 other application. Checked by running with a PATH holding only Windows' own folders.
 
