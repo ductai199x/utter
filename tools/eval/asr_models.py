@@ -192,9 +192,77 @@ class CohereTranscribe(AsrModel):
         return Result((text[0] if isinstance(text, list) else text).strip(), lang)
 
 
+class ParakeetUltra(AsrModel):
+    """moondream/parakeet-ultra: a post-trained Parakeet TDT 0.6B v3 (same architecture and
+    tokenizer), which runs only in Moondream's Photon engine.
+
+    Photon reports usage telemetry to api.moondream.ai every minute and has no switch to turn
+    it off. So `load` refuses to start unless the process is cut off: HF_HUB_OFFLINE=1 (weights
+    already in the cache) and HTTPS_PROXY pointing at a closed local port, so every request fails.
+    Photon never ships in Utter: if this model wins, its weights get Utter's own runtime.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("parakeet-ultra-0.6b", ("en",), auto_language=True)
+
+    def load(self) -> None:
+        import os
+
+        if not (os.environ.get("HF_HUB_OFFLINE") == "1" and "127.0.0.1:9" in os.environ.get("HTTPS_PROXY", "")):
+            raise RuntimeError("parakeet-ultra needs HF_HUB_OFFLINE=1 and HTTPS_PROXY=http://127.0.0.1:9 "
+                               "so Photon's telemetry cannot leave the machine")
+        import moondream as md
+
+        self._ctx = md.photon("moondream/parakeet-ultra")
+        self._speech = self._ctx.__enter__()
+        self.notes["runtime"] = "moondream Photon (kestrel), telemetry blocked by a dead proxy"
+
+    def transcribe(self, audio: np.ndarray, lang: str) -> Result:
+        result = self._speech.transcribe(audio=audio, sample_rate=SAMPLE_RATE)
+        return Result(str(result["text"]).strip())
+
+    def __del__(self) -> None:
+        ctx = getattr(self, "_ctx", None)
+        if ctx is not None:
+            ctx.__exit__(None, None, None)
+
+
+class ParakeetTdtHf(AsrModel):
+    """A Parakeet TDT checkpoint in Transformers' ParakeetForTDT, with no vendor engine.
+
+    parakeet-ultra's repo ships weights only (plus a VAD head Photon uses to split long audio,
+    unused here), so the processor and generation config come from NVIDIA's v3: same
+    architecture, tokenizer and front end.
+    """
+
+    def __init__(self, name: str, weights: str, front_end: str = "nvidia/parakeet-tdt-0.6b-v3"):
+        super().__init__(name, ("en",), auto_language=True)
+        self._weights, self._front_end = weights, front_end
+
+    def load(self) -> None:
+        import torch
+        from transformers import AutoProcessor, GenerationConfig, ParakeetForTDT
+
+        self._proc = AutoProcessor.from_pretrained(self._front_end)
+        self._model = ParakeetForTDT.from_pretrained(self._weights, dtype=torch.float32).cuda().eval()
+        self._model.generation_config = GenerationConfig.from_pretrained(self._front_end)
+        self.notes["runtime"] = f"transformers ParakeetForTDT, fp32, weights {self._weights}"
+
+    def transcribe(self, audio: np.ndarray, lang: str) -> Result:
+        import torch
+
+        x = self._proc(audio, sampling_rate=SAMPLE_RATE, return_tensors="pt").to("cuda")
+        with torch.inference_mode():
+            out = self._model.generate(**x)
+        seq = out.sequences if hasattr(out, "sequences") else out
+        return Result(self._proc.batch_decode(seq, skip_special_tokens=True)[0].strip())
+
+
 def registry() -> dict[str, AsrModel]:
     models: list[AsrModel] = [
         OnnxAsr("parakeet-tdt-0.6b-v3", ("en",), "nemo-parakeet-tdt-0.6b-v3"),
+        ParakeetUltra(),
+        ParakeetTdtHf("parakeet-ultra-0.6b-hf", "moondream/parakeet-ultra"),
         # Trained for Vietnamese-English code-switching, so it is measured on English too.
         OnnxAsr("parakeet-ctc-0.6b-vi", ("vi", "en"), "nemo-conformer-ctc",
                 repo="OpenVoiceOS/nvidia-parakeet-ctc-0.6b-vietnamese-onnx"),
