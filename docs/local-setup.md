@@ -6,11 +6,12 @@ How the development machine is laid out. Tai's choice (2026-10-09): downloads go
 
 | What | Where | Notes |
 |---|---|---|
-| Models (speech, LLM weights from Hugging Face) | `C:\Users\Tai\.cache\huggingface\hub` | The standard Hugging Face cache, shared with other projects. Never committed. |
+| Models under evaluation (Python tools) | `C:\Users\Tai\.cache\huggingface\hub` | The standard Hugging Face cache, shared with other projects. Never committed. |
+| Utter's runtime components (incl. shipped models) | `C:\Users\Tai\.cache\utter\runtime\<id>-<version>\` | Installed by `utter-cli setup` from `crates/utter-runtime/components.json`. |
 | Eval clips and manifests | `C:\Users\Tai\.cache\utter\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl`. Override the root with `UTTER_DATA_DIR`. |
 | Eval results | `C:\Users\Tai\.cache\utter\eval\results\` | One JSONL per model and set, re-scored by the report commands. |
-| Exported models for the Rust core | `C:\Users\Tai\.cache\utter\models\<name>\` | `parakeet-ultra`: ONNX graphs, mel filters, vocabulary, config (`tools/export/export_parakeet.py`). |
-| llama.cpp builds (when fetched) | `C:\Users\Tai\.cache\utter\llama.cpp\<build>\` | |
+| Local model exports | `C:\Users\Tai\.cache\utter\models\<name>\` | Output of `tools/export/export_parakeet.py`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
+| Logs | `C:\Users\Tai\.cache\utter\logs\` | `llama-server.log` |
 
 The Hugging Face account is `ductai199x`. Its terms were accepted for the gated repos
 `speechcolab/gigaspeech2`, `linhtran92/viet_bud500` and `CohereLabs/cohere-transcribe-03-2026`.
@@ -40,7 +41,7 @@ version, a publisher's URL and that publisher's SHA-256:
 | cudnn 9.27 | NVIDIA's PyPI package | onnxruntime's convolutions |
 | llama-cpp b11535 (llama-server) | ggml-org's GitHub release | The language model, as Utter's child process |
 
-`utter-cli setup` downloads, verifies and installs them into
+`utter-cli setup` downloads, verifies and installs them, and the speech model (2.6 GB, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx`), into
 `C:\Users\Tai\.cache\utter\runtime\` (about 1.3 GB); `utter-cli doctor` lists them. The same
 path serves development and release; nothing is loaded from `tools/.venv`, LM Studio or any
 other application. Checked by running with a PATH holding only Windows' own folders.

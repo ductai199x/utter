@@ -110,8 +110,13 @@ def export(module: nn.Module, args: tuple, path: Path, inputs: list[str], output
     torch.onnx.export(module, args, str(scratch / path.name), input_names=inputs, output_names=outputs,
                       dynamic_axes=dynamic, opset_version=OPSET, dynamo=False)
     proto = onnx.load(str(scratch / path.name), load_external_data=True)
+    # onnx appends to an existing data file rather than replacing it: a re-export into the
+    # same folder would otherwise keep every earlier export's tensors as dead weight.
+    data = path.parent / f"{path.name}.data"
+    if data.exists():
+        data.unlink()
     onnx.save_model(proto, str(path), save_as_external_data=True, all_tensors_to_one_file=True,
-                    location=f"{path.name}.data", size_threshold=1024)
+                    location=data.name, size_threshold=1024)
     for f in scratch.iterdir():
         f.unlink()
     scratch.rmdir()

@@ -12,11 +12,6 @@ pub fn data_dir() -> PathBuf {
     home_dir().join(".cache").join("utter")
 }
 
-/// Where exported models live: `<data_dir>/models/<name>`.
-pub fn model_dir(name: &str) -> PathBuf {
-    data_dir().join("models").join(name)
-}
-
 fn home_dir() -> PathBuf {
     std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))

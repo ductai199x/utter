@@ -23,9 +23,10 @@ const WARMUP_CLIPS: usize = 3;
 struct Cli {
     #[command(subcommand)]
     command: Command,
-    /// Exported model folder name under <data_dir>/models.
-    #[arg(long, global = true, default_value = "parakeet-ultra")]
-    model: String,
+    /// A local export folder to use instead of the installed speech model component
+    /// (e.g. a fresh tools/export output under <data_dir>/models/).
+    #[arg(long, global = true)]
+    model_dir: Option<PathBuf>,
     /// Where the decoder and joint graphs run.
     #[arg(long, global = true, value_enum, default_value_t = DeviceArg::Cpu)]
     decoder_device: DeviceArg,
@@ -155,7 +156,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match &cli.command {
         Command::Setup { ids } => return setup(ids),
-        Command::Doctor => return doctor(&cli.model),
+        Command::Doctor => return doctor(),
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
         _ => {}
     }
@@ -168,7 +169,10 @@ fn main() -> Result<()> {
         cpu_spinning: !cli.no_cpu_spinning,
         ..Default::default()
     };
-    let dir = utter_core::model_dir(&cli.model);
+    let dir = match &cli.model_dir {
+        Some(dir) => dir.clone(),
+        None => utter_asr::installed_model_dir()?,
+    };
     let mut asr = ParakeetTdt::load(&dir, opts).with_context(|| format!("loading {}", dir.display()))?;
     match cli.command {
         Command::Transcribe { files } => transcribe(&mut asr, &files),
@@ -221,7 +225,7 @@ fn setup(ids: &[String]) -> Result<()> {
     } else {
         ids.iter().map(|id| utter_runtime::component(id)).collect::<Result<_, _>>()?
     };
-    let pending: u64 = chosen.iter().filter(|c| !c.is_installed()).map(|c| c.size).sum();
+    let pending: u64 = chosen.iter().filter(|c| !c.is_installed()).map(|c| c.download_size()).sum();
     println!("Runtime folder: {}", utter_runtime::runtime_dir().display());
     println!("To download: {:.2} GB", pending as f64 / 1e9);
     for c in chosen {
@@ -247,16 +251,19 @@ fn setup(ids: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn doctor(model: &str) -> Result<()> {
+fn doctor() -> Result<()> {
     println!("Data folder: {}", utter_core::data_dir().display());
     println!("Runtime components:");
     for c in utter_runtime::components() {
         let state = if c.is_installed() { "installed" } else { "MISSING (utter-cli setup)" };
-        println!("  {:<16} {:<12} {state}  -- {}", c.id, c.version, c.purpose);
+        println!(
+            "  {:<20} {:<12} {:>8.0} MB  {state}  -- {}",
+            c.id,
+            c.version,
+            c.download_size() as f64 / 1e6,
+            c.purpose
+        );
     }
-    let dir = utter_core::model_dir(model);
-    let state = if dir.join("config.json").is_file() { "present" } else { "MISSING" };
-    println!("Speech model {model}: {state} ({})", dir.display());
     Ok(())
 }
 

@@ -73,6 +73,64 @@
       ],
       "license": "MIT (ggml-org)",
       "purpose": "llama-server, which runs the cleanup and Command Mode model as Utter's child process."
+    },
+    {
+      "id": "parakeet-ultra-onnx",
+      "version": "3aa6ab31",
+      "os": "any",
+      "arch": "any",
+      "files": [
+        {
+          "name": "config.json",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/config.json",
+          "sha256": "a60e6caf9df28c3bf23131862f307761fbbf89fc99bab6d2a48dce4397a8e039",
+          "size": 563
+        },
+        {
+          "name": "decoder.onnx",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/decoder.onnx",
+          "sha256": "2f86802fa038a8b10fb54d98c9d6b9a7674bf880290b8e16188ff117e7315c8b",
+          "size": 48874061
+        },
+        {
+          "name": "encoder.onnx",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/encoder.onnx",
+          "sha256": "8f24be346b2bba2ff14029572a00fd3502bd787fb0bdcc4406998b2e3380078f",
+          "size": 1090515
+        },
+        {
+          "name": "encoder.onnx.data",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/encoder.onnx.data",
+          "sha256": "dd79ce6c1b521a9a379509b24460ae14357abdc4f18313e1e46997085ab060fc",
+          "size": 2438044160
+        },
+        {
+          "name": "joint.onnx",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/joint.onnx",
+          "sha256": "eb3ff04072ded9f26c4bcb0276050014de0664b78c325e7e50a6ea8095f90e09",
+          "size": 21020118
+        },
+        {
+          "name": "mel_filters.f32",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/mel_filters.f32",
+          "sha256": "f5608e00763a20a191022fbb00a43346db5f1ec06828a97a6f4157f7d02b76c8",
+          "size": 131584
+        },
+        {
+          "name": "step.onnx",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/step.onnx",
+          "sha256": "0240f470b4afa0ab3e1e62ac1e6ae35eef026e0f9a102c1bd0763747e21052a2",
+          "size": 69896713
+        },
+        {
+          "name": "vocab.txt",
+          "url": "https://huggingface.co/ductai199x/utter-parakeet-ultra-onnx/resolve/3aa6ab31a5981cb1d9b99542f81106b37c25de97/vocab.txt",
+          "sha256": "04d756a9b6601bde84944f64609fb1d379f86731289ff083ecd9d68ddf5cdc2f",
+          "size": 54086
+        }
+      ],
+      "license": "CC-BY-4.0 (weights: Moondream, moondream/parakeet-ultra; base model: NVIDIA, nvidia/parakeet-tdt-0.6b-v3)",
+      "purpose": "The English speech model, exported to ONNX for utter-asr (ductai199x/utter-parakeet-ultra-onnx)."
     }
   ]
 }
