@@ -88,6 +88,25 @@ enum Command {
     },
     /// Show which runtime components and models are installed.
     Doctor,
+    /// Run the cleanup cases through Utter's llama-server on a GGUF model and write the outputs
+    /// for tools/eval/cleanup_score.py.
+    LlmBench {
+        /// The GGUF model file.
+        #[arg(long)]
+        gguf: PathBuf,
+        /// Case files (JSONL with id, input, optional dictionary).
+        #[arg(long, required = true)]
+        cases: Vec<PathBuf>,
+        /// Name the results are written under (results/llm/<name>/).
+        #[arg(long)]
+        name: String,
+        /// Extra arguments for llama-server, e.g. --server-arg=--spec-type --server-arg=ngram-mod.
+        #[arg(long = "server-arg", allow_hyphen_values = true)]
+        server_args: Vec<String>,
+        /// Cases per file (0: all).
+        #[arg(long, default_value_t = 0)]
+        limit: usize,
+    },
     /// Start Utter's llama-server on a GGUF model and send one chat message.
     Chat {
         /// The GGUF model file.
@@ -158,6 +177,9 @@ fn main() -> Result<()> {
         Command::Setup { ids } => return setup(ids),
         Command::Doctor => return doctor(),
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
+        Command::LlmBench { gguf, cases, name, server_args, limit } => {
+            return llm_bench(gguf, cases, name, server_args, *limit);
+        }
         _ => {}
     }
     let opts = ParakeetOptions {
@@ -179,7 +201,7 @@ fn main() -> Result<()> {
         Command::Bench { sets, limit, name, gap_ms, keepalive_ms } => {
             bench(&mut asr, &sets, limit, &name, Pacing { gap_ms, keepalive_ms })
         }
-        Command::Setup { .. } | Command::Doctor | Command::Chat { .. } => {
+        Command::Setup { .. } | Command::Doctor | Command::Chat { .. } | Command::LlmBench { .. } => {
             unreachable!("handled before the speech model loads")
         }
     }
@@ -215,6 +237,80 @@ fn chat(gguf: &Path, system: &str, message: &str, server_args: &[String]) -> Res
         if round == 1 {
             println!("{}", out.text);
         }
+    }
+    Ok(())
+}
+
+fn llm_bench(gguf: &Path, case_files: &[PathBuf], name: &str, server_args: &[String], limit: usize) -> Result<()> {
+    use utter_llm::{ChatParams, LlamaServer, ServerOptions, cleanup};
+
+    let mut opts = ServerOptions::new(gguf);
+    opts.extra_args = server_args.to_vec();
+    let server = LlamaServer::start(&opts).with_context(|| format!("starting llama-server on {}", gguf.display()))?;
+    let out_dir = utter_core::data_dir().join("eval").join("results").join("llm").join(name);
+    std::fs::create_dir_all(&out_dir)?;
+    std::fs::write(
+        out_dir.join("notes.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "gguf": gguf.display().to_string(),
+            "server_args": server_args,
+            "llama_cpp": utter_runtime::component("llama-cpp")?.version,
+            "prompt": "crates/utter-llm/prompts/cleanup.md",
+        }))?,
+    )?;
+    // Cleanup output is about as long as its input; a cap stops a model that starts
+    // answering instead of cleaning from running on.
+    let params = |input: &str| ChatParams { max_tokens: (input.len() as u32 / 2).max(64), ..ChatParams::default() };
+    for warm in ["Um, this is a warm-up.", "The the second warm-up, no, third."] {
+        server.chat(&cleanup::messages(warm, &[]), &params(warm))?;
+    }
+    for file in case_files {
+        let mut rows: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
+        for line in BufReader::new(File::open(file).with_context(|| format!("opening {}", file.display()))?).lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            rows.push(serde_json::from_str(&line)?);
+            if limit > 0 && rows.len() >= limit {
+                break;
+            }
+        }
+        let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("cases");
+        let part = out_dir.join(format!("{stem}.jsonl.part"));
+        let mut w = BufWriter::new(File::create(&part)?);
+        let mut walls = Vec::with_capacity(rows.len());
+        for mut row in rows {
+            let input = row.get("input").and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+            let dictionary: Vec<String> = row
+                .get("dictionary")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+                .unwrap_or_default();
+            let out = server.chat(&cleanup::messages(&input, &dictionary), &params(&input))?;
+            let s = out.server;
+            row.insert("output".into(), cleanup::tidy_output(&out.text).into());
+            row.insert("raw_output".into(), out.text.clone().into());
+            row.insert("wall_ms".into(), (out.wall.as_secs_f64() * 1e3).into());
+            row.insert("prompt_n".into(), s.prompt_n.into());
+            row.insert("cache_n".into(), s.cache_n.into());
+            row.insert("prompt_ms".into(), s.prompt_ms.into());
+            row.insert("predicted_n".into(), s.predicted_n.into());
+            row.insert("predicted_ms".into(), s.predicted_ms.into());
+            serde_json::to_writer(&mut w, &row)?;
+            w.write_all(b"\n")?;
+            walls.push(out.wall.as_secs_f64());
+        }
+        w.flush()?;
+        drop(w);
+        std::fs::rename(&part, out_dir.join(format!("{stem}.jsonl")))?;
+        walls.sort_by(f64::total_cmp);
+        println!(
+            "{stem:>20}: {} cases | wall p50 {:.0} ms p95 {:.0} ms",
+            walls.len(),
+            percentile(&walls, 0.5) * 1e3,
+            percentile(&walls, 0.95) * 1e3
+        );
     }
     Ok(())
 }

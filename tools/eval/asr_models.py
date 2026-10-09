@@ -63,7 +63,9 @@ class OnnxAsr(AsrModel):
         if self._repo:
             from huggingface_hub import snapshot_download
 
-            path = snapshot_download(self._repo, allow_patterns=["config.json", "vocab.txt", "model.onnx*"])
+            path = snapshot_download(
+                self._repo, allow_patterns=["config.json", "vocab.txt", "model.onnx*"]
+            )
         self._asr = onnx_asr.load_model(self._model_name, path, providers=_cuda_providers())
         self.notes["runtime"] = f"onnx-asr, onnxruntime {ort.__version__}, CUDA EP"
 
@@ -87,7 +89,9 @@ class Nemotron(AsrModel):
         self._proc = AutoProcessor.from_pretrained(repo)
         if self._lookahead is not None:
             self._proc.set_num_lookahead_tokens(self._lookahead)
-        self._model = AutoModelForRNNT.from_pretrained(repo, device_map="cuda", dtype=torch.bfloat16).eval()
+        self._model = AutoModelForRNNT.from_pretrained(
+            repo, device_map="cuda", dtype=torch.bfloat16
+        ).eval()
         latency = getattr(self._proc, "streaming_latency_ms", None)
         self.notes["runtime"] = "transformers, bf16, offline decode of the whole clip"
         self.notes["streaming_latency_ms"] = str(latency)
@@ -123,10 +127,14 @@ class Qwen3Asr(AsrModel):
     def transcribe(self, audio: np.ndarray, lang: str) -> Result:
         import torch
 
-        inputs = self._proc.apply_transcription_request(audio=audio).to(self._model.device, self._model.dtype)
+        inputs = self._proc.apply_transcription_request(audio=audio).to(
+            self._model.device, self._model.dtype
+        )
         with torch.inference_mode():
             ids = self._model.generate(**inputs, max_new_tokens=448, do_sample=False)
-        parsed = self._proc.decode(ids[:, inputs["input_ids"].shape[1]:], return_format="parsed")[0]
+        parsed = self._proc.decode(ids[:, inputs["input_ids"].shape[1] :], return_format="parsed")[
+            0
+        ]
         language = (parsed.get("language") or "").lower()
         code = {"english": "en", "vietnamese": "vi"}.get(language, language or None)
         return Result((parsed.get("transcription") or "").strip(), code)
@@ -159,7 +167,9 @@ class WhisperTurbo(AsrModel):
             lang_id = int(self._model.detect_language(feats)[0])
             token = self._proc.tokenizer.convert_ids_to_tokens(lang_id)  # "<|en|>"
             code = token.strip("<|>")
-            ids = self._model.generate(feats, task="transcribe", language=code, max_new_tokens=440, do_sample=False)
+            ids = self._model.generate(
+                feats, task="transcribe", language=code, max_new_tokens=440, do_sample=False
+            )
         text = self._proc.batch_decode(ids, skip_special_tokens=True)[0]
         return Result(text.strip(), code)
 
@@ -184,7 +194,9 @@ class CohereTranscribe(AsrModel):
     def transcribe(self, audio: np.ndarray, lang: str) -> Result:
         import torch
 
-        inputs = self._proc(audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", language=lang, punctuation=True)
+        inputs = self._proc(
+            audio, sampling_rate=SAMPLE_RATE, return_tensors="pt", language=lang, punctuation=True
+        )
         inputs.to(self._model.device, dtype=self._model.dtype)
         with torch.inference_mode():
             out = self._model.generate(**inputs, max_new_tokens=448)
@@ -208,9 +220,14 @@ class ParakeetUltra(AsrModel):
     def load(self) -> None:
         import os
 
-        if not (os.environ.get("HF_HUB_OFFLINE") == "1" and "127.0.0.1:9" in os.environ.get("HTTPS_PROXY", "")):
-            raise RuntimeError("parakeet-ultra needs HF_HUB_OFFLINE=1 and HTTPS_PROXY=http://127.0.0.1:9 "
-                               "so Photon's telemetry cannot leave the machine")
+        if not (
+            os.environ.get("HF_HUB_OFFLINE") == "1"
+            and "127.0.0.1:9" in os.environ.get("HTTPS_PROXY", "")
+        ):
+            raise RuntimeError(
+                "parakeet-ultra needs HF_HUB_OFFLINE=1 and HTTPS_PROXY=http://127.0.0.1:9 "
+                "so Photon's telemetry cannot leave the machine"
+            )
         import moondream as md
 
         self._ctx = md.photon("moondream/parakeet-ultra")
@@ -244,7 +261,9 @@ class ParakeetTdtHf(AsrModel):
         from transformers import AutoProcessor, GenerationConfig, ParakeetForTDT
 
         self._proc = AutoProcessor.from_pretrained(self._front_end)
-        self._model = ParakeetForTDT.from_pretrained(self._weights, dtype=torch.float32).cuda().eval()
+        self._model = (
+            ParakeetForTDT.from_pretrained(self._weights, dtype=torch.float32).cuda().eval()
+        )
         self._model.generation_config = GenerationConfig.from_pretrained(self._front_end)
         self.notes["runtime"] = f"transformers ParakeetForTDT, fp32, weights {self._weights}"
 
@@ -264,8 +283,12 @@ def registry() -> dict[str, AsrModel]:
         ParakeetUltra(),
         ParakeetTdtHf("parakeet-ultra-0.6b-hf", "moondream/parakeet-ultra"),
         # Trained for Vietnamese-English code-switching, so it is measured on English too.
-        OnnxAsr("parakeet-ctc-0.6b-vi", ("vi", "en"), "nemo-conformer-ctc",
-                repo="OpenVoiceOS/nvidia-parakeet-ctc-0.6b-vietnamese-onnx"),
+        OnnxAsr(
+            "parakeet-ctc-0.6b-vi",
+            ("vi", "en"),
+            "nemo-conformer-ctc",
+            repo="OpenVoiceOS/nvidia-parakeet-ctc-0.6b-vietnamese-onnx",
+        ),
         Nemotron(),
         Qwen3Asr("0.6b"),
         Qwen3Asr("1.7b"),

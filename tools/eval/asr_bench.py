@@ -52,7 +52,9 @@ def available_sets() -> dict[str, list[dict]]:
     return sets
 
 
-def run_pair(model: AsrModel, set_name: str, rows: list[dict], limit: int | None, redo: bool) -> None:
+def run_pair(
+    model: AsrModel, set_name: str, rows: list[dict], limit: int | None, redo: bool
+) -> None:
     out = results_dir() / model.name / f"{set_name}.jsonl"
     rows = rows[:limit] if limit else rows
     if out.exists() and not redo and sum(1 for _ in out.open(encoding="utf-8")) >= len(rows):
@@ -64,17 +66,30 @@ def run_pair(model: AsrModel, set_name: str, rows: list[dict], limit: int | None
         model.transcribe(audio, clips[0][0]["lang"])
     model.sync()
     tmp = out.with_suffix(".jsonl.part")
-    with tmp.open("w", encoding="utf-8", newline="\n") as f, console.status(f"{model.name} on {set_name}") as status:
+    with (
+        tmp.open("w", encoding="utf-8", newline="\n") as f,
+        console.status(f"{model.name} on {set_name}") as status,
+    ):
         for i, (row, audio) in enumerate(clips):
             start = time.perf_counter()
             result = model.transcribe(audio, row["lang"])
             model.sync()
             latency = time.perf_counter() - start
-            f.write(json.dumps({
-                "id": row["id"], "lang": row["lang"], "ref": row["text"], "hyp": result.text,
-                "detected": result.language, "latency_s": round(latency, 4),
-                "duration_s": row["duration_s"],
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "id": row["id"],
+                        "lang": row["lang"],
+                        "ref": row["text"],
+                        "hyp": result.text,
+                        "detected": result.language,
+                        "latency_s": round(latency, 4),
+                        "duration_s": row["duration_s"],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
             status.update(f"{model.name} on {set_name}: {i + 1}/{len(clips)}")
     tmp.replace(out)
 
@@ -132,8 +147,11 @@ def score(path: Path) -> dict:
     lat = sorted(r["latency_s"] for r in rows)
     audio_s = sum(r["duration_s"] for r in rows)
     return {
-        "n": len(rows), "wer": wer, "lid_err": lid_err,
-        "p50": statistics.median(lat), "p95": lat[min(len(lat) - 1, int(0.95 * len(lat)))],
+        "n": len(rows),
+        "wer": wer,
+        "lid_err": lid_err,
+        "p50": statistics.median(lat),
+        "p95": lat[min(len(lat) - 1, int(0.95 * len(lat)))],
         "rtfx": audio_s / sum(lat),
     }
 
@@ -147,7 +165,9 @@ def report() -> None:
         console.print("No results yet.")
         return
     set_names = sorted({s for m in scores.values() for s in m})
-    table = Table(title="WER % (lower is better); last columns: per-language mean WER, latency at batch 1")
+    table = Table(
+        title="WER % (lower is better); last columns: per-language mean WER, latency at batch 1"
+    )
     table.add_column("model")
     for s in set_names:
         table.add_column(s, justify="right")
@@ -162,9 +182,14 @@ def report() -> None:
         lids = [v["lid_err"] for v in by_set.values() if v["lid_err"] is not None]
         lats = [v["p50"] for v in by_set.values()]
         p95s = [v["p95"] for v in by_set.values()]
-        table.add_row(model, *cells, *means,
-                      f"{np.mean(lids) * 100:.1f}%" if lids else "",
-                      f"{np.median(lats) * 1000:.0f}", f"{np.median(p95s) * 1000:.0f}")
+        table.add_row(
+            model,
+            *cells,
+            *means,
+            f"{np.mean(lids) * 100:.1f}%" if lids else "",
+            f"{np.median(lats) * 1000:.0f}",
+            f"{np.median(p95s) * 1000:.0f}",
+        )
     console.print(table)
 
 
@@ -178,7 +203,10 @@ def _clip_errors(model: str, lang: str) -> dict[tuple[str, str], tuple[int, int]
             if not ref:
                 continue
             m = jiwer.process_words(ref, hyp)
-            out[(path.stem, r["id"])] = (m.substitutions + m.deletions + m.insertions, len(ref.split()))
+            out[(path.stem, r["id"])] = (
+                m.substitutions + m.deletions + m.insertions,
+                len(ref.split()),
+            )
     return out
 
 
@@ -199,8 +227,10 @@ def compare(a: str, b: str, lang: str = "en", resamples: int = 10_000) -> None:
     diffs = (errs_a[idx].sum(1) - errs_b[idx].sum(1)) / words[idx].sum(1) * 100
     point = (errs_a.sum() - errs_b.sum()) / words.sum() * 100
     lo, hi = np.percentile(diffs, [2.5, 97.5])
-    console.print(f"{a} minus {b}, {lang}, {len(keys)} clips: {point:+.2f} WER points "
-                  f"(95% CI {lo:+.2f} to {hi:+.2f}); {a} worse in {np.mean(diffs > 0) * 100:.1f}% of resamples")
+    console.print(
+        f"{a} minus {b}, {lang}, {len(keys)} clips: {point:+.2f} WER points "
+        f"(95% CI {lo:+.2f} to {hi:+.2f}); {a} worse in {np.mean(diffs > 0) * 100:.1f}% of resamples"
+    )
 
 
 if __name__ == "__main__":

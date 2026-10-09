@@ -5,6 +5,9 @@
 //! `cuda-runtime` component, waits until `/health` answers, and logs its output to
 //! `<data_dir>/logs/llama-server.log`. Dropping the handle stops it. [`LlamaServer::chat`]
 //! sends one chat completion and returns the text with llama-server's own timings.
+//! [`cleanup`] builds the cleanup request.
+
+pub mod cleanup;
 
 use std::fs::{self, File};
 use std::net::TcpListener;

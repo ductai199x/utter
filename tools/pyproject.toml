@@ -68,3 +68,7 @@ torch = { index = "pytorch-cu130" }
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer declares CLI parameters as call defaults by design.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]

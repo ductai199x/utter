@@ -82,9 +82,9 @@ class Step(nn.Module):
 
     def forward(self, token, h, c, encoded, start):
         dec, h2, c2 = self.decoder(token, h, c)
-        logits = self.joint.head(self.joint.activation(encoded[start[0]:] + dec))
+        logits = self.joint.head(self.joint.activation(encoded[start[0] :] + dec))
         tokens = logits[:, : self.vocab].argmax(dim=-1)
-        durations = logits[:, self.vocab:].argmax(dim=-1)
+        durations = logits[:, self.vocab :].argmax(dim=-1)
         return tokens, durations, h2, c2
 
 
@@ -94,29 +94,58 @@ def front_end_frames(num_samples: int, hop: int) -> int:
     return num_samples // hop
 
 
-def export(module: nn.Module, args: tuple, path: Path, inputs: list[str], outputs: list[str],
-           dynamic: dict, large: bool = False) -> None:
+def export(
+    module: nn.Module,
+    args: tuple,
+    path: Path,
+    inputs: list[str],
+    outputs: list[str],
+    dynamic: dict,
+    large: bool = False,
+) -> None:
     """Export with the TorchScript exporter. A model over protobuf's 2 GB limit comes out as
     one file per tensor; it is re-saved with every tensor in a single `<name>.data` beside it."""
     import onnx
 
     if not large:
-        torch.onnx.export(module, args, str(path), input_names=inputs, output_names=outputs,
-                          dynamic_axes=dynamic, opset_version=OPSET, dynamo=False)
+        torch.onnx.export(
+            module,
+            args,
+            str(path),
+            input_names=inputs,
+            output_names=outputs,
+            dynamic_axes=dynamic,
+            opset_version=OPSET,
+            dynamo=False,
+        )
         onnx.checker.check_model(str(path))
         return
     scratch = path.parent / f".{path.stem}-scratch"
     scratch.mkdir(exist_ok=True)
-    torch.onnx.export(module, args, str(scratch / path.name), input_names=inputs, output_names=outputs,
-                      dynamic_axes=dynamic, opset_version=OPSET, dynamo=False)
+    torch.onnx.export(
+        module,
+        args,
+        str(scratch / path.name),
+        input_names=inputs,
+        output_names=outputs,
+        dynamic_axes=dynamic,
+        opset_version=OPSET,
+        dynamo=False,
+    )
     proto = onnx.load(str(scratch / path.name), load_external_data=True)
     # onnx appends to an existing data file rather than replacing it: a re-export into the
     # same folder would otherwise keep every earlier export's tensors as dead weight.
     data = path.parent / f"{path.name}.data"
     if data.exists():
         data.unlink()
-    onnx.save_model(proto, str(path), save_as_external_data=True, all_tensors_to_one_file=True,
-                    location=data.name, size_threshold=1024)
+    onnx.save_model(
+        proto,
+        str(path),
+        save_as_external_data=True,
+        all_tensors_to_one_file=True,
+        location=data.name,
+        size_threshold=1024,
+    )
     for f in scratch.iterdir():
         f.unlink()
     scratch.rmdir()
@@ -127,9 +156,13 @@ def export(module: nn.Module, args: tuple, path: Path, inputs: list[str], output
 def main(
     weights: str = typer.Option("moondream/parakeet-ultra", help="ParakeetForTDT checkpoint."),
     name: str = typer.Option("parakeet-ultra", help="Output folder name under <data_dir>/models."),
-    conv_free: bool = typer.Option(True, help="Rewrite the encoder's convolutions (export/conv_free.py)."),
+    conv_free: bool = typer.Option(
+        True, help="Rewrite the encoder's convolutions (export/conv_free.py)."
+    ),
     depthwise: str = typer.Option("fixed", help="Depthwise conv rewrite: fixed | taps."),
-    max_frames: int = typer.Option(512, help="Longest clip, in encoder frames of 80 ms (depthwise=fixed)."),
+    max_frames: int = typer.Option(
+        512, help="Longest clip, in encoder frames of 80 ms (depthwise=fixed)."
+    ),
 ) -> None:
     from transformers import AutoProcessor, GenerationConfig, ParakeetForTDT
 
@@ -147,48 +180,87 @@ def main(
 
     with torch.inference_mode():
         console.print("encoder")
-        export(Encoder(model), (torch.randn(1, 300, cfg.encoder_config.num_mel_bins),), out / "encoder.onnx",
-               ["features"], ["encoded"], {"features": {1: "frames"}, "encoded": {1: "encoded_frames"}},
-               large=True)
+        export(
+            Encoder(model),
+            (torch.randn(1, 300, cfg.encoder_config.num_mel_bins),),
+            out / "encoder.onnx",
+            ["features"],
+            ["encoded"],
+            {"features": {1: "frames"}, "encoded": {1: "encoded_frames"}},
+            large=True,
+        )
         console.print("decoder")
         zeros = torch.zeros(layers, 1, hidden)
-        export(Decoder(model), (torch.tensor([[cfg.blank_token_id]]), zeros, zeros), out / "decoder.onnx",
-               ["token", "h", "c"], ["decoded", "h_out", "c_out"], {})
+        export(
+            Decoder(model),
+            (torch.tensor([[cfg.blank_token_id]]), zeros, zeros),
+            out / "decoder.onnx",
+            ["token", "h", "c"],
+            ["decoded", "h_out", "c_out"],
+            {},
+        )
         console.print("joint")
-        export(Joint(model), (torch.randn(4, hidden), torch.randn(1, hidden)), out / "joint.onnx",
-               ["encoded", "decoded"], ["logits"], {"encoded": {0: "n"}, "logits": {0: "n"}})
+        export(
+            Joint(model),
+            (torch.randn(4, hidden), torch.randn(1, hidden)),
+            out / "joint.onnx",
+            ["encoded", "decoded"],
+            ["logits"],
+            {"encoded": {0: "n"}, "logits": {0: "n"}},
+        )
         console.print("step")
-        export(Step(model), (torch.tensor([[cfg.blank_token_id]]), zeros, zeros, torch.randn(9, hidden),
-                             torch.tensor([2])), out / "step.onnx",
-               ["token", "h", "c", "encoded", "start"], ["tokens", "durations", "h_out", "c_out"],
-               {"encoded": {0: "frames"}, "tokens": {0: "n"}, "durations": {0: "n"}})
+        export(
+            Step(model),
+            (
+                torch.tensor([[cfg.blank_token_id]]),
+                zeros,
+                zeros,
+                torch.randn(9, hidden),
+                torch.tensor([2]),
+            ),
+            out / "step.onnx",
+            ["token", "h", "c", "encoded", "start"],
+            ["tokens", "durations", "h_out", "c_out"],
+            {"encoded": {0: "frames"}, "tokens": {0: "n"}, "durations": {0: "n"}},
+        )
 
     fe = proc.feature_extractor
     np.asarray(fe.mel_filters, dtype="<f4").tofile(out / "mel_filters.f32")
     tokens = proc.tokenizer.convert_ids_to_tokens(list(range(cfg.vocab_size)))
-    (out / "vocab.txt").write_text("\n".join(t if t is not None else "" for t in tokens) + "\n",
-                                   encoding="utf-8", newline="\n")
-    (out / "config.json").write_text(json.dumps({
-        "weights": weights,
-        "front_end": FRONT_END_REPO,
-        "encoder_convolutions": f"rewritten, depthwise {depthwise}" if conv_free else "conv",
-        "max_encoder_frames": max_frames if conv_free and depthwise == "fixed" else None,
-        "subsampling_factor": cfg.encoder_config.subsampling_factor,
-        "vocab_size": cfg.vocab_size,
-        "blank_id": cfg.blank_token_id,
-        "durations": list(cfg.durations),
-        "max_symbols_per_step": cfg.max_symbols_per_step,
-        "decoder_layers": layers,
-        "decoder_hidden": hidden,
-        "sample_rate": fe.sampling_rate,
-        "n_fft": fe.n_fft,
-        "win_length": fe.win_length,
-        "hop_length": fe.hop_length,
-        "n_mels": fe.feature_size,
-        "preemphasis": fe.preemphasis,
-        "log_guard": 2**-24,
-        "norm_epsilon": 1e-5,
-    }, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (out / "vocab.txt").write_text(
+        "\n".join(t if t is not None else "" for t in tokens) + "\n", encoding="utf-8", newline="\n"
+    )
+    (out / "config.json").write_text(
+        json.dumps(
+            {
+                "weights": weights,
+                "front_end": FRONT_END_REPO,
+                "encoder_convolutions": f"rewritten, depthwise {depthwise}"
+                if conv_free
+                else "conv",
+                "max_encoder_frames": max_frames if conv_free and depthwise == "fixed" else None,
+                "subsampling_factor": cfg.encoder_config.subsampling_factor,
+                "vocab_size": cfg.vocab_size,
+                "blank_id": cfg.blank_token_id,
+                "durations": list(cfg.durations),
+                "max_symbols_per_step": cfg.max_symbols_per_step,
+                "decoder_layers": layers,
+                "decoder_hidden": hidden,
+                "sample_rate": fe.sampling_rate,
+                "n_fft": fe.n_fft,
+                "win_length": fe.win_length,
+                "hop_length": fe.hop_length,
+                "n_mels": fe.feature_size,
+                "preemphasis": fe.preemphasis,
+                "log_guard": 2**-24,
+                "norm_epsilon": 1e-5,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     console.print(f"Exported to {out}")
 
 
