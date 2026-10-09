@@ -1,0 +1,48 @@
+[project]
+name = "utter-tools"
+version = "0.0.0"
+description = "Utter's offline tooling: eval sets, scoring, reference transcriptions. Never shipped."
+requires-python = ">=3.12"
+dependencies = [
+    "huggingface-hub>=1.0",
+    "pyarrow>=17",
+    "soundfile>=0.12",
+    "soxr>=0.5",
+    "numpy>=2.0",
+    "jiwer>=4.0",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.6", "pyright>=1.1.380", "pytest>=8.3"]
+# The development runtime of the Rust core: onnxruntime-gpu's DLLs and the CUDA 13 / cuDNN 9
+# DLLs it loads, from the nvidia-* wheels. `utter-asr` loads onnxruntime.dll from this
+# environment (UTTER_ORT_DYLIB, set by tools/env.ps1). onnx-asr is the Python reference the
+# Rust transcriber is checked against, word for word.
+runtime = [
+    "onnxruntime-gpu>=1.27",
+    "nvidia-cudnn-cu13>=9.0",
+    "nvidia-cublas>=13.0",
+    "nvidia-cuda-runtime>=13.0",
+    "nvidia-cuda-nvrtc>=13.0",
+    "nvidia-cufft>=12.0",
+    "nvidia-curand>=10.0",
+    "onnx-asr[hub]>=0.12",
+]
+
+[tool.uv]
+default-groups = ["dev", "runtime"]
+# onnx-asr depends on the CPU-only `onnxruntime`, which would shadow onnxruntime-gpu (same
+# import name). The GPU build provides the CPU provider too.
+override-dependencies = ["onnxruntime ; sys_platform == 'never'"]
+# Resolve only versions that ship wheels for the platforms we develop on: some nvidia-* releases
+# are Linux-only.
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

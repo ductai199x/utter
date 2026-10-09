@@ -85,7 +85,7 @@ Phase 2 makes insertion robust.
 | `utter-core` | Shared types, config, the event bus, tracing setup |
 | `utter-audio` | Mic capture (`cpal`), a lock-free ring buffer, resampling to 16 kHz, levels for the waveform, noise suppression and gain (whisper mode), device hot-plug |
 | `utter-vad` | Silero VAD (onnx) |
-| `utter-asr` | The speech-recognition trait. Parakeet (ort + CUDA) is the main implementation. Whisper (`whisper-rs`) is the multilingual fallback. |
+| `utter-asr` | The speech-recognition trait (offline and streaming), and the runtime of the model the bench picks (section 6) |
 | `utter-llm` | The llama-server client, its supervisor, prompts, the cleanup gate |
 | `utter-text` | Logic that needs no model: snippet matching, spoken punctuation, dictionary application, number and list formatting |
 | `utter-platform` | OS traits (hotkey, insert, context, focus, media) with one module per OS |
@@ -188,24 +188,31 @@ measurement.
 
 ## 6. Models
 
-Chosen by measurement on the eval set (section 12), not by reputation. These are the starting
-candidates.
+Languages: **English and Vietnamese**, including switching between them mid-sentence (Tai,
+2026-10-09).
 
-| Role | Main candidate | Alternatives to measure |
-|---|---|---|
-| Speech recognition | Parakeet TDT 0.6B v3 (25 European languages), ort + CUDA | Whisper large-v3-turbo for other languages, Canary |
-| Voice activity | Silero VAD | — |
-| Cleanup and Command Mode | Qwen3.5-4B, Q6, llama.cpp, thinking off | Qwen3.5-9B; Qwen3.5-2B for the fastest path; Qwen3.8-27B (Q4, about 16 GB) as the quality reference and a candidate for Command Mode |
-| Noise suppression | DeepFilterNet 3 | RNNoise (lighter) |
-| Meeting speakers (phase 3) | sherpa-onnx diarization | pyannote |
+Chosen by measurement on the eval set (section 12), not by reputation and not from memory.
+`docs/model-survey.md` is the live survey the candidates come from (checked 2026-10-09). It is
+re-run before every model decision.
+
+| Role | Candidates to measure |
+|---|---|
+| Speech recognition | Nemotron 3.5 ASR streaming 0.6B (streams, both languages, auto language); Qwen3-ASR 1.7B and 0.6B (most accurate open model with both languages); Cohere Transcribe; parakeet-ctc-0.6b-Vietnamese (Vietnamese–English code-switching); Parakeet TDT 0.6B v3 and parakeet-ultra (English-only fast path); Whisper large-v3-turbo (baseline) |
+| Voice activity | Silero VAD, unless the chosen recognizer streams on its own |
+| Cleanup and Command Mode | Qwen3.5 2B, 4B and 9B; Gemma 4 E2B, E4B and 12B; Gemma 4 26B-A4B and Qwen3.6 35B-A3B (MoE: few active parameters, so fast to decode); MiniCPM5 2B; Qwen3.8-27B as the quality reference. All in llama.cpp, thinking off. |
+| Noise suppression | DeepFilterNet 3, RNNoise |
+| Meeting speakers (phase 3) | to be surveyed in phase 3 |
+
+The bench runs each speech model in its official runtime first (ONNX, Transformers, or its
+C++ GGUF port). Only the winners get a native runtime inside the Rust core, so no time goes
+into porting a model that loses. Winning one language each is acceptable: Utter can route by
+detected language, at the cost of VRAM for two models.
 
 On first run, models are downloaded with size and SHA-256 checks, the same as Sidecoach.
 VRAM use is shown in Settings.
 
 Off-the-shelf models come first (Tai, 2026-10-09). A fine-tuned cleanup model is considered
-only when the eval set shows where they fail. Qwen3.8 is the newest family, but its smallest
-model is 27B (checked on Hugging Face, 2026-10-09). A dense 27B decodes several times slower
-than a 4B, so it probably cannot meet the 400 ms cleanup budget; the bench decides that.
+only when the eval set shows where they fail.
 
 ---
 
@@ -332,9 +339,13 @@ Settings are in `settings.toml`, which the Home window edits and which a person 
 1. **Tracing from the first commit.** Every dictation emits a trace (the `tracing` crate)
    with one span per stage. A debug overlay shows the latest breakdown live. `utter bench`
    replays recorded audio through the real pipeline and reports p50 and p99 per stage.
-2. **Eval set.** About 200 of Tai's own recordings to start: plain dictation, fillers,
-   backtracks, lists, jargon and names, code words, whispering, noise, other languages, and
-   Command Mode instructions. Each has its expected text. `tools/eval` reports:
+2. **Eval set.** Public test sets, so no recording is needed (Tai, 2026-10-09). English: the
+   Open ASR Leaderboard's sets, weighted towards spontaneous speech (AMI, Earnings-22, Voice
+   Arena, URGENT24 for noise). Vietnamese: ViMD (dialects), FLEURS, GigaSpeech2 and Bud500
+   (in the wild, gated). Two gaps have no public data and get sets made for them: Vietnamese–English
+   code-switching, and dictation itself (fillers, backtracks, spoken punctuation, Command Mode
+   instructions), built as text pairs checked by code. Details: `docs/model-survey.md`.
+   `tools/eval` reports:
    - word error rate of recognition;
    - cleanup quality: exact checks where possible (fillers gone, backtrack applied, the
      dictionary obeyed), a judge model only for what code cannot decide;
@@ -373,5 +384,7 @@ utter/
 |---|---|---|
 | 2026-10-09 | Push-to-talk is Right Ctrl. The other shortcuts follow Wispr Flow's Windows defaults. | 4.1 |
 | 2026-10-09 | The Bar is hidden at idle and appears on the key press. | 8.1 |
-| 2026-10-09 | Text goes into the app once, at the end. Live words show in the Bar. (Pending Tai's confirmation.) | 4.2 |
-| 2026-10-09 | Off-the-shelf models first: Qwen3.5 small models, measured against Qwen3.8-27B. | 6 |
+| 2026-10-09 | Text goes into the app once, at the end. Live words show in the Bar. Revisit once it is in use. | 4.2 |
+| 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
+| 2026-10-09 | Languages: English and Vietnamese, with code-switching. Parakeet v3 alone no longer fits (no Vietnamese). | 6 |
+| 2026-10-09 | Eval on public datasets, no recordings from Tai. | 12 |
