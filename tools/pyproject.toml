@@ -41,6 +41,8 @@ models = [
     "protobuf>=5",
     # moondream/parakeet-ultra runs only in its own engine (Photon, from the kestrel package).
     "moondream>=2.6",
+    # Exporting models to the ONNX graphs the Rust core runs (tools/export).
+    "onnx>=1.23",
 ]
 
 [tool.uv]
