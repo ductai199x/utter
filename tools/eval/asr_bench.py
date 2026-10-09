@@ -125,8 +125,10 @@ def score(path: Path) -> dict:
     hyps = [normalize(r["hyp"], lang) for r in rows]
     keep = [i for i, ref in enumerate(refs) if ref]
     wer = jiwer.wer([refs[i] for i in keep], [hyps[i] for i in keep])
-    detected = [r["detected"] for r in rows if r["detected"]]
-    lid_err = (sum(d != lang for d in detected) / len(detected)) if detected else None
+    # For a model that reports languages, a clip it gave no language for is a miss too: the
+    # tag was absent or unreadable, so Utter could not route on it.
+    reports_language = any(r["detected"] for r in rows)
+    lid_err = (sum(r["detected"] != lang for r in rows) / len(rows)) if reports_language else None
     lat = sorted(r["latency_s"] for r in rows)
     audio_s = sum(r["duration_s"] for r in rows)
     return {
@@ -164,6 +166,41 @@ def report() -> None:
                       f"{np.mean(lids) * 100:.1f}%" if lids else "",
                       f"{np.median(lats) * 1000:.0f}", f"{np.median(p95s) * 1000:.0f}")
     console.print(table)
+
+
+def _clip_errors(model: str, lang: str) -> dict[tuple[str, str], tuple[int, int]]:
+    """(set, clip id) -> (word errors, reference words) for every clip of `lang` the model did."""
+    out = {}
+    for path in sorted((results_dir() / model).glob(f"{lang}-*.jsonl")):
+        for line in path.open(encoding="utf-8"):
+            r = json.loads(line)
+            ref, hyp = normalize(r["ref"], lang), normalize(r["hyp"], lang)
+            if not ref:
+                continue
+            m = jiwer.process_words(ref, hyp)
+            out[(path.stem, r["id"])] = (m.substitutions + m.deletions + m.insertions, len(ref.split()))
+    return out
+
+
+@app.command()
+def compare(a: str, b: str, lang: str = "en", resamples: int = 10_000) -> None:
+    """Paired bootstrap of pooled WER, A minus B, over the clips both models did: is the gap
+    bigger than what the choice of clips alone would produce?"""
+    ea, eb = _clip_errors(a, lang), _clip_errors(b, lang)
+    keys = sorted(ea.keys() & eb.keys())
+    if not keys:
+        console.print("No clips in common.")
+        return
+    errs_a = np.array([ea[k][0] for k in keys], dtype=float)
+    errs_b = np.array([eb[k][0] for k in keys], dtype=float)
+    words = np.array([ea[k][1] for k in keys], dtype=float)
+    rng = np.random.default_rng(0)
+    idx = rng.integers(0, len(keys), size=(resamples, len(keys)))
+    diffs = (errs_a[idx].sum(1) - errs_b[idx].sum(1)) / words[idx].sum(1) * 100
+    point = (errs_a.sum() - errs_b.sum()) / words.sum() * 100
+    lo, hi = np.percentile(diffs, [2.5, 97.5])
+    console.print(f"{a} minus {b}, {lang}, {len(keys)} clips: {point:+.2f} WER points "
+                  f"(95% CI {lo:+.2f} to {hi:+.2f}); {a} worse in {np.mean(diffs > 0) * 100:.1f}% of resamples")
 
 
 if __name__ == "__main__":

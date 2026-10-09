@@ -388,3 +388,5 @@ utter/
 | 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
 | 2026-10-09 | Languages: English and Vietnamese, with code-switching. Parakeet v3 alone no longer fits (no Vietnamese). | 6 |
 | 2026-10-09 | Eval on public datasets, no recordings from Tai. | 12 |
+| 2026-10-09 | English speech recognition: parakeet-ultra weights (CC-BY-4.0) in Utter's own ONNX runtime. Ties the most accurate open model at a fraction of its latency; never Moondream's Photon engine, which sends telemetry. Vietnamese candidates: Qwen3-ASR-1.7B, Cohere. Evidence: docs/eval-results.md. | 6 |
+| 2026-10-09 | English first. If no model does English and Vietnamese both well, v1 ships the best English model; Vietnamese follows (a second, routed model or a later single one). Tai's English is a standard American accent. | 6 |

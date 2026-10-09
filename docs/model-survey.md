@@ -39,6 +39,8 @@ Cohere, Nemotron, Whisper), GGUF in C++ (NeMo-Speech.cpp for Nemotron, transcrib
 Cohere), vLLM (Linux only). The accuracy bench runs each model in its official runtime first.
 Only the winners get a native runtime inside the Rust core.
 
+Measured results and the choice made from them: `docs/eval-results.md`.
+
 ## Eval data (public, no recording needed)
 
 English (`hf-audio/open-asr-leaderboard`, ungated, updated 2026-10-07; the leaderboard's own
