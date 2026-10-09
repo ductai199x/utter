@@ -83,12 +83,13 @@ Phase 2 makes insertion robust.
 | Crate | Job |
 |---|---|
 | `utter-core` | Shared types, config, the event bus, tracing setup |
+| `utter-runtime` | The pinned runtime components (onnxruntime, CUDA, cuDNN, llama-server): download, SHA-256 check, install, locate |
 | `utter-audio` | Mic capture (`cpal`), a lock-free ring buffer, resampling to 16 kHz, levels for the waveform, noise suppression and gain (whisper mode), device hot-plug |
 | `utter-vad` | Silero VAD (onnx) |
 | `utter-asr` | The speech-recognition trait (offline and streaming), and the runtime of the model the bench picks (section 6) |
 | `utter-llm` | The llama-server client, its supervisor, prompts, the cleanup gate |
 | `utter-text` | Logic that needs no model: snippet matching, spoken punctuation, dictionary application, number and list formatting |
-| `utter-platform` | OS traits (hotkey, insert, context, focus, media) with one module per OS |
+| `utter-platform` | OS traits (hotkey, insert, context, focus, media, child processes) with one module per OS |
 | `utter-pipeline` | The dictation state machine that wires everything together |
 | `utter-store` | SQLite: history, dictionary, snippets, styles, stats |
 | `src-tauri` | The shell: windows, tray, IPC commands, the updater |
@@ -394,6 +395,7 @@ utter/
 | 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
 | 2026-10-09 | Languages: English and Vietnamese, with code-switching. Parakeet v3 alone no longer fits (no Vietnamese). | 6 |
 | 2026-10-09 | Eval on public datasets, no recordings from Tai. | 12 |
+| 2026-10-09 | Standalone: nothing but the GPU driver is taken from the machine. onnxruntime, CUDA, cuDNN and llama-server are pinned, checksummed components (`crates/utter-runtime`); llama-server is Utter's child process, ended by Windows if Utter dies. | 3, docs/local-setup.md |
 | 2026-10-09 | The recognizer runs in the Rust core: encoder on the GPU (convolutions rewritten for fixed shapes), decoder on the CPU. Same accuracy as Transformers, 34 ms p50 warm. The pipeline warms the GPU on key down. | 4, docs/eval-results.md |
 | 2026-10-09 | English speech recognition: parakeet-ultra weights (CC-BY-4.0) in Utter's own ONNX runtime. Ties the most accurate open model at a fraction of its latency; never Moondream's Photon engine, which sends telemetry. Vietnamese candidates: Qwen3-ASR-1.7B, Cohere. Evidence: docs/eval-results.md. | 6 |
 | 2026-10-09 | English first. If no model does English and Vietnamese both well, v1 ships the best English model; Vietnamese follows (a second, routed model or a later single one). Tai's English is a standard American accent. | 6 |

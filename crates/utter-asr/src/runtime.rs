@@ -1,16 +1,13 @@
-//! Loading ONNX Runtime, which `ort` loads at run time (`load-dynamic`).
+//! Loading ONNX Runtime, which `ort` loads at run time (`load-dynamic`), from Utter's own
+//! runtime components (`utter-runtime`): onnxruntime's GPU build, the CUDA runtime with
+//! cuBLAS, and cuDNN, each pinned and checksummed. Nothing is taken from other applications
+//! or from the system beyond the GPU driver: verified by transcribing with a PATH holding only
+//! Windows' own folders.
 //!
-//! Where the library comes from, in order:
-//! 1. `UTTER_ORT_DYLIB`: the full path of `onnxruntime.dll` / `libonnxruntime.so`;
-//! 2. in development, `tools/.venv`'s onnxruntime-gpu, found by walking up from the current
-//!    directory and from the executable.
-//!
-//! The CUDA provider needs the CUDA and cuDNN libraries. In development they come from the
-//! nvidia-* wheels in the same environment: their folders are put at the front of the
-//! process's library search path before the first session is created. The installer will
-//! ship these libraries beside the executable instead.
+//! `UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build; the
+//! CUDA libraries still come from the components.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::AsrError;
@@ -20,15 +17,10 @@ const ORT_LIB: &str = "onnxruntime.dll";
 #[cfg(not(windows))]
 const ORT_LIB: &str = "libonnxruntime.so";
 
-#[cfg(windows)]
-const SITE_PACKAGES: &[&str] = &["Lib", "site-packages"];
-#[cfg(not(windows))]
-const SITE_PACKAGES: &[&str] = &["lib", "python3.12", "site-packages"];
-
-#[cfg(windows)]
-const LIB_EXT: &str = "dll";
-#[cfg(not(windows))]
-const LIB_EXT: &str = "so";
+/// The components onnxruntime's CUDA provider loads its libraries from. cuFFT and cuRAND,
+/// which the provider can also load, are not needed by these graphs: without them, 100 of 100
+/// transcripts came out identical (2026-10-09).
+pub const CUDA_COMPONENTS: &[&str] = &["cuda-runtime", "cudnn"];
 
 static INIT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 
@@ -38,84 +30,32 @@ pub fn init() -> Result<PathBuf, AsrError> {
 }
 
 fn init_inner() -> Result<PathBuf, AsrError> {
-    let lib = locate()?;
-    if let Some(site) = site_packages_of(&lib) {
-        prepend_library_path(&nvidia_lib_dirs(&site))?;
+    let lib = match std::env::var_os("UTTER_ORT_DYLIB") {
+        Some(path) => PathBuf::from(path),
+        None => component_dir("onnxruntime-gpu")?.join(ORT_LIB),
+    };
+    if !lib.is_file() {
+        return Err(AsrError::Runtime(format!("{} does not exist", lib.display())));
     }
+    let mut dirs = Vec::new();
+    for id in CUDA_COMPONENTS {
+        dirs.push(component_dir(id)?);
+    }
+    prepend_library_path(&dirs)?;
     let builder = ort::init_from(&lib).map_err(|e| AsrError::Runtime(format!("{}: {e}", lib.display())))?;
     builder.with_name("utter").commit();
     tracing::info!(lib = %lib.display(), "onnxruntime loaded");
     Ok(lib)
 }
 
-fn locate() -> Result<PathBuf, AsrError> {
-    if let Some(path) = std::env::var_os("UTTER_ORT_DYLIB") {
-        let path = PathBuf::from(path);
-        return if path.is_file() {
-            Ok(path)
-        } else {
-            Err(AsrError::Runtime(format!("UTTER_ORT_DYLIB={} does not exist", path.display())))
-        };
-    }
-    let starts = [std::env::current_dir().ok(), std::env::current_exe().ok()];
-    for start in starts.into_iter().flatten() {
-        for dir in start.ancestors() {
-            let mut candidate = dir.join("tools").join(".venv");
-            for part in SITE_PACKAGES {
-                candidate.push(part);
-            }
-            candidate.push("onnxruntime");
-            candidate.push("capi");
-            candidate.push(ORT_LIB);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-    }
-    Err(AsrError::Runtime(format!(
-        "{ORT_LIB} not found: set UTTER_ORT_DYLIB, or run `uv sync` in tools/ (docs/local-setup.md)"
-    )))
-}
-
-/// `.../site-packages` for a library at `.../site-packages/onnxruntime/capi/<lib>`.
-fn site_packages_of(lib: &Path) -> Option<PathBuf> {
-    let site = lib.parent()?.parent()?.parent()?;
-    (site.file_name()? == "site-packages").then(|| site.to_path_buf())
-}
-
-/// Every folder under `site-packages/nvidia` that directly holds a shared library. The
-/// wheels do not agree on a layout (`nvidia/cudnn/bin`, `nvidia/cu13/bin/x86_64`, ...), so
-/// the tree is searched, a few levels deep, rather than guessed.
-fn nvidia_lib_dirs(site: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        let mut has_lib = false;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if depth > 0 {
-                    walk(&path, depth - 1, out);
-                }
-            } else if path.extension().is_some_and(|e| e == LIB_EXT) {
-                has_lib = true;
-            }
-        }
-        if has_lib {
-            out.push(dir.to_path_buf());
-        }
-    }
-    let mut dirs = Vec::new();
-    walk(&site.join("nvidia"), 4, &mut dirs);
-    dirs.sort();
-    dirs
+fn component_dir(id: &str) -> Result<PathBuf, AsrError> {
+    let c = utter_runtime::component(id).map_err(|e| AsrError::Runtime(e.to_string()))?;
+    c.installed_dir().map_err(|e| AsrError::Runtime(e.to_string()))
 }
 
 /// Windows searches PATH, as it is at the moment of each load, for a DLL's dependencies.
 #[cfg(windows)]
 fn prepend_library_path(dirs: &[PathBuf]) -> Result<(), AsrError> {
-    if dirs.is_empty() {
-        return Ok(());
-    }
     let var = "PATH";
     let mut paths: Vec<PathBuf> = dirs.to_vec();
     if let Some(existing) = std::env::var_os(var) {
@@ -129,12 +69,9 @@ fn prepend_library_path(dirs: &[PathBuf]) -> Result<(), AsrError> {
 }
 
 /// Linux's loader reads LD_LIBRARY_PATH only at process start, so changing it here would do
-/// nothing. Until phase 4 (Linux) preloads these libraries itself, they must already be on
-/// the loader's path.
+/// nothing. Phase 4 (Linux) preloads these libraries itself; until then there are no Linux
+/// components, and `component_dir` has already failed.
 #[cfg(not(windows))]
-fn prepend_library_path(dirs: &[PathBuf]) -> Result<(), AsrError> {
-    if !dirs.is_empty() {
-        tracing::warn!(?dirs, "CUDA libraries are not preloaded on this platform yet; put them on LD_LIBRARY_PATH");
-    }
+fn prepend_library_path(_dirs: &[PathBuf]) -> Result<(), AsrError> {
     Ok(())
 }

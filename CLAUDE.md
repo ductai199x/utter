@@ -12,6 +12,9 @@ architecture or scope; it is the source of truth.
 - **Latency first.** Every stage of a dictation is traced. Claim nothing is faster or slower
   without a measurement.
 - **Local only.** Nothing leaves the machine except model downloads and updates.
+- **Standalone.** Utter depends on nothing installed on the machine but the GPU driver: no
+  LM Studio, no Python, no system CUDA. Everything it runs on is a pinned, checksummed
+  component in `crates/utter-runtime/components.json`, installed by `utter-cli setup`.
 
 ## Conventions
 

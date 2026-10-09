@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/utter-core", "crates/utter-asr", "crates/utter-cli"]
+members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-asr", "crates/utter-llm", "crates/utter-cli"]
 
 [workspace.package]
 version = "0.0.1"
@@ -11,14 +11,23 @@ rust-version = "1.98"
 
 [workspace.dependencies]
 utter-core = { path = "crates/utter-core" }
+utter-platform = { path = "crates/utter-platform" }
+utter-runtime = { path = "crates/utter-runtime" }
 utter-asr = { path = "crates/utter-asr" }
+utter-llm = { path = "crates/utter-llm" }
 
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
+globset = "0.4.20"
+hex = "0.4.3"
 hound = "3.5.1"
-# onnxruntime is loaded at run time (load-dynamic): development uses the DLLs of tools/'s
-# onnxruntime-gpu, the installer will ship its own copy. docs/local-setup.md.
+# onnxruntime is loaded at run time (load-dynamic) from the pinned component utter-runtime
+# installs (crates/utter-runtime/components.json).
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "cuda"] }
+sha2 = "0.11.0"
+windows-sys = "0.61.2"
+ureq = { version = "3.4.2", features = ["json"] }
+zip = { version = "9.0.0", default-features = false, features = ["deflate"] }
 ndarray = "0.17.2"
 realfft = "3.5.0"
 serde = { version = "1.0.229", features = ["derive"] }
