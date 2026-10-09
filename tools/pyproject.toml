@@ -31,8 +31,18 @@ runtime = [
     "onnx-asr[hub]>=0.12",
 ]
 
+# The speech models' official runtimes, for the accuracy bench (docs/model-survey.md).
+models = [
+    "torch>=2.14",
+    "transformers>=5.19",
+    "accelerate>=1.15",
+    "librosa>=1.0",
+    "sentencepiece>=0.2",
+    "protobuf>=5",
+]
+
 [tool.uv]
-default-groups = ["dev", "runtime"]
+default-groups = ["dev", "runtime", "models"]
 # onnx-asr depends on the CPU-only `onnxruntime`, which would shadow onnxruntime-gpu (same
 # import name). The GPU build provides the CPU provider too.
 override-dependencies = ["onnxruntime ; sys_platform == 'never'"]
@@ -42,6 +52,15 @@ required-environments = [
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
+
+# PyTorch's CUDA 13.0 build, from PyTorch's own index; everything else from PyPI.
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
 
 [tool.ruff]
 line-length = 100
