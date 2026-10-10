@@ -47,10 +47,10 @@ def main(
             for line in (eval_dir() / eval_set / "manifest.jsonl").open(encoding="utf-8")
         )
     }
-    hyps = (eval_dir() / "results" / "asr" / asr_name / f"{eval_set}.jsonl").open(encoding="utf-8")
+    hyp_path = eval_dir() / "results" / "asr" / asr_name / f"{eval_set}.jsonl"
+    hyps = [json.loads(line) for line in hyp_path.read_text(encoding="utf-8").splitlines() if line]
     rows = []
-    for line in hyps:
-        h = json.loads(line)
+    for h in hyps:
         m = manifest.get(h["id"])
         if m is None or not h["hyp"].strip():
             continue
