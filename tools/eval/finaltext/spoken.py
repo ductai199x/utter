@@ -329,9 +329,15 @@ def _match_at(got: list[str], k: int, w: str) -> int | None:
     if joined == w:
         return end
     g = got[k]
-    if g.startswith(w) or (w.startswith(g) and len(g) >= 3):
+    if g.startswith(w) or (w.startswith(g) and len(g) >= 3) or _SPOKEN_AS.get(w) == g:
         return k + 1
+    # A misspelled word read as the word meant ("morgage" -> "mortgage") does not match on
+    # purpose: the gold keeps the typo, and a pair teaching it would teach misspelling.
     return None
+
+
+# Abbreviations read as the words they stand for.
+_SPOKEN_AS = {"vs": "versus"}
 
 
 def same_numbers(script: str, spoken: str) -> bool:

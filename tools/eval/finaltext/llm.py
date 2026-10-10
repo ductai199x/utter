@@ -73,7 +73,8 @@ class Chat:
         if json_schema is not None:
             body["response_format"] = {
                 "type": "json_schema",
-                "json_schema": {"schema": json_schema},
+                # The name is required by the OpenAI API (vLLM checks it); llama-server ignores it.
+                "json_schema": {"name": "reply", "schema": json_schema},
             }
         req = urllib.request.Request(
             f"{self.url}/v1/chat/completions",
