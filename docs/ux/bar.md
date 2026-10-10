@@ -71,11 +71,11 @@ Live words arrive in pieces (each segment, and the preview of the segment being 
 words fade in over 120 ms. Words already shown never jump: a preview may only extend or
 correct its own tail, and a correction cross-fades the changed words in place.
 
-What you see is what is pasted. Words that are not yet the text to be pasted are shown as
-provisional (dimmed, `--bar-words-provisional`). The text being pasted replaces them at full
-weight as the paste happens, and stays under the Done check. (Today the words are provisional
-until key up; once cleanup runs while you speak, only the newest words are:
-docs/plan-final-text.md.)
+What you see is what is pasted. At every pause the dictation so far is cleaned (punctuation,
+symbols, numbers, corrections applied) and shown at full weight; the words heard after it are
+provisional (dimmed, `--bar-words-provisional`) until the next cleanup replaces them. A later
+correction can still change cleaned text ("five, no wait, seven"). At key up the cleaned whole
+is the text pasted, and it stays under the Done check (docs/plan-final-text.md).
 
 ## Color
 
