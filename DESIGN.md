@@ -398,6 +398,7 @@ utter/
 | 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
 | 2026-10-09 | Languages: English and Vietnamese, with code-switching. Parakeet v3 alone no longer fits (no Vietnamese). | 6 |
 | 2026-10-09 | Eval on public datasets, no recordings from Tai. | 12 |
+| 2026-10-09 | Footprint about 5 GB: the default (light) tier is the float16 speech encoder plus Gemma 4 E4B, about 5.6 GB of GPU memory in all; Gemma 4 26B-A4B becomes an optional quality tier. The LLM context stays 4096. | 6, docs/eval-results.md |
 | 2026-10-09 | Cleanup model: Gemma 4 26B-A4B (QAT 4-bit) in llama-server with `--swa-full` and n-gram drafting; 99% of the cleanup checks, 101 ms p50 (136 ms on real speech). Latency over precision: slower, higher-precision variants are not pursued. | 6, docs/eval-results.md |
 | 2026-10-09 | Standalone: nothing but the GPU driver is taken from the machine. onnxruntime, CUDA, cuDNN and llama-server are pinned, checksummed components (`crates/utter-runtime`); llama-server is Utter's child process, ended by Windows if Utter dies. | 3, docs/local-setup.md |
 | 2026-10-09 | The recognizer runs in the Rust core: encoder on the GPU (convolutions rewritten for fixed shapes), decoder on the CPU. Same accuracy as Transformers, 34 ms p50 warm. The pipeline warms the GPU on key down. | 4, docs/eval-results.md |

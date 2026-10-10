@@ -40,11 +40,12 @@ version, a publisher's URL and that publisher's SHA-256:
 | cuda-runtime 13.4 (cudart, cuBLAS) | ggml-org's llama.cpp release | Both onnxruntime and llama.cpp |
 | cudnn 9.27 | NVIDIA's PyPI package | onnxruntime's convolutions |
 | llama-cpp b11535 (llama-server) | ggml-org's GitHub release | The language model, as Utter's child process |
-| parakeet-ultra-onnx 3aa6ab31 (2.6 GB) | Hugging Face `ductai199x/utter-parakeet-ultra-onnx` | The speech model |
-| gemma4-26b-a4b-qat d1c082be (14.4 GB) | Hugging Face `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | The cleanup model |
+| parakeet-ultra-onnx-fp16 3f7de939 (1.4 GB) | Hugging Face `ductai199x/utter-parakeet-ultra-onnx`, `fp16/` | The speech model (half-precision encoder) |
+| gemma4-e4b-qat 4b4a2c1d (5.2 GB) | Hugging Face `google/gemma-4-E4B-it-qat-q4_0-gguf` | The cleanup model, light tier (default) |
+| gemma4-26b-a4b-qat d1c082be (14.4 GB) | Hugging Face `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | The cleanup model, quality tier: optional, `utter-cli setup gemma4-26b-a4b-qat` |
 
 `utter-cli setup` downloads, verifies and installs them, and the speech model (2.6 GB, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx`), into
-`C:\Users\Tai\.cache\utter\runtime\` (about 18.3 GB in all, most of it the two models); `utter-cli doctor` lists them. The same
+`C:\Users\Tai\.cache\utter\runtime\` (about 8.2 GB for the default tier, most of it the two models); `utter-cli doctor` lists them. The same
 path serves development and release; nothing is loaded from `tools/.venv`, LM Studio or any
 other application. Checked by running with a PATH holding only Windows' own folders.
 

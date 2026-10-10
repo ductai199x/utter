@@ -11,12 +11,38 @@ use crate::{LlmError, Message, ServerOptions};
 /// The cleanup system prompt.
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
 
-/// The runtime component holding the cleanup model (crates/utter-runtime/components.json):
-/// Gemma 4 26B-A4B, Google's QAT 4-bit build. Chosen by measurement, docs/eval-results.md.
-pub const MODEL_COMPONENT: &str = "gemma4-26b-a4b-qat";
-pub const MODEL_FILE: &str = "gemma-4-26B_q4_0-it.gguf";
+/// Which cleanup model runs. Both are Google's Gemma 4 QAT 4-bit builds, chosen by measurement
+/// (docs/eval-results.md); both run with [`SERVER_ARGS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Tier {
+    /// Gemma 4 E4B: about 3.3 GB of GPU memory (its 2.7 GB of per-layer embeddings stay in
+    /// system RAM), 97% of the cleanup checks, 124 ms p50 on real speech. The default: with
+    /// the speech model, Utter takes about 5.6 GB of GPU memory in all (Tai, 2026-10-09).
+    #[default]
+    Light,
+    /// Gemma 4 26B-A4B: about 15 GB of GPU memory, 99% of the checks, 137 ms p50. Optional, for
+    /// GPUs with room.
+    Quality,
+}
 
-/// llama-server settings measured for this model (docs/eval-results.md, 2026-10-09):
+impl Tier {
+    /// The runtime component holding the model (crates/utter-runtime/components.json).
+    pub fn component(self) -> &'static str {
+        match self {
+            Tier::Light => "gemma4-e4b-qat",
+            Tier::Quality => "gemma4-26b-a4b-qat",
+        }
+    }
+
+    pub fn model_file(self) -> &'static str {
+        match self {
+            Tier::Light => "gemma-4-E4B_q4_0-it.gguf",
+            Tier::Quality => "gemma-4-26B_q4_0-it.gguf",
+        }
+    }
+}
+
+/// llama-server settings measured for these models (docs/eval-results.md, 2026-10-09):
 /// - `--swa-full`: a full-size cache for the sliding-window layers. Without it every request
 ///   rebuilds that cache from a checkpoint; with it, prompt processing drops from about 95 ms
 ///   to 25 ms. Wall time per cleanup halves.
@@ -34,14 +60,14 @@ pub const SERVER_ARGS: &[&str] = &[
     "6",
 ];
 
-/// The installed cleanup model's file, or an error naming how to install it.
-pub fn installed_model() -> Result<PathBuf, LlmError> {
-    Ok(utter_runtime::component(MODEL_COMPONENT)?.installed_dir()?.join(MODEL_FILE))
+/// The installed model file of `tier`, or an error naming how to install it.
+pub fn installed_model(tier: Tier) -> Result<PathBuf, LlmError> {
+    Ok(utter_runtime::component(tier.component())?.installed_dir()?.join(tier.model_file()))
 }
 
-/// Server options for the installed cleanup model with its measured settings.
-pub fn server_options() -> Result<ServerOptions, LlmError> {
-    let mut opts = ServerOptions::new(installed_model()?);
+/// Server options for `tier`'s installed model with its measured settings.
+pub fn server_options(tier: Tier) -> Result<ServerOptions, LlmError> {
+    let mut opts = ServerOptions::new(installed_model(tier)?);
     opts.extra_args = SERVER_ARGS.iter().map(|s| (*s).to_owned()).collect();
     Ok(opts)
 }
