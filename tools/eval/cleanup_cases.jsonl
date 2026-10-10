@@ -74,7 +74,7 @@
 {"id": "clean-04", "category": "clean", "input": "Happy birthday! I hope this year brings you everything you wished for.", "expected": "Happy birthday! I hope this year brings you everything you wished for."}
 {"id": "clean-05", "category": "clean", "input": "The new policy takes effect next month, so please read it carefully.", "expected": "The new policy takes effect next month, so please read it carefully."}
 {"id": "clean-06", "category": "clean", "input": "Ain't nobody got time for that.", "expected": "Ain't nobody got time for that."}
-{"id": "clean-07", "category": "clean", "input": "lol that's hilarious", "expected": "lol that's hilarious", "must_contain": ["lol"]}
+{"id": "clean-07", "category": "clean", "input": "lol that's hilarious", "expected": "Lol, that's hilarious.", "must_contain": ["hilarious"], "note": "Rule 7 fixes punctuation and capitalization even in casual text; keeping it casual is a Style."}
 {"id": "clean-08", "category": "clean", "input": "We should probably talk about this in person.", "expected": "We should probably talk about this in person."}
 {"id": "clean-09", "category": "clean", "input": "Me and him went to the store yesterday.", "expected": "Me and him went to the store yesterday.", "must_contain": ["Me and him"]}
 {"id": "clean-10", "category": "clean", "input": "Okay.", "expected": "Okay."}

@@ -130,7 +130,9 @@ idle ──key down──► listening ──key up──► finishing ──►
 6. **Cleanup gate.** If the text has no fillers, no backtrack cues ("no wait", "actually",
    "I mean", repeated words), is short and the style needs no rewriting, the LLM is skipped.
    The gate's decisions are logged and tuned against the eval set.
-7. **LLM cleanup.** The prompt has a cached prefix (the system prompt, then the style, then
+7. **LLM cleanup.** The cleanup model loads when Utter starts (about 8 s for its 14 GB) and
+   gets one warm-up request then: the first request after loading takes about 400 ms, later
+   ones about 140 ms (docs/eval-results.md). No dictation ever waits for either. The prompt has a cached prefix (the system prompt, then the style, then
    the dictionary terms) followed by the transcript and a little context. It runs with
    prompt-lookup decoding, because the output mostly copies the input. A guard rejects an
    output that drifts too far from the input (for example, answering a question instead of
@@ -184,6 +186,7 @@ Measured on the development machine (RTX 3090 Ti). Each row has a trace span. p9
 | (measured 2026-10-09, warm: parakeet-ultra on the eval clips) | 34 ms | 59 ms |
 | Key up → text inserted, gate skips the LLM | 120 ms | 250 ms |
 | Key up → text inserted, LLM cleanup of ~30 words | 400 ms | 800 ms |
+| (measured 2026-10-09: the cleanup request alone, Gemma 4 26B-A4B, real speech) | 136 ms | 253 ms |
 | Command Mode, rewrite of a short paragraph | 700 ms | 1.5 s |
 | Cold start → ready to dictate (models already on disk) | 3 s | 6 s |
 | Idle RAM, Rust process (not counting model VRAM) | 150 MB | — |
@@ -395,6 +398,7 @@ utter/
 | 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
 | 2026-10-09 | Languages: English and Vietnamese, with code-switching. Parakeet v3 alone no longer fits (no Vietnamese). | 6 |
 | 2026-10-09 | Eval on public datasets, no recordings from Tai. | 12 |
+| 2026-10-09 | Cleanup model: Gemma 4 26B-A4B (QAT 4-bit) in llama-server with `--swa-full` and n-gram drafting; 99% of the cleanup checks, 101 ms p50 (136 ms on real speech). Latency over precision: slower, higher-precision variants are not pursued. | 6, docs/eval-results.md |
 | 2026-10-09 | Standalone: nothing but the GPU driver is taken from the machine. onnxruntime, CUDA, cuDNN and llama-server are pinned, checksummed components (`crates/utter-runtime`); llama-server is Utter's child process, ended by Windows if Utter dies. | 3, docs/local-setup.md |
 | 2026-10-09 | The recognizer runs in the Rust core: encoder on the GPU (convolutions rewritten for fixed shapes), decoder on the CPU. Same accuracy as Transformers, 34 ms p50 warm. The pipeline warms the GPU on key down. | 4, docs/eval-results.md |
 | 2026-10-09 | English speech recognition: parakeet-ultra weights (CC-BY-4.0) in Utter's own ONNX runtime. Ties the most accurate open model at a fraction of its latency; never Moondream's Photon engine, which sends telemetry. Vietnamese candidates: Qwen3-ASR-1.7B, Cohere. Evidence: docs/eval-results.md. | 6 |

@@ -229,6 +229,16 @@ impl LlamaServer {
     }
 }
 
+impl LlamaServer {
+    /// Processes `messages` into the prompt cache without generating anything. Sent while the
+    /// user is still speaking, with the transcript so far, it leaves only the last words for
+    /// the request that follows key up: a later prompt that starts with the same tokens reuses
+    /// them.
+    pub fn prefill(&self, messages: &[Message]) -> Result<Completion, LlmError> {
+        self.chat(messages, &ChatParams { max_tokens: 0, ..ChatParams::default() })
+    }
+}
+
 impl Drop for LlamaServer {
     fn drop(&mut self) {
         let _ = self.child.kill();
