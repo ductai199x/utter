@@ -580,14 +580,6 @@ impl Engine {
         };
         let total_ms = key_up.elapsed().as_secs_f64() * 1e3;
         log.push(Entry::Inserted { ok: inserted.is_ok(), error: inserted.as_ref().err().cloned() });
-        log.finish(Finished {
-            target: log_target(&target),
-            config: self.log_config(),
-            raw: Some(raw.clone()),
-            text: Some(text.clone()),
-            audio: audio.clone(),
-            timings: Some(Timings { asr: asr_ms, cleanup: cleanup_ms, total: total_ms }),
-        });
         let dictation = Dictation {
             raw,
             text,
@@ -601,6 +593,15 @@ impl Engine {
             total_ms,
         };
         on_event(Event::Done(Box::new(dictation.clone())));
+        // The audio is not needed past here: it moves into the log, uncopied.
+        log.finish(Finished {
+            target: log_target(&dictation.target),
+            config: self.log_config(),
+            raw: Some(dictation.raw.clone()),
+            text: Some(dictation.text.clone()),
+            audio,
+            timings: Some(Timings { asr: asr_ms, cleanup: cleanup_ms, total: total_ms }),
+        });
         Ok(Some(dictation))
     }
 }
