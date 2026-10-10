@@ -1,0 +1,27 @@
+[project]
+name = "utter-tts-chatterbox"
+version = "0.0.0"
+description = "Chatterbox (MIT, Resemble AI) speech synthesis for Utter's eval and training sets: voice cloning for speaker variety. Dev only, never shipped."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "chatterbox-tts==0.1.7",
+    # Direct, so the CUDA index below applies (uv sources only govern direct dependencies).
+    "torch==2.6.0",
+    "torchaudio==2.6.0",
+    "soundfile>=0.12",
+    "soxr>=0.5",
+    "typer>=0.12",
+]
+
+# Chatterbox pins torch 2.6.0, so it has its own environment, kept on C: (docs/local-setup.md).
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
+
+[tool.uv]
+package = false
