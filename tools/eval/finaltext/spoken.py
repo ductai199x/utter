@@ -382,3 +382,48 @@ def render(
 
 def to_json(r: Rendition) -> str:
     return json.dumps(asdict(r), ensure_ascii=False)
+
+
+def main(
+    split: str = "eval",
+    model: str = "gemma4-26b-a4b-qat",
+    slots: int = 6,
+    limit: int = 0,
+) -> None:
+    """Renders every passage of a split in every kind; resumes where a previous run stopped."""
+    from eval.finaltext.llm import Server, model_path
+    from eval.paths import eval_dir
+
+    root = eval_dir() / "finaltext"
+    passages = [
+        json.loads(line) for line in (root / f"passages-{split}.jsonl").open(encoding="utf-8")
+    ]
+    if limit:
+        passages = passages[:limit]
+    out = root / f"renditions-{split}.jsonl"
+    done: set[tuple[str, str]] = set()
+    if out.exists():
+        for line in out.open(encoding="utf-8"):
+            r = json.loads(line)
+            done.add((r["passage_id"], r["kind"]))
+    failed = kept = 0
+    with Server(model_path(model), slots=slots) as llm, out.open("a", encoding="utf-8") as fh:
+        for kind in KINDS:
+            todo = [(p["id"], p["text"]) for p in passages if (p["id"], kind) not in done]
+            for pid, _, r, rejections in render(llm, todo, kinds=[kind], workers=slots):
+                if r is None:
+                    failed += 1
+                    print(f"{pid} {kind}: no rendition passed ({rejections})", flush=True)
+                    continue
+                fh.write(to_json(r) + "\n")
+                fh.flush()
+                kept += 1
+                if kept % 100 == 0:
+                    print(f"{kept} kept, {failed} failed", flush=True)
+    print(f"done: {kept} kept, {failed} failed -> {out}")
+
+
+if __name__ == "__main__":
+    import typer
+
+    typer.run(main)
