@@ -20,6 +20,7 @@ use utter_llm::{ChatParams, LlamaServer};
 use utter_platform::focus::{self, Window};
 use utter_platform::hotkey::{self, Action, HotkeyConfig};
 use utter_platform::insert::{self, PasteOptions};
+use utter_runtime::gpu::GpuWarmer;
 
 /// How often the pipeline reads the microphone while listening.
 pub const POLL: Duration = Duration::from_millis(30);
@@ -83,9 +84,35 @@ pub struct Dictation {
     pub total_ms: f64,
 }
 
+/// What the pipeline tells the UI as a dictation goes.
+#[derive(Debug, Clone)]
+pub enum Event {
+    /// Listening began (or became hands-free).
+    /// `target` is the window the text will go to (its handle), for placing the UI.
+    Listening {
+        hands_free: bool,
+        target: Option<isize>,
+    },
+    /// The words so far: `committed` (finished segments) never changes once shown; `preview`
+    /// is the segment being spoken, re-transcribed as it grows.
+    Words {
+        committed: String,
+        preview: String,
+    },
+    /// Key up: transcribing the rest, cleaning up, pasting.
+    Finishing,
+    Done(Box<Dictation>),
+    Cancelled,
+}
+
 enum Job {
     /// A recognizer pass on a short silent clip, only to keep the GPU busy.
     KeepAlive,
+    /// The segment being spoken, transcribed so far, for live words.
+    Preview {
+        generation: u64,
+        audio: Vec<f32>,
+    },
     Segment {
         generation: u64,
         index: usize,
@@ -93,43 +120,64 @@ enum Job {
     },
 }
 
+enum DoneKind {
+    Segment(usize),
+    Preview,
+}
+
 struct Done {
     generation: u64,
-    index: usize,
+    kind: DoneKind,
     text: String,
+}
+
+fn transcribe_text(asr: &mut ParakeetTdt, audio: &[f32]) -> String {
+    match asr.transcribe(audio) {
+        Ok(t) => t.text,
+        Err(utter_asr::AsrError::TooShort { .. }) => String::new(),
+        Err(e) => {
+            tracing::warn!("transcribe: {e}");
+            String::new()
+        }
+    }
 }
 
 /// Owns the recognizer; runs jobs in order.
 fn speech_worker(mut asr: ParakeetTdt, jobs: Receiver<Job>, done: Sender<Done>) {
     let silence = vec![0.0f32; 8_000];
     while let Ok(mut job) = jobs.recv() {
-        // A keep-alive with real work queued behind it is skipped: it would only delay the
-        // segment, possibly the last one, which the user is waiting for.
-        while matches!(job, Job::KeepAlive) {
+        // A keep-alive or preview with work queued behind it is stale: skip it. It would only
+        // delay the segment, possibly the last one, which the user is waiting for, and a newer
+        // preview supersedes an older one.
+        while matches!(job, Job::KeepAlive | Job::Preview { .. }) {
             match jobs.try_recv() {
                 Ok(next) => job = next,
                 Err(_) => break,
             }
         }
-        match job {
+        let (generation, kind, text) = match job {
             Job::KeepAlive => {
                 let _ = asr.transcribe(&silence);
+                continue;
             }
+            Job::Preview { generation, audio } => (generation, DoneKind::Preview, transcribe_text(&mut asr, &audio)),
             Job::Segment { generation, index, audio } => {
-                let text = match asr.transcribe(&audio) {
-                    Ok(t) => t.text,
-                    Err(utter_asr::AsrError::TooShort { .. }) => String::new(),
-                    Err(e) => {
-                        tracing::warn!("segment {index}: {e}");
-                        String::new()
-                    }
-                };
-                if done.send(Done { generation, index, text }).is_err() {
-                    break;
-                }
+                (generation, DoneKind::Segment(index), transcribe_text(&mut asr, &audio))
             }
+        };
+        if done.send(Done { generation, kind, text }).is_err() {
+            break;
         }
     }
+}
+
+/// How often the live words are refreshed while speaking; these passes also keep the GPU busy.
+const PREVIEW_EVERY: Duration = Duration::from_millis(300);
+/// The least unfinished speech worth a preview pass (0.4 s).
+const PREVIEW_MIN_SAMPLES: usize = 6_400;
+
+fn join_parts(parts: &[String]) -> String {
+    parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
 /// Where a dictation's audio comes from: the microphone, or a recording replayed in real time.
@@ -206,6 +254,8 @@ struct Engine {
     done: Receiver<Done>,
     llm: Option<LlamaServer>,
     generation: u64,
+    /// Holds the GPU at full clocks from key down to key up (see utter_runtime::gpu).
+    gpu: GpuWarmer,
 }
 
 impl Pipeline {
@@ -235,15 +285,19 @@ impl Pipeline {
         };
         let vad = SileroVad::load_installed()?;
         let mic = Microphone::open(&cfg.mic)?;
-        Ok(Self { mic, engine: Engine { cfg, vad, jobs: job_tx, done: done_rx, llm, generation: 0 } })
+        Ok(Self {
+            mic,
+            engine: Engine { cfg, vad, jobs: job_tx, done: done_rx, llm, generation: 0, gpu: GpuWarmer::new() },
+        })
     }
 
     pub fn microphone(&self) -> &Microphone {
         &self.mic
     }
 
-    /// Runs dictations until the hotkey listener ends; `on_done` sees each one.
-    pub fn run(&mut self, mut on_done: impl FnMut(&Dictation)) -> Result<(), PipelineError> {
+    /// Runs dictations until the hotkey listener ends; `on_event` sees everything that
+    /// happens, from the key going down to the paste.
+    pub fn run(&mut self, mut on_event: impl FnMut(Event)) -> Result<(), PipelineError> {
         let listener = hotkey::listen(self.engine.cfg.hotkey)?;
         loop {
             let Some((action, _at)) = listener.recv_timeout(Duration::from_secs(3600)) else { continue };
@@ -252,9 +306,7 @@ impl Pipeline {
             }
             let target = focus::foreground();
             let mut source = MicSource(&self.mic);
-            if let Some(d) = self.engine.dictate(&mut source, |t| listener.recv_timeout(t), target, true)? {
-                on_done(&d);
-            }
+            self.engine.dictate(&mut source, |t| listener.recv_timeout(t), target, true, &mut on_event)?;
         }
     }
 
@@ -270,6 +322,7 @@ impl Pipeline {
             },
             None,
             false,
+            &mut |_| {},
         )?;
         Ok(d.expect("a replay is never cancelled"))
     }
@@ -280,19 +333,41 @@ impl Engine {
     fn dictate(
         &mut self,
         source: &mut dyn AudioSource,
+        next_action: impl FnMut(Duration) -> Option<(Action, Instant)>,
+        target: Option<Window>,
+        do_insert: bool,
+        on_event: &mut dyn FnMut(Event),
+    ) -> Result<Option<Dictation>, PipelineError> {
+        let result = self.dictate_inner(source, next_action, target, do_insert, on_event);
+        // Whatever happened, the GPU goes back to idling.
+        self.gpu.stop();
+        result
+    }
+
+    fn dictate_inner(
+        &mut self,
+        source: &mut dyn AudioSource,
         mut next_action: impl FnMut(Duration) -> Option<(Action, Instant)>,
         target: Option<Window>,
         do_insert: bool,
+        on_event: &mut dyn FnMut(Event),
     ) -> Result<Option<Dictation>, PipelineError> {
         self.generation += 1;
         let generation = self.generation;
         source.start();
+        self.gpu.start();
+        let target_handle = target.as_ref().map(|w| w.handle);
+        on_event(Event::Listening { hands_free: false, target: target_handle });
         self.vad.reset();
         let mut segmenter = Segmenter::new(SegmenterConfig::default());
         let mut audio: Vec<f32> = Vec::new();
         let mut last_cut = 0usize;
         let mut sent = 0usize;
+        let mut parts: Vec<String> = Vec::new();
+        let mut received = 0usize;
+        let mut preview = String::new();
         let mut last_job = Instant::now();
+        let mut last_preview = Instant::now();
         let _ = self.jobs.send(Job::KeepAlive);
 
         let key_up = loop {
@@ -303,11 +378,34 @@ impl Engine {
                 Some((Action::Finish, at)) => break at,
                 Some((Action::Cancel, _)) => {
                     source.stop(Duration::ZERO);
+                    on_event(Event::Cancelled);
                     return Ok(None);
                 }
-                // Hands-free: keep listening until Finish.
-                Some((Action::HandsFree | Action::Start, _)) | None => {}
+                Some((Action::HandsFree, _)) => on_event(Event::Listening { hands_free: true, target: target_handle }),
+                Some((Action::Start, _)) | None => {}
             }
+            // Results that came back while speaking: show them.
+            let mut words_changed = false;
+            while let Ok(d) = self.done.try_recv() {
+                if d.generation != generation {
+                    continue;
+                }
+                match d.kind {
+                    DoneKind::Segment(i) => {
+                        parts[i] = d.text;
+                        received += 1;
+                        // The preview was of this segment (or earlier audio); the next one
+                        // starts fresh.
+                        preview.clear();
+                    }
+                    DoneKind::Preview => preview = d.text,
+                }
+                words_changed = true;
+            }
+            if words_changed {
+                on_event(Event::Words { committed: join_parts(&parts), preview: preview.clone() });
+            }
+
             let new = source.take_new();
             if new.is_empty() {
                 continue;
@@ -321,18 +419,28 @@ impl Engine {
                     self.jobs
                         .send(Job::Segment { generation, index: sent, audio: segment })
                         .map_err(|_| PipelineError::WorkerGone)?;
+                    parts.push(String::new());
                     sent += 1;
                     last_cut = cut_sample;
                     last_job = Instant::now();
                 }
             }
-            if last_job.elapsed() >= KEEPALIVE {
+            if last_preview.elapsed() >= PREVIEW_EVERY
+                && segmenter.has_speech()
+                && audio.len() - last_cut >= PREVIEW_MIN_SAMPLES
+            {
+                let _ = self.jobs.send(Job::Preview { generation, audio: audio[last_cut..].to_vec() });
+                last_preview = Instant::now();
+                last_job = last_preview;
+            } else if last_job.elapsed() >= KEEPALIVE {
                 let _ = self.jobs.send(Job::KeepAlive);
                 last_job = Instant::now();
             }
         };
 
         // Key up: the user is waiting from here on.
+        self.gpu.stop();
+        on_event(Event::Finishing);
         let rest = source.stop(SETTLE);
         // `stop` returns the whole utterance; keep only what `take_new` had not delivered.
         if rest.len() > audio.len() {
@@ -342,19 +450,21 @@ impl Engine {
             self.jobs
                 .send(Job::Segment { generation, index: sent, audio: audio[last_cut..].to_vec() })
                 .map_err(|_| PipelineError::WorkerGone)?;
+            parts.push(String::new());
             sent += 1;
         }
-        let mut parts = vec![String::new(); sent];
-        let mut received = 0;
         while received < sent {
             let d = self.done.recv().map_err(|_| PipelineError::WorkerGone)?;
-            if d.generation == generation {
-                parts[d.index] = d.text;
+            if d.generation != generation {
+                continue;
+            }
+            if let DoneKind::Segment(i) = d.kind {
+                parts[i] = d.text;
                 received += 1;
             }
         }
         let asr_ms = key_up.elapsed().as_secs_f64() * 1e3;
-        let raw = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ");
+        let raw = join_parts(&parts);
 
         let gate = if raw.is_empty() { None } else { gate::reason(&raw, &self.cfg.dictionary) };
         let (text, cleanup_ms) = match (&self.llm, gate) {
@@ -376,7 +486,7 @@ impl Engine {
             (Some(_), false) => Err("insertion off (replay)".to_owned()),
         };
         let total_ms = key_up.elapsed().as_secs_f64() * 1e3;
-        Ok(Some(Dictation {
+        let dictation = Dictation {
             raw,
             text,
             target,
@@ -387,6 +497,8 @@ impl Engine {
             asr_ms,
             cleanup_ms,
             total_ms,
-        }))
+        };
+        on_event(Event::Done(Box::new(dictation.clone())));
+        Ok(Some(dictation))
     }
 }

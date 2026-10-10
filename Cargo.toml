@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-audio", "crates/utter-asr", "crates/utter-llm", "crates/utter-pipeline", "crates/utter-cli"]
+members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-audio", "crates/utter-asr", "crates/utter-llm", "crates/utter-pipeline", "crates/utter-cli", "app/src-tauri"]
 
 [workspace.package]
 version = "0.0.1"

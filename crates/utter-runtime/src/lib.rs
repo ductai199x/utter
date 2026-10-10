@@ -10,6 +10,8 @@
 //! is loaded from anywhere else, in development or release, so Utter depends on no other
 //! installed application.
 
+pub mod gpu;
+
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};

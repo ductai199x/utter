@@ -72,8 +72,26 @@ cargo run --release -p utter-cli -- setup      # install the runtime components 
 cargo run --release -p utter-cli -- doctor     # what is installed
 cargo run --release -p utter-cli -- transcribe some.wav
 cargo run --release -p utter-cli -- chat --gguf model.gguf "message"
+cargo run --release -p utter-cli -- clean "um, so, the text"   # the cleanup model on its own
+cargo run --release -p utter-cli -- record out.wav           # the microphone, 16 kHz, with pre-roll
+cargo run --release -p utter-cli -- vad some.wav             # where voice detection cuts
+cargo run --release -p utter-cli -- dictate                  # live: hold Right Ctrl, speak, release
+cargo run --release -p utter-cli -- e2e-bench                # key up -> text ready, on eval clips
 cargo run --release -p utter-cli -- bench      # the Rust runtime on the English sets
 ```
+
+The app (the Bar overlay and the tray) needs Node 22 or newer for its web side:
+
+```
+cd app
+npm ci
+npx tauri dev                                  # the app, with the Bar hot-reloading
+npx tauri build --no-bundle                    # target/release/utter.exe
+npm run check                                  # svelte-check
+```
+
+It loads the same components as `utter-cli dictate`; run `setup` first. Logs go to the
+console in a debug build (`RUST_LOG=debug` for more).
 
 Benches of the Rust runtime are sensitive to everything else using the GPU; note the GPU's
 utilization (`nvidia-smi`) next to any number you record.

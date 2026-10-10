@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "bar",
+  "description": "The Bar only listens to events from the core.",
+  "windows": ["bar"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

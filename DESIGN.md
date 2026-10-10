@@ -85,12 +85,11 @@ Phase 2 makes insertion robust.
 | `utter-core` | Shared types, config, the event bus, tracing setup |
 | `utter-runtime` | The pinned runtime components (onnxruntime, CUDA, cuDNN, llama-server): download, SHA-256 check, install, locate |
 | `utter-audio` | Mic capture (`cpal`), a lock-free ring buffer, resampling to 16 kHz, levels for the waveform, noise suppression and gain (whisper mode), device hot-plug |
-| `utter-vad` | Silero VAD (onnx) |
-| `utter-asr` | The speech-recognition trait (offline and streaming), and the runtime of the model the bench picks (section 6) |
+| `utter-asr` | Speech recognition (Parakeet TDT on onnxruntime, section 6) and voice activity detection (Silero VAD and the segmenter that cuts at pauses) |
 | `utter-llm` | The llama-server client, its supervisor, prompts, the cleanup gate |
 | `utter-text` | Logic that needs no model: snippet matching, spoken punctuation, dictionary application, number and list formatting |
 | `utter-platform` | OS traits (hotkey, insert, context, focus, media, child processes) with one module per OS |
-| `utter-pipeline` | The dictation state machine that wires everything together |
+| `utter-pipeline` | The dictation loop that wires everything together, and the cleanup gate |
 | `utter-store` | SQLite: history, dictionary, snippets, styles, stats |
 | `src-tauri` | The shell: windows, tray, IPC commands, the updater |
 
@@ -115,7 +114,9 @@ idle ──key down──► listening ──key up──► finishing ──►
    The Bar appears within one frame. The recognizer starts a warm-up pass at once: an idle
    GPU drops its clocks, and a cold pass takes about 5 times as long as a warm one
    (docs/eval-results.md, "Idle GPU"). From then until key up, the live preview's passes keep
-   it busy.
+   it busy, and one GPU thread naps in a tiny kernel so the memory clock stays at full speed
+   (P2, not P3): the cleanup request after key up is bound by memory bandwidth and would take
+   twice as long (docs/eval-results.md, "GPU clocks while the user speaks").
 2. **Focus capture.** On key down, Utter records the focused window, and the selection if
    there is one. Insertion goes to that window and nowhere else.
 3. **Streaming transcription while the key is held.** Silero marks pauses. Each finished
@@ -185,6 +186,7 @@ Measured on the development machine (RTX 3090 Ti). Each row has a trace span. p9
 | Key up → last segment transcribed | 60 ms | 120 ms |
 | (measured 2026-10-09, warm: parakeet-ultra on the eval clips) | 34 ms | 59 ms |
 | Key up → text inserted, gate skips the LLM | 120 ms | 250 ms |
+| (measured 2026-10-10: key up → text ready, all paths, AMI + VoxPopuli replayed live, light tier) | 40 ms | 236 ms (p95) |
 | Key up → text inserted, LLM cleanup of ~30 words | 400 ms | 800 ms |
 | (measured 2026-10-09: the cleanup request alone, Gemma 4 26B-A4B, real speech) | 136 ms | 253 ms |
 | Command Mode, rewrite of a short paragraph | 700 ms | 1.5 s |
@@ -394,6 +396,7 @@ utter/
 |---|---|---|
 | 2026-10-09 | Push-to-talk is Right Ctrl. The other shortcuts follow Wispr Flow's Windows defaults. | 4.1 |
 | 2026-10-09 | The Bar is hidden at idle and appears on the key press. | 8.1 |
+| 2026-10-10 | Hold the GPU's clocks up from key down to key up with a napping one-thread kernel (CUDA driver API, no component), stopped at key up. Key up to text: AMI p50 55 → 31 ms, VoxPopuli 74 → 50 ms. Costs about 157 W while the key is down, nothing at idle. | 4, docs/eval-results.md |
 | 2026-10-09 | Text goes into the app once, at the end. Live words show in the Bar. Revisit once it is in use. | 4.2 |
 | 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
 | 2026-10-09 | Languages: English and Vietnamese, with code-switching. Parakeet v3 alone no longer fits (no Vietnamese). | 6 |

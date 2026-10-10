@@ -1,0 +1,21 @@
+/* Design tokens. The Bar's values come from docs/ux/bar.md; change them there first. */
+:root {
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --dur-enter: 120ms;
+  --dur-exit: 160ms;
+  --dur-resize: 180ms;
+  --dur-check: 400ms;
+  --dur-word: 120ms;
+
+  --bar-bg: rgba(18, 18, 20, 0.92);
+  --bar-border: rgba(255, 255, 255, 0.08);
+  --bar-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --bar-wave: rgba(255, 255, 255, 0.92);
+  --bar-words: rgba(255, 255, 255, 0.86);
+  --bar-word-newest: rgba(255, 255, 255, 0.98);
+  --bar-hands-free: #ff453a;
+  --bar-error: #ffb340;
+
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+}
