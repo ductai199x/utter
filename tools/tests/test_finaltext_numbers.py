@@ -28,6 +28,17 @@ from eval.finaltext.numbers import spoken_digits
         ("six twenty five a m", "06:25"),
         ("sixteen point zero four", "16.04"),
         ("zero point five", "0.5"),
+        ("in the nineteen thirties", "in the 1930s"),
+        ("the nineties", "the '90s"),
+        ("nineteen oh five", "1905"),
+        ("room four oh one", "room 401"),
+        ("kubuntu sixteen point ten", "Kubuntu 16.10"),
+        ("sixteen point oh four", "16.04"),
+        ("zero point twenty five", "0.25"),
+        ("twenty point five", "20.5"),
+        ("emperor theodosius the second", "Emperor Theodosius II"),
+        ("world war two", "World War II"),
+        ("louis the fourteenth", "Louis XIV"),
     ],
 )
 def test_spoken_and_written_numbers_give_the_same_digits(spoken: str, written: str):
@@ -40,3 +51,7 @@ def test_a_misread_number_differs():
 
 def test_text_without_numbers_has_no_digits():
     assert spoken_digits("send it to the platform team") == ""
+
+
+def test_oh_outside_a_number_is_not_zero():
+    assert spoken_digits("oh, five more") == spoken_digits("oh, 5 more") == "5"
