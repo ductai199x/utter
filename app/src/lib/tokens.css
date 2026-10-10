@@ -19,5 +19,6 @@
   --bar-hands-free: #ff453a;
   --bar-error: #ffb340;
 
+  --bar-text-size: 14px;
   --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
 }

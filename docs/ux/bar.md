@@ -41,8 +41,8 @@ and it simply never shows. Showing then hiding a flash would be worse.
 - Width 124 with waveform only (16 bars plus 14 px padding each side). With words it grows to
   fit them on one line, up to 520. Past 520 the words wrap, as text does: the pill grows
   upward one line (20 px) at a time, its bottom edge fixed, up to 5 lines (120 px). Past 5
-  lines the oldest lines scroll off the top under a 16 px fade; the newest line is always
-  the bottom one.
+  lines the oldest scroll off the top: nothing shows in the top padding, and the oldest full
+  line fades in from 35%. The newest line is always the bottom one.
 - Waveform (and the Done check, and the error icon): in a 38 px box at the bottom left, so it
   sits beside the newest line. 16 bars, 3 wide, 3 apart (93 px), heights 3 to 22.
 - Words: 14 px on a 20 px line, 12 px to the right of the waveform, 16 px padding at the end,
