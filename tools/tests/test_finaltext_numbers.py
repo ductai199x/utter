@@ -25,6 +25,9 @@ from eval.finaltext.numbers import spoken_digits
         ("q three", "Q3"),
         ("nineteen", "19"),
         ("two four six", "2, 4, 6"),
+        ("six twenty five a m", "06:25"),
+        ("sixteen point zero four", "16.04"),
+        ("zero point five", "0.5"),
     ],
 )
 def test_spoken_and_written_numbers_give_the_same_digits(spoken: str, written: str):

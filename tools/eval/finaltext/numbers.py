@@ -101,14 +101,17 @@ class _Phrase:
         self.in_decimals = True
         self.decimals += "5"
 
-    def digits(self) -> str:
+    def groups(self) -> list[str]:
+        """The numbers read, in order; decimals are a group of their own."""
         self._flush_part()
-        whole = "".join(self.parts)
-        return whole + self.decimals
+        return self.parts + ([self.decimals] if self.decimals else [])
 
 
 def spoken_digits(text: str) -> str:
-    """Every digit the text says, in order, as one string."""
+    """Every number the text says, in order, as one string of digits (leading zeros of each
+    number dropped)."""
+    # Thousands separators join one number ("1,000"), not two.
+    text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
     toks = _TOKEN.findall(text.lower())
     out: list[str] = []
     phrase: _Phrase | None = None
@@ -118,7 +121,7 @@ def spoken_digits(text: str) -> str:
         nxt = toks[i + 1] if i + 1 < len(toks) else ""
         if t.isdigit():
             if phrase:
-                out.append(phrase.digits())
+                out.extend(phrase.groups())
                 phrase = None
             out.append(t)
         elif _is_number_word(t) or (t == "a" and nxt in _SCALES and phrase is None):
@@ -134,9 +137,10 @@ def spoken_digits(text: str) -> str:
             pass  # "one hundred and five"
         else:
             if phrase:
-                out.append(phrase.digits())
+                out.extend(phrase.groups())
                 phrase = None
         i += 1
     if phrase:
-        out.append(phrase.digits())
-    return "".join(out)
+        out.extend(phrase.groups())
+    # Leading zeros are not said ("06:25" -> "six twenty five"): drop them from every group.
+    return "".join(g.lstrip("0") or "0" for g in out)
