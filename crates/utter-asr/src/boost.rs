@@ -3,9 +3,11 @@
 //! arXiv 2508.07014, is the same idea for NeMo).
 //!
 //! The phrases become a tree over token sequences. At every decoding step, a token that
-//! continues a phrase matched so far, or starts a phrase at a word boundary, gets a bonus added
-//! to its log-probability; the blank (which decides timing) never does. The bonus grows with
-//! the depth of the match, so a phrase half-spoken is pulled through to its end.
+//! continues a phrase matched so far gets a bonus added to its log-probability, growing with the
+//! depth of the match so a phrase half-spoken is pulled through to its end; starting a phrase
+//! gets a smaller one (`start_score`). Whether a token is emitted at all stays the model's
+//! decision (the decoder compares blank with the unboosted scores): a bonus that beat blank
+//! would write words nobody said. Measured in docs/eval-results.md, "Phrase boosting".
 //!
 //! The model's vocabulary ships without piece scores, so the exact split SentencePiece would
 //! make is unknown. Every split of a phrase into vocabulary pieces goes into the tree instead
@@ -18,9 +20,14 @@ use crate::vocab::Vocab;
 /// How strongly phrases are boosted.
 #[derive(Debug, Clone, Copy)]
 pub struct BoostConfig {
-    /// Bonus, in log-probability, for a token that starts or continues a phrase.
+    /// Bonus, in log-probability, for a token that starts a phrase. Kept small: greedy decoding
+    /// cannot take a start back when the rest does not follow, and a phrase's first pieces are
+    /// often a common word's ("▁U" of "UMAP" turns "um" into "UM").
+    pub start_score: f32,
+    /// Bonus for a token that continues a phrase already started.
     pub score: f32,
-    /// Added per level of depth into a phrase, so the rest of a phrase is followed through.
+    /// Added per level of depth past the second token, so the rest of a phrase is followed
+    /// through.
     pub depth_bonus: f32,
     /// The most splits of one phrase into pieces kept in the tree.
     pub max_splits: usize,
@@ -28,7 +35,7 @@ pub struct BoostConfig {
 
 impl Default for BoostConfig {
     fn default() -> Self {
-        Self { score: 1.5, depth_bonus: 0.5, max_splits: 64 }
+        Self { start_score: 0.0, score: 1.5, depth_bonus: 0.5, max_splits: 64 }
     }
 }
 
@@ -93,8 +100,9 @@ impl PhraseBoost {
     /// for starting a phrase.
     pub fn bonus(&self, state: State, token: u32) -> f32 {
         let next = self.nodes[state.0].children.get(&token).or_else(|| self.nodes[0].children.get(&token));
-        match next {
-            Some(&n) => self.cfg.score + self.cfg.depth_bonus * (self.nodes[n].depth - 1) as f32,
+        match next.map(|&n| self.nodes[n].depth) {
+            Some(1) => self.cfg.start_score,
+            Some(depth) => self.cfg.score + self.cfg.depth_bonus * (depth - 2) as f32,
             None => 0.0,
         }
     }
@@ -192,11 +200,22 @@ mod tests {
         let b = PhraseBoost::new(&vocab(), &["SQL Sentry".to_owned()], BoostConfig::default()).unwrap();
         // "▁SQL" then "▁Sentry" or "▁Sent" "ry"; and "▁S" "QL" ...
         for start in [2, 0] {
-            assert!(b.bonus(State(0), start) > 0.0, "a phrase can start with token {start}");
+            assert_ne!(b.advance(State(0), start), State(0), "a phrase can start with token {start}");
         }
         let after_sql = b.advance(State(0), 2);
         assert!(b.bonus(after_sql, 7) > 0.0);
         assert!(b.bonus(after_sql, 3) > 0.0);
+    }
+
+    #[test]
+    fn starting_gets_the_start_score_and_continuing_more_with_depth() {
+        let cfg = BoostConfig { start_score: 0.25, ..BoostConfig::default() };
+        let b = PhraseBoost::new(&vocab(), &["SQL Sentry SQL".to_owned()], cfg).unwrap();
+        assert_eq!(b.bonus(State(0), 2), 0.25);
+        let s = b.advance(State(0), 2);
+        assert_eq!(b.bonus(s, 7), cfg.score);
+        let s = b.advance(s, 7);
+        assert_eq!(b.bonus(s, 2), cfg.score + cfg.depth_bonus);
     }
 
     #[test]
@@ -211,7 +230,8 @@ mod tests {
 
     #[test]
     fn the_blank_is_never_boosted() {
-        let b = PhraseBoost::new(&vocab(), &["SQL Sentry".to_owned()], BoostConfig::default()).unwrap();
+        let cfg = BoostConfig { start_score: 1.0, ..BoostConfig::default() };
+        let b = PhraseBoost::new(&vocab(), &["SQL Sentry".to_owned()], cfg).unwrap();
         let mut logp = vec![-5.0f32; 9];
         b.apply(State(0), &mut logp, 8);
         assert_eq!(logp[8], -5.0);
