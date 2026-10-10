@@ -213,14 +213,12 @@ Each recipe ships with its eval kind first (scored against current models), then
 Every model is scored on all kinds, so a gain in one never hides a regression in another (FT2's
 lesson).
 
-## Decisions for Tai
+## Decisions (Tai, 2026-10-10)
 
-1. **Email greetings and sign-offs:** add them when not spoken (Wispr, Superwhisper, Willow), or
-   only format what was said (VoiceInk)? Proposed: format only what was said. Utter never adds
-   words.
-2. **Trailing period in chat apps:** Wispr drops it in messaging apps. Proposed: keep periods in
-   v1; per-app Styles later.
-3. **Speak & Improve:** sign the non-commercial research agreement so it can be the real
-   non-native grammar test (local only)?
-4. **Recording a real test set:** about 100 of your own dictations across these use cases, read
-   from prompts I prepare, plus any friends willing (non-native speakers especially).
+1. **Email greetings and sign-offs, and trailing periods in chat:** not needed yet. Deferred
+   with per-app Styles. Until then, Utter formats only what was said and keeps periods.
+2. **Speak & Improve:** not used for now; it must not hold anything up.
+3. **Non-native accents:** next iteration. Tai's accent is not the problem today. Grammar repair
+   (R2) still covers broken English in the words themselves.
+4. **Real test set:** Tai records a few dictations, not 100. Prompts are prepared so that each
+   recording covers several use cases at once.
