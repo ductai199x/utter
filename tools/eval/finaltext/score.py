@@ -140,7 +140,7 @@ def _canonical(text: str) -> str:
     return "\n".join(lines)
 
 
-def _edit_distance(a: str, b: str) -> int:
+def edit_distance(a: str, b: str) -> int:
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, 1):
         cur = [i]
@@ -189,7 +189,7 @@ def score(
     English normalizer unless given)."""
     ref_c, hyp_c = _canonical(reference), _canonical(hypothesis)
     exact = ref_c == hyp_c
-    chars = _edit_distance(ref_c, hyp_c) / max(1, len(ref_c))
+    chars = edit_distance(ref_c, hyp_c) / max(1, len(ref_c))
 
     nr, nh = normalize(reference).split(), normalize(hypothesis).split()
     s = d = ins = 0

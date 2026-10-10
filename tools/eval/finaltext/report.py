@@ -162,12 +162,30 @@ def score_cmd(
     eval_set: str = typer.Option(..., "--set"),
     asr_name: str = typer.Option(..., "--asr"),
     cleanup_names: list[str] = typer.Option([], "--cleanup"),
-    clean_only: bool = typer.Option(
-        True, help="Only passages the gold screen passed, if screened."
+    gold: str = typer.Option(
+        "fixed",
+        help="fixed: the gold-fixed passages (eval.finaltext.goldfix), dropping those it "
+        "dropped; screened: passages the screen did not flag; all: every passage as extracted.",
     ),
 ) -> None:
     rows = _manifest(eval_set)
-    screen_path = eval_dir() / "finaltext" / "screen-eval.jsonl"
+    root = eval_dir() / "finaltext"
+    if gold == "fixed":
+        fixed_path = root / "passages-eval.jsonl"
+        if not (root / "passages-eval.raw.jsonl").exists():
+            raise typer.BadParameter(
+                "eval passages are not gold-fixed yet: run eval.finaltext.goldfix"
+            )
+        fixed = {p["id"]: p["text"] for p in _rows(fixed_path)}
+        before = len(rows)
+        rows = [
+            {**r, "gold": fixed[pid]} for r in rows if (pid := r["id"].rsplit("-", 1)[0]) in fixed
+        ]
+        console.print(
+            f"{len(rows)} dictations scored against fixed gold; {before - len(rows)} dropped"
+        )
+    screen_path = root / "screen-eval.jsonl"
+    clean_only = gold == "screened"
     if clean_only and screen_path.exists():
         # A passage is excluded only for gold problems the screen judges reliably enough; its
         # punctuation opinions are too noisy to exclude on (2026-10-10: 259 of 445 flags, many
@@ -212,7 +230,7 @@ def score_cmd(
         summary[system] = {k: t.row() for k, t in sorted(groups.items())}
         summary[system]["all"]["latency"] = latency[system]
 
-    view = "screened" if clean_only else "all"
+    view = gold
     out = eval_dir() / "results" / "finaltext" / f"{eval_set}--{asr_name}--{view}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
