@@ -475,6 +475,7 @@ def main(
     model: str = "gemma4-26b-a4b-qat",
     slots: int = 6,
     limit: int = 0,
+    sample: int = typer.Option(0, help="Render a random N of the passages (0: all)."),
     kinds: list[str] = typer.Option(list(KINDS), "--kind", help="Kinds to render (repeatable)."),
     out_name: str = typer.Option("", help="Renditions file stem (default: renditions-<split>)."),
     llm_url: str = typer.Option(
@@ -494,6 +495,9 @@ def main(
     ]
     if limit:
         passages = passages[:limit]
+    if sample and sample < len(passages):
+        # A random share, the same every run (resumable): passage files are grouped by domain.
+        passages = random.Random(f"sample:{split}").sample(passages, sample)
     out = root / f"{out_name or f'renditions-{split}'}.jsonl"
     done: set[tuple[str, str]] = set()
     if out.exists():
