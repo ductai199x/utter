@@ -6,6 +6,8 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "kokoro>=0.9.4",
     "misaki[en]>=0.9.4",
+    # misaki loads this spaCy model and pip-installs it at run time if missing; pinned here instead.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
     "soundfile>=0.12",
     "soxr>=0.5",
     "torch>=2.8",
