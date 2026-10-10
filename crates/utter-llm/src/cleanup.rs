@@ -11,6 +11,11 @@ use crate::{LlmError, Message, ServerOptions};
 /// The cleanup system prompt.
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
 
+/// The system prompt the fine-tuned cleanup model is trained with (tools/train,
+/// eval.finaltext.trainset --system): short, since the rules are in its weights. That model
+/// must be sent exactly this.
+pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
+
 /// Which cleanup model runs. Both are Google's Gemma 4 QAT 4-bit builds, chosen by measurement
 /// (docs/eval-results.md); both run with [`SERVER_ARGS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
