@@ -6,6 +6,51 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-10: ft2, and voices it never heard
+
+**ft2:**
+- Same recipe as ft1, with 18,183 pairs: the corrected "scratch that" data and 2.7× more.
+- Trained data-parallel on FLAME's 4 A6000s in 39 minutes (1.05 s per step, 2.9× one GPU).
+- The held-out loss, now on whole held-out passages, rose throughout training (0.185 → 0.36)
+  while the training loss fell to 0.03. The model memorizes passages it has seen in six
+  renditions. Even so, the real eval improved, so the real eval decides, and ft4 uses one
+  rendition per passage.
+
+**Test sets:**
+- **Kokoro:** the usual eval, with answer keys now fixed for grammar (goldfix --grammar, 240 of
+  892 passages).
+- **Chatterbox:** the same dictations spoken by Chatterbox, cloning donated voices that no
+  training data uses, recognized by Parakeet.
+
+Each cell gives no edit needed / characters to fix / word error:
+
+| | E4B v3 (product) | 26B v4 | **ft2** |
+|---|---|---|---|
+| Kokoro (4309) | 7.2 / 18.0 / 14.3% | 11.3 / 7.7 / 6.6% | **16.5 / 4.3 / 3.8%** |
+| Chatterbox, unseen voices (4309) | 6.8 / 19.0 / 16.0% | 10.6 / 8.8 / 8.3% | **13.8 / 5.6 / 5.6%** |
+
+On Chatterbox:
+
+| | E4B v3 | 26B v4 | **ft2** |
+|---|---|---|---|
+| comma F1 | 0.66 | 0.70 | **0.74** |
+| parentheses F1 | 0.13 | 0.36 | **0.57** |
+| exact brackets / symbols / numbers / terms | 5 / 24 / 66 / 55% | 15 / 44 / 67 / 70% | **32 / 53 / 76 / 72%** |
+
+What this says:
+- **The gains are not a Kokoro artifact.** Every system loses a little on Chatterbox, because
+  Parakeet itself does worse on those voices (27.6% vs 25.8% characters to fix on its own). The
+  ranking and the margins stay.
+- **ft2 has gaps the eval did not measure until now:**
+  - lists: it writes them inline;
+  - grammar: it keeps the speaker's mistakes, where the product's prompt fixes them;
+  - far-back edits.
+
+  Tai set both behaviors on by default (docs/cleanup-spec.md, rules 4 and 8), so ft4 trains them
+  and the eval gains grammar, list and amend sets (docs/plan-use-cases.md).
+
+---
+
 ## 2026-10-10: fine-tuning the cleanup model (ft1)
 
 **Model:** a LoRA on Gemma 4 E4B (Google's unquantized QAT checkpoint), exported to the same
