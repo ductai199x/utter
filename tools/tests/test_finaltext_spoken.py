@@ -101,3 +101,10 @@ def test_disfluencies_keep_every_passage_word_in_order():
     assert words_in_order(passage, s.text, min_ratio=1.0)
     assert s.tags["false_start"] == "1"
     assert words_in_order("send out the ship the new build", s.text, min_ratio=1.0)
+
+
+def test_jobs_go_passage_by_passage_and_skip_what_is_done():
+    from eval.finaltext.spoken import jobs_for
+
+    jobs = jobs_for([("a", "A."), ("b", "B.")], ["natural", "explicit"], done={("a", "natural")})
+    assert jobs == [("a", "A.", "explicit"), ("b", "B.", "natural"), ("b", "B.", "explicit")]
