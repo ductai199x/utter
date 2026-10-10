@@ -30,7 +30,7 @@ pub enum AsrError {
 }
 
 /// The runtime component holding the English speech model (crates/utter-runtime/components.json).
-pub const MODEL_COMPONENT: &str = "parakeet-ultra-onnx";
+pub const MODEL_COMPONENT: &str = "parakeet-ultra-onnx-fp16";
 
 /// The installed speech model's folder, or an error naming how to install it.
 pub fn installed_model_dir() -> Result<PathBuf, AsrError> {

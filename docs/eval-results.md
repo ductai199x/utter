@@ -6,6 +6,46 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-09: a 5 GB footprint (tiers)
+
+Tai: the quality setup (about 21 GB of GPU memory, 18 GB to download) is far too heavy; aim for
+about 5 GB, with the heavy model as an option. Measured with `nvidia-smi`, above the idle
+desktop (2.8 GB), each model under load:
+
+| Piece | GPU memory | Notes |
+|---|---|---|
+| Speech model, encoder float32 | 2.3 GB | 2.4 GB weights file |
+| **Speech model, encoder float16** | **2.3 GB** | 1.2 GB file; WER the same as the reference (-0.02 points, within noise); encoder 18-21 ms p50, a little faster |
+| Speech model, encoder weights 8-bit (MatMulNBits) | 1.9 GB | WER the same; encoder about 26 ms, 6-7 ms slower (weights unpacked every pass) |
+| Speech model, encoder weights 4-bit | 1.6 GB | +0.08 WER points (not significant, worse in 90% of resamples) |
+| **Gemma 4 E4B (llama-server, 4096 context)** | **3.3 GB** | its 2.7 GB of per-layer embeddings stay in system RAM (llama.cpp's default) |
+| Gemma 4 E4B, 2048 context | 3.2 GB | no latency change; Tai kept 4096 |
+| Gemma 4 26B-A4B | about 15 GB | |
+
+The speech model's footprint does not depend on clip length (2.3 GB for 3 s and 25 s clips):
+about 1.1 GB above its weights is fixed per-process cost (CUDA context, cuBLAS, cuDNN).
+Tried and dropped: onnxruntime's memory pool growing by exact requests (3.1 GB: blocks of
+every new length fragment) and weights outside the pool (2.4 GB).
+
+Tai chose the float16 encoder over 8-bit weights: 0.4 GB more for about 7 ms less.
+
+### Prompt v3
+
+Two examples added (grammar and slang kept; a correction with "I mean"), new sentences, not
+copies of test cases. Gemma 4 E4B: checks 96% -> **97%** (fillers and clean text 100%), real-speech
+added words 20.0% -> 15.5%, 124 ms p50. Gemma 4 26B-A4B: 99% unchanged, added words 9.1% -> 8.1%.
+
+### Decision
+
+- **Light tier, the default: speech encoder float16 + Gemma 4 E4B. About 5.6 GB of GPU memory,
+  97% of the cleanup checks, 124 ms p50 cleanup on real speech; loads in 2.5 s.**
+- Quality tier, optional: Gemma 4 26B-A4B (about 15 GB more, 99%, 137 ms).
+
+Components: `parakeet-ultra-onnx-fp16` (Hugging Face `ductai199x/utter-parakeet-ultra-onnx`,
+`fp16/`), `gemma4-e4b-qat` (Google's repo), and `gemma4-26b-a4b-qat` marked optional.
+
+---
+
 ## 2026-10-09: cleanup model
 
 ### Method

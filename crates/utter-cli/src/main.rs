@@ -65,6 +65,21 @@ impl From<ConvSearchArg> for ConvSearch {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
+enum TierArg {
+    Light,
+    Quality,
+}
+
+impl From<TierArg> for utter_llm::cleanup::Tier {
+    fn from(t: TierArg) -> Self {
+        match t {
+            TierArg::Light => Self::Light,
+            TierArg::Quality => Self::Quality,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
 enum DeviceArg {
     Cuda,
     Cpu,
@@ -83,7 +98,8 @@ impl From<DeviceArg> for Device {
 enum Command {
     /// Download, verify and install Utter's runtime components (crates/utter-runtime/components.json).
     Setup {
-        /// Only these components (default: all).
+        /// Only these components (default: every component that is not optional; name an
+        /// optional one, such as gemma4-26b-a4b-qat, to install it).
         ids: Vec<String>,
     },
     /// Show which runtime components and models are installed.
@@ -118,6 +134,9 @@ enum Command {
         /// Dictionary words, comma-separated.
         #[arg(long, default_value = "")]
         dictionary: String,
+        /// Which cleanup model.
+        #[arg(long, value_enum, default_value_t = TierArg::Light)]
+        tier: TierArg,
     },
     /// Start Utter's llama-server on a GGUF model and send one chat message.
     Chat {
@@ -189,7 +208,7 @@ fn main() -> Result<()> {
         Command::Setup { ids } => return setup(ids),
         Command::Doctor => return doctor(),
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
-        Command::Clean { text, dictionary } => return clean(&text.join(" "), dictionary),
+        Command::Clean { text, dictionary, tier } => return clean(&text.join(" "), dictionary, (*tier).into()),
         Command::LlmBench { gguf, cases, name, server_args, limit, prefill_fraction } => {
             return llm_bench(gguf, cases, name, server_args, *limit, *prefill_fraction);
         }
@@ -224,14 +243,14 @@ fn main() -> Result<()> {
     }
 }
 
-fn clean(text: &str, dictionary: &str) -> Result<()> {
+fn clean(text: &str, dictionary: &str, tier: utter_llm::cleanup::Tier) -> Result<()> {
     use utter_llm::{ChatParams, LlamaServer, cleanup};
 
     let dictionary: Vec<String> =
         dictionary.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect();
     let start = std::time::Instant::now();
-    let server = LlamaServer::start(&cleanup::server_options()?).context("starting the cleanup model")?;
-    println!("cleanup model ready in {:.1} s", start.elapsed().as_secs_f64());
+    let server = LlamaServer::start(&cleanup::server_options(tier)?).context("starting the cleanup model")?;
+    println!("cleanup model ({tier:?}) ready in {:.1} s", start.elapsed().as_secs_f64());
     let params = ChatParams { max_tokens: (text.len() as u32 / 2).max(64), ..ChatParams::default() };
     for round in ["cold", "warm"] {
         let out = server.chat(&cleanup::messages(text, &dictionary), &params)?;
@@ -371,7 +390,7 @@ fn llm_bench(
 
 fn setup(ids: &[String]) -> Result<()> {
     let chosen: Vec<&utter_runtime::Component> = if ids.is_empty() {
-        utter_runtime::components().iter().collect()
+        utter_runtime::components().iter().filter(|c| !c.optional).collect()
     } else {
         ids.iter().map(|id| utter_runtime::component(id)).collect::<Result<_, _>>()?
     };
@@ -405,9 +424,13 @@ fn doctor() -> Result<()> {
     println!("Data folder: {}", utter_core::data_dir().display());
     println!("Runtime components:");
     for c in utter_runtime::components() {
-        let state = if c.is_installed() { "installed" } else { "MISSING (utter-cli setup)" };
+        let state = match (c.is_installed(), c.optional) {
+            (true, _) => "installed".to_owned(),
+            (false, true) => format!("optional (utter-cli setup {})", c.id),
+            (false, false) => "MISSING (utter-cli setup)".to_owned(),
+        };
         println!(
-            "  {:<20} {:<12} {:>8.0} MB  {state}  -- {}",
+            "  {:<26} {:<10} {:>7.0} MB  {state}  -- {}",
             c.id,
             c.version,
             c.download_size() as f64 / 1e6,

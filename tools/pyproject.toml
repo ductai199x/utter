@@ -42,6 +42,8 @@ models = [
     "moondream>=2.6",
     # Exporting models to the ONNX graphs the Rust core runs (tools/export).
     "onnx>=1.23",
+    # onnxruntime's weight-only quantizer (MatMulNBits) needs it.
+    "onnx-ir>=0.1",
 ]
 
 [tool.uv]
