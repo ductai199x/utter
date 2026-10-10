@@ -225,7 +225,9 @@ On first run, models are downloaded with size and SHA-256 checks, the same as Si
 VRAM use is shown in Settings.
 
 Off-the-shelf models come first (Tai, 2026-10-09). A fine-tuned cleanup model is considered
-only when the eval set shows where they fail.
+only when the eval set shows where they fail. It did (2026-10-10): the light tier is now Gemma 4
+E4B fine-tuned for cleanup (huggingface.co/ductai199x/utter-cleanup-e4b), better than the
+prompted 26B on every final-text eval; Parakeet is never fine-tuned.
 
 ---
 
@@ -410,3 +412,4 @@ utter/
 | 2026-10-09 | The recognizer runs in the Rust core: encoder on the GPU (convolutions rewritten for fixed shapes), decoder on the CPU. Same accuracy as Transformers, 34 ms p50 warm. The pipeline warms the GPU on key down. | 4, docs/eval-results.md |
 | 2026-10-09 | English speech recognition: parakeet-ultra weights (CC-BY-4.0) in Utter's own ONNX runtime. Ties the most accurate open model at a fraction of its latency; never Moondream's Photon engine, which sends telemetry. Vietnamese candidates: Qwen3-ASR-1.7B, Cohere. Evidence: docs/eval-results.md. | 6 |
 | 2026-10-09 | English first. If no model does English and Vietnamese both well, v1 ships the best English model; Vietnamese follows (a second, routed model or a later single one). Tai's English is a standard American accent. | 6 |
+| 2026-10-10 | The light-tier cleanup model is Gemma 4 E4B fine-tuned on Utter's final-text data (ft4: LoRA, Q4_0, the 28-word prompt crates/utter-llm/prompts/cleanup-ft.md), installed as the pinned component utter-cleanup-e4b. On every eval set it beats the prompted E4B and the prompted 26B (main 18.5% no edit needed vs 7.2% and 11.3%; lists 45.9% vs 2.7% and 3.2%), at the E4B's size and speed. The prompted E4B stays as an optional component for evals. | 6, docs/eval-results.md |
