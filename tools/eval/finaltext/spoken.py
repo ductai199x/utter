@@ -23,6 +23,7 @@ import json
 import random
 import re
 from collections.abc import Iterable
+from collections.abc import Set as AbstractSet
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 
@@ -362,6 +363,19 @@ class Rendition:
     attempt: int
 
 
+def jobs_for(
+    passages: Iterable[tuple[str, str]],
+    kinds: Iterable[str],
+    done: AbstractSet[tuple[str, str]] = frozenset(),
+) -> list[tuple[str, str, str]]:
+    """(passage id, text, kind) still to render, passage by passage: a run stopped partway
+    leaves every kind equally covered, not the first kinds only."""
+    kinds = list(kinds)
+    return [
+        (pid, text, kind) for pid, text in passages for kind in kinds if (pid, kind) not in done
+    ]
+
+
 def render(
     llm,
     passages: Iterable[tuple[str, str]],
@@ -369,10 +383,11 @@ def render(
     tries: int = 3,
     workers: int = 4,
     seed: int = 0,
+    done: AbstractSet[tuple[str, str]] = frozenset(),
 ):
-    """Yields (passage_id, kind, Rendition | None, rejections) for every passage and kind.
-    `llm` is an eval.finaltext.llm.Server."""
-    jobs = [(pid, text, kind) for pid, text in passages for kind in kinds]
+    """Yields (passage_id, kind, Rendition | None, rejections) for every passage and kind not
+    already `done`. `llm` is an eval.finaltext.llm.Server."""
+    jobs = jobs_for(passages, kinds, done)
 
     def one(job: tuple[str, str, str]):
         pid, text, kind = job
@@ -439,18 +454,17 @@ def main(
             done.add((r["passage_id"], r["kind"]))
     failed = kept = 0
     with Server(model_path(model), slots=slots) as llm, out.open("a", encoding="utf-8") as fh:
-        for kind in kinds:
-            todo = [(p["id"], p["text"]) for p in passages if (p["id"], kind) not in done]
-            for pid, _, r, rejections in render(llm, todo, kinds=[kind], workers=slots):
-                if r is None:
-                    failed += 1
-                    print(f"{pid} {kind}: no rendition passed ({rejections})", flush=True)
-                    continue
-                fh.write(to_json(r) + "\n")
-                fh.flush()
-                kept += 1
-                if kept % 100 == 0:
-                    print(f"{kept} kept, {failed} failed", flush=True)
+        todo = [(p["id"], p["text"]) for p in passages]
+        for pid, kind, r, rejections in render(llm, todo, kinds=kinds, workers=slots, done=done):
+            if r is None:
+                failed += 1
+                print(f"{pid} {kind}: no rendition passed ({rejections})", flush=True)
+                continue
+            fh.write(to_json(r) + "\n")
+            fh.flush()
+            kept += 1
+            if kept % 100 == 0:
+                print(f"{kept} kept, {failed} failed", flush=True)
     print(f"done: {kept} kept, {failed} failed -> {out}")
 
 
