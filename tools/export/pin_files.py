@@ -33,7 +33,8 @@ def main(
             sha, size = f.lfs.sha256, f.lfs.size
         else:
             local = hf_hub_download(repo, f.path, revision=revision)
-            data = open(local, "rb").read()
+            with open(local, "rb") as fh:
+                data = fh.read()
             sha, size = hashlib.sha256(data).hexdigest(), len(data)
         url = f"https://huggingface.co/{repo}/resolve/{revision}/{f.path}"
         out.append({"name": name, "url": url, "sha256": sha, "size": size})
