@@ -65,6 +65,7 @@ def cleanup(
     asr_name: str = typer.Option(..., "--asr"),
     name: str = typer.Option(...),
     model: str = "gemma4-e4b-qat",
+    prompt: Path | None = typer.Option(None, help="A system prompt file instead of the product's."),
 ) -> None:
     from eval.finaltext.llm import model_path
 
@@ -89,6 +90,8 @@ def cleanup(
         str(case_file),
     ]
     cmd += [f"--server-arg={a}" for a in PRODUCT_SERVER_ARGS]
+    if prompt is not None:
+        cmd += ["--prompt", str(prompt.resolve())]
     subprocess.run(cmd, check=True)
 
 
