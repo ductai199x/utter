@@ -24,6 +24,11 @@ impl Vocab {
         Self { pieces }
     }
 
+    /// Piece text to id, for spelling phrases in the model's pieces.
+    pub fn piece_index(&self) -> std::collections::HashMap<&str, u32> {
+        self.pieces.iter().enumerate().map(|(i, p)| (p.as_str(), i as u32)).collect()
+    }
+
     /// Joins the pieces and turns each "▁" into a space, trimming the ends. Checked against
     /// Transformers' decode on the eval clips (`tools/export/check_parakeet.py`).
     pub fn decode(&self, ids: &[u32]) -> String {

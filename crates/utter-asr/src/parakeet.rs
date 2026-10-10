@@ -19,6 +19,7 @@ use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::value::{Tensor, TensorRef};
 
+use crate::boost::{BoostConfig, PhraseBoost, State};
 use crate::frontend::MelFrontEnd;
 use crate::{AsrError, ModelConfig, Vocab};
 
@@ -106,6 +107,8 @@ pub struct ParakeetTdt {
     step: Option<Session>,
     /// Width of the projected encoder frames and the decoder output (they are added).
     hidden: usize,
+    /// The dictionary's phrase boost, when there is a dictionary (see `crate::boost`).
+    boost: Option<PhraseBoost>,
 }
 
 impl ParakeetTdt {
@@ -123,7 +126,18 @@ impl ParakeetTdt {
         };
         let hidden = cfg.decoder_hidden;
         tracing::info!(dir = %dir.display(), ?opts, "parakeet loaded");
-        Ok(Self { cfg, frontend, vocab, encoder, decoder, joint, step, hidden })
+        Ok(Self { cfg, frontend, vocab, encoder, decoder, joint, step, hidden, boost: None })
+    }
+
+    /// Boosts these phrases (the user's dictionary) in every transcription from now on; an
+    /// empty list turns boosting off. Returns how many phrases could be spelled in the model's
+    /// pieces. Boosting needs per-frame token scores, so it decodes frame by frame (the fused
+    /// GPU step reports only the winning tokens).
+    pub fn set_phrases(&mut self, phrases: &[String], cfg: BoostConfig) -> usize {
+        let (boost, usable) = PhraseBoost::build(&self.vocab, phrases, cfg);
+        self.boost = boost;
+        tracing::info!(phrases = phrases.len(), usable, "phrase boost set");
+        usable
     }
 
     /// Transcribes one clip of 16 kHz mono samples.
@@ -155,7 +169,7 @@ impl ParakeetTdt {
         t.encoder_frames = encoded.len() / self.hidden;
 
         let start = Instant::now();
-        let tokens = if self.step.is_some() {
+        let tokens = if self.step.is_some() && self.boost.is_none() {
             self.greedy_batched(encoded, &mut t)?
         } else {
             self.greedy_per_frame(&encoded, &mut t)?
@@ -255,6 +269,8 @@ impl ParakeetTdt {
 
         let mut tokens = Vec::new();
         let (mut frame, mut emitted) = (0usize, 0usize);
+        let mut boost_state = State::default();
+        let mut scores = vec![0.0f32; vocab_size];
         while frame < frames {
             let enc = &encoded[frame * self.hidden..(frame + 1) * self.hidden];
             let (token, step) = {
@@ -262,10 +278,22 @@ impl ParakeetTdt {
                 let d = TensorRef::from_array_view(([1usize, self.hidden], &dec[..]))?;
                 let outputs = self.joint.run(ort::inputs!["encoded" => enc, "decoded" => d])?;
                 let (_, logits) = outputs["logits"].try_extract_tensor::<f32>()?;
-                (argmax(&logits[..vocab_size]), self.cfg.durations[argmax(&logits[vocab_size..])])
+                let token = match &self.boost {
+                    // Boosted: log-probabilities plus the phrase bonus (never on blank).
+                    Some(boost) => {
+                        log_softmax(&logits[..vocab_size], &mut scores);
+                        boost.apply(boost_state, &mut scores, blank);
+                        argmax(&scores)
+                    }
+                    None => argmax(&logits[..vocab_size]),
+                };
+                (token, self.cfg.durations[argmax(&logits[vocab_size..])])
             };
             t.joint_calls += 1;
             if token != blank {
+                if let Some(boost) = &self.boost {
+                    boost_state = boost.advance(boost_state, token as u32);
+                }
                 tokens.push(token as u32);
                 emitted += 1;
                 dec = self.decoder_step(token as i64, &mut h, &mut c)?;
@@ -337,9 +365,27 @@ fn argmax(values: &[f32]) -> usize {
     best
 }
 
+/// `out[i] = logits[i] - log(sum(exp(logits)))`, computed stably.
+fn log_softmax(logits: &[f32], out: &mut [f32]) {
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let log_sum = logits.iter().map(|&x| (x - max).exp()).sum::<f32>().ln() + max;
+    for (o, &x) in out.iter_mut().zip(logits) {
+        *o = x - log_sum;
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::argmax;
+    use super::{argmax, log_softmax};
+
+    #[test]
+    fn log_softmax_is_normalized_and_keeps_the_order() {
+        let mut out = [0.0f32; 3];
+        log_softmax(&[1.0, 3.0, 2.0], &mut out);
+        let total: f32 = out.iter().map(|x| x.exp()).sum();
+        assert!((total - 1.0).abs() < 1e-5);
+        assert_eq!(argmax(&out), 1);
+    }
 
     #[test]
     fn argmax_takes_the_first_of_equal_maxima() {
