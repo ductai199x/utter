@@ -1,8 +1,10 @@
 import random
 
 from eval.finaltext.spoken import (
+    COMMANDS,
     SCOPES,
     check,
+    command_script,
     correction_script,
     disfluent_script,
     same_numbers,
@@ -61,6 +63,26 @@ def rng_asking_for(scope: str) -> random.Random:
     """A generator whose first scope choice is `scope`."""
     seed = next(s for s in range(1000) if random.Random(s).choice(SCOPES) == scope)
     return random.Random(seed)
+
+
+def rng_choosing(command: str) -> random.Random:
+    """A generator whose first command choice is `command`."""
+    seed = next(s for s in range(1000) if random.Random(s).choice(COMMANDS) == command)
+    return random.Random(seed)
+
+
+def test_scratch_that_follows_a_single_sentence():
+    llm = FakeLLM('{"false_start": "The build is broken. We should roll back."}')
+    s = command_script("Ship it on Friday.", rng_choosing("scratch that"), llm, seed=0)
+    assert s is not None
+    assert s.text == "We should roll back. Scratch that. Ship it on Friday."
+
+
+def test_start_over_keeps_the_whole_false_start():
+    llm = FakeLLM('{"false_start": "The build is broken. We should roll back."}')
+    s = command_script("Ship it on Friday.", rng_choosing("start over"), llm, seed=0)
+    assert s is not None
+    assert s.text == "The build is broken. We should roll back. Start over. Ship it on Friday."
 
 
 def test_a_correction_always_ends_on_the_passage_words():

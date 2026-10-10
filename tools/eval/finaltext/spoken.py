@@ -91,6 +91,8 @@ COMMANDS = (
     "let's try that from the beginning",
     "start over",
 )
+# Commands that retract the last sentence; the others retract everything said so far.
+SENTENCE_COMMANDS = ("scratch that", "delete that")
 
 _PROPOSE_CORRECTION = """You help build test data for a dictation app. Given a written passage,
 propose one realistic self-correction a speaker might make while dictating it: they first say
@@ -257,6 +259,10 @@ def command_script(passage: str, rng: random.Random, llm, seed: int) -> Script |
     if not start:
         return None
     command = rng.choice(COMMANDS)
+    if command in SENTENCE_COMMANDS:
+        # These retract the sentence before them, not everything (docs/cleanup-spec.md): a
+        # longer false start would be partly kept, and the passage would not be the gold.
+        start = re.split(r"(?<=[.!?])\s+", start)[-1]
     start = start.rstrip(".!?") + "."
     return Script(
         "command",
