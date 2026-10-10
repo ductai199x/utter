@@ -96,7 +96,10 @@ Return JSON with:
   number for "word", a few words for "phrase", one whole sentence for "sentence";
 - "wrong": what the speaker says first instead of the anchor: same kind of thing, plausible in
   context, clearly different (a different number, name, day, word or sentence).
-Choose the scope yourself; prefer numbers, names, times and key words for "word"."""
+Use the scope you are given; for "word", prefer numbers, names, times and key words."""
+
+# How often each correction scope is asked for. Left to itself the LLM never chose "sentence".
+SCOPES = ("word", "word", "word", "phrase", "phrase", "sentence", "sentence")
 
 _PROPOSE_FALSE_START = """You help build test data for a dictation app. Given a written passage,
 write a plausible false start: one or two short sentences on the same topic that a speaker might
@@ -139,11 +142,12 @@ class Script:
     tags: dict[str, str] = field(default_factory=dict)
 
 
-def _ask(llm, system: str, passage: str, schema: dict, seed: int) -> dict:
+def _ask(llm, system: str, passage: str, schema: dict, seed: int, note: str = "") -> dict:
+    user = f"Passage:\n{passage}" + (f"\n\n{note}" if note else "")
     out = llm.chat(
         [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"Passage:\n{passage}"},
+            {"role": "user", "content": user},
         ],
         max_tokens=400,
         temperature=0.9,
@@ -201,14 +205,26 @@ def disfluent_script(passage: str, rng: random.Random, llm, seed: int) -> Script
 
 
 def correction_script(passage: str, rng: random.Random, llm, seed: int) -> Script | None:
+    want = rng.choice(SCOPES)
     try:
-        p = _ask(llm, _PROPOSE_CORRECTION, passage, _CORRECTION_SCHEMA, seed)
+        p = _ask(llm, _PROPOSE_CORRECTION, passage, _CORRECTION_SCHEMA, seed, note=f"Scope: {want}")
     except (ValueError, KeyError):
         return None
     scope, anchor, wrong = p["scope"], p["anchor"].strip(), p["wrong"].strip()
-    if not anchor or not wrong or passage.count(anchor) != 1 or wrong.lower() == anchor.lower():
+    if (
+        scope != want
+        or not anchor
+        or not wrong
+        or passage.count(anchor) != 1
+        or wrong.lower() == anchor.lower()
+    ):
         return None
     idx = passage.index(anchor)
+    # A sentence-scope anchor must be a whole sentence of the passage.
+    if scope == "sentence" and not (
+        anchor[-1] in ".!?" and (idx == 0 or passage[:idx].rstrip()[-1:] in ".!?")
+    ):
+        return None
     if scope == "sentence":
         cue = rng.choice(SENTENCE_CUES)
         wrong = wrong.rstrip(".!?") + "."
