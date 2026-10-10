@@ -397,6 +397,8 @@ utter/
 |---|---|---|
 | 2026-10-09 | Push-to-talk is Right Ctrl. The other shortcuts follow Wispr Flow's Windows defaults. | 4.1 |
 | 2026-10-09 | The Bar is hidden at idle and appears on the key press. | 8.1 |
+| 2026-10-10 | The Bar shows the text as it will be typed, live: at every pause the dictation so far is cleaned and shown, the words heard since are provisional (dimmed), and the paste is exactly the last cleaned text. Every dictation is cleaned (the keyword gate is only logged). Overrides "live words show raw" (Tai's first live test). | 4.2, docs/plan-final-text.md, docs/ux/bar.md |
+| 2026-10-10 | Cleanup is judged on an eval built from real written text (5 registers), spoken by an LLM in 5 kinds (natural, explicit, disfluent, correction, command) with gold known by construction, synthesized by TTS and recognized by Parakeet; never on hand-written examples. Fine-tuning the cleanup model is the expected path (Wispr does; the literature supports it). | 6, 12, docs/plan-final-text.md, docs/research/2026-10-10-final-text.md |
 | 2026-10-10 | Hold the GPU's clocks up from key down to key up with a napping one-thread kernel (CUDA driver API, no component), stopped at key up. Key up to text: AMI p50 55 → 31 ms, VoxPopuli 74 → 50 ms. Costs about 157 W while the key is down, nothing at idle. | 4, docs/eval-results.md |
 | 2026-10-09 | Text goes into the app once, at the end. Live words show in the Bar. Revisit once it is in use. | 4.2 |
 | 2026-10-09 | Off-the-shelf models first, measured on our own bench. Candidates come from a live survey, never from memory. | 6 |
