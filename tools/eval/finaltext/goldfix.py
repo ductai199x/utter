@@ -125,14 +125,18 @@ def main(
     with server as llm:
 
         def one(p: dict) -> tuple[dict, Outcome]:
-            reply = json.loads(
-                llm.chat(
-                    [{"role": "system", "content": SYSTEM}, {"role": "user", "content": p["text"]}],
-                    max_tokens=400,
-                    temperature=0.0,
-                    json_schema=SCHEMA,
-                )
+            out = llm.chat(
+                [{"role": "system", "content": SYSTEM}, {"role": "user", "content": p["text"]}],
+                max_tokens=1024,
+                temperature=0.0,
+                json_schema=SCHEMA,
             )
+            try:
+                reply = json.loads(out)
+            except json.JSONDecodeError:
+                # A reply cut off at the token limit: a passage needing that many fixes is not
+                # one to keep anyway.
+                return p, Outcome(None, [], "unreadable reply")
             return p, apply(p["text"], reply["not_prose"], reply["fixes"], spoken_safe)
 
         kept: list[dict] = []
