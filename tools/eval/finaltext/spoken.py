@@ -361,6 +361,8 @@ class Rendition:
     spoken: str
     tags: dict[str, str]
     attempt: int
+    # The model that wrote it; rows from before this field were all the local 26B QAT GGUF.
+    llm: str = ""
 
 
 def jobs_for(
@@ -384,9 +386,10 @@ def render(
     workers: int = 4,
     seed: int = 0,
     done: AbstractSet[tuple[str, str]] = frozenset(),
+    llm_name: str = "",
 ):
     """Yields (passage_id, kind, Rendition | None, rejections) for every passage and kind not
-    already `done`. `llm` is an eval.finaltext.llm.Server."""
+    already `done`. `llm` is an eval.finaltext.llm.Chat; `llm_name` is recorded per row."""
     jobs = jobs_for(passages, kinds, done)
 
     def one(job: tuple[str, str, str]):
@@ -411,7 +414,9 @@ def render(
                 return (
                     pid,
                     kind,
-                    Rendition(pid, kind, script.style, script.text, spoken, script.tags, attempt),
+                    Rendition(
+                        pid, kind, script.style, script.text, spoken, script.tags, attempt, llm_name
+                    ),
                     rejections,
                 )
             rejections.append(why)
@@ -432,9 +437,12 @@ def main(
     limit: int = 0,
     kinds: list[str] = typer.Option(list(KINDS), "--kind", help="Kinds to render (repeatable)."),
     out_name: str = typer.Option("", help="Renditions file stem (default: renditions-<split>)."),
+    llm_url: str = typer.Option(
+        "", help="An OpenAI-style server to use instead of a local llama-server (e.g. vLLM)."
+    ),
 ) -> None:
     """Renders every passage of a split in each kind; resumes where a previous run stopped."""
-    from eval.finaltext.llm import Server, model_path
+    from eval.finaltext.llm import Remote, Server, model_path
     from eval.paths import eval_dir
 
     root = eval_dir() / "finaltext"
@@ -453,9 +461,13 @@ def main(
             r = json.loads(line)
             done.add((r["passage_id"], r["kind"]))
     failed = kept = 0
-    with Server(model_path(model), slots=slots) as llm, out.open("a", encoding="utf-8") as fh:
+    server = Remote(llm_url) if llm_url else Server(model_path(model), slots=slots)
+    with server as llm, out.open("a", encoding="utf-8") as fh:
+        name = llm.served_model or model
+        print(f"{len(passages)} passages, {len(done)} renditions already done, llm {name}")
         todo = [(p["id"], p["text"]) for p in passages]
-        for pid, kind, r, rejections in render(llm, todo, kinds=kinds, workers=slots, done=done):
+        jobs = render(llm, todo, kinds=kinds, workers=slots, done=done, llm_name=name)
+        for pid, kind, r, rejections in jobs:
             if r is None:
                 failed += 1
                 print(f"{pid} {kind}: no rendition passed ({rejections})", flush=True)

@@ -1,5 +1,6 @@
 """A local LLM for building eval and training data: Utter's own pinned llama-server (the
-`llama-cpp` runtime component), started on a free port with several parallel slots.
+`llama-cpp` runtime component), started on a free port with several parallel slots; or, for
+bulk work, a server elsewhere that speaks the same API (`Remote`).
 
 Dev only. The product talks to llama-server from Rust (crates/utter-llm).
 """
@@ -44,7 +45,63 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-class Server:
+class Chat:
+    """An OpenAI-style chat endpoint at `url`."""
+
+    url: str
+    # Sent as the request's "model"; llama-server serves one model and ignores it.
+    served_model: str | None = None
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int = 1024,
+        temperature: float = 0.7,
+        seed: int | None = None,
+        json_schema: dict | None = None,
+    ) -> str:
+        body: dict = {
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        if self.served_model is not None:
+            body["model"] = self.served_model
+        if seed is not None:
+            body["seed"] = seed
+        if json_schema is not None:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"schema": json_schema},
+            }
+        req = urllib.request.Request(
+            f"{self.url}/v1/chat/completions",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=600) as r:
+            out = json.load(r)
+        return out["choices"][0]["message"]["content"]
+
+
+class Remote(Chat):
+    """A server someone else runs (e.g. vLLM on a GPU cluster, reached over an SSH port-forward):
+    `with Remote(url) as llm: llm.chat(messages)`. Asks it which model it serves."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url.rstrip("/")
+
+    def __enter__(self) -> Self:
+        with urllib.request.urlopen(f"{self.url}/v1/models", timeout=10) as r:
+            self.served_model = json.load(r)["data"][0]["id"]
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+
+class Server(Chat):
     """`with Server(model, slots=4) as llm: llm.chat(messages)`."""
 
     def __init__(self, model: Path, slots: int = 4, context_per_slot: int = 4096) -> None:
@@ -99,33 +156,3 @@ class Server:
         if self.proc is not None:
             self.proc.kill()
             self.proc.wait()
-
-    def chat(
-        self,
-        messages: list[dict[str, str]],
-        max_tokens: int = 1024,
-        temperature: float = 0.7,
-        seed: int | None = None,
-        json_schema: dict | None = None,
-    ) -> str:
-        body: dict = {
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-        if seed is not None:
-            body["seed"] = seed
-        if json_schema is not None:
-            body["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"schema": json_schema},
-            }
-        req = urllib.request.Request(
-            f"{self.url}/v1/chat/completions",
-            data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=600) as r:
-            out = json.load(r)
-        return out["choices"][0]["message"]["content"]
