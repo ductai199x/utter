@@ -104,6 +104,40 @@ enum Command {
     },
     /// Show which runtime components and models are installed.
     Doctor,
+    /// Dictate: hold Right Ctrl, speak, release; the text goes into the focused app. Double-tap
+    /// Right Ctrl for hands-free, Esc to cancel, Ctrl+C here to quit.
+    Dictate {
+        /// Which cleanup model.
+        #[arg(long, value_enum, default_value_t = TierArg::Light)]
+        tier: TierArg,
+        /// Dictionary words, comma-separated.
+        #[arg(long, default_value = "")]
+        dictionary: String,
+        /// Insert raw transcripts, no cleanup model.
+        #[arg(long)]
+        no_cleanup: bool,
+        /// An input device whose name contains this text (default: the system default).
+        #[arg(long)]
+        device: Option<String>,
+    },
+    /// Replay eval clips through the whole dictation pipeline in real time (segments while
+    /// "speaking", gate, cleanup; no insertion) and measure key up -> text ready.
+    E2eBench {
+        /// Comma-separated set names.
+        #[arg(long, default_value = "en-ami,en-voxpopuli")]
+        sets: String,
+        /// Clips per set.
+        #[arg(long, default_value_t = 40)]
+        limit: usize,
+        /// Results name (results/e2e/<name>/ and results/asr/e2e-<name>/).
+        #[arg(long, default_value = "light")]
+        name: String,
+        #[arg(long, value_enum, default_value_t = TierArg::Light)]
+        tier: TierArg,
+        /// Seconds of silence between clips, as between dictations.
+        #[arg(long, default_value_t = 1.0)]
+        gap: f64,
+    },
     /// Show where voice activity detection cuts a 16 kHz mono WAV file into segments.
     Vad { file: PathBuf },
     /// Record from the microphone (16 kHz mono, pre-roll included) to a WAV file.
@@ -222,6 +256,12 @@ fn main() -> Result<()> {
         Command::Doctor => return doctor(),
         Command::Record { out, seconds, device } => return record(out, *seconds, device.clone()),
         Command::Vad { file } => return vad(file),
+        Command::E2eBench { sets, limit, name, tier, gap } => {
+            return e2e_bench(sets, *limit, name, (*tier).into(), *gap);
+        }
+        Command::Dictate { tier, dictionary, no_cleanup, device } => {
+            return dictate((*tier).into(), dictionary, *no_cleanup, device.clone());
+        }
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
         Command::Clean { text, dictionary, tier } => return clean(&text.join(" "), dictionary, (*tier).into()),
         Command::LlmBench { gguf, cases, name, server_args, limit, prefill_fraction } => {
@@ -254,7 +294,9 @@ fn main() -> Result<()> {
         | Command::LlmBench { .. }
         | Command::Clean { .. }
         | Command::Record { .. }
-        | Command::Vad { .. } => {
+        | Command::Vad { .. }
+        | Command::Dictate { .. }
+        | Command::E2eBench { .. } => {
             unreachable!("handled before the speech model loads")
         }
     }
@@ -435,6 +477,113 @@ fn setup(ids: &[String]) -> Result<()> {
         println!("  {} {}: installed", c.id, c.version);
     }
     Ok(())
+}
+
+fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, device: Option<String>) -> Result<()> {
+    use utter_pipeline::{Pipeline, PipelineConfig};
+
+    let dictionary: Vec<String> =
+        dictionary.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect();
+    let cfg = PipelineConfig {
+        tier,
+        dictionary,
+        no_cleanup,
+        mic: utter_audio::MicConfig { device, ..Default::default() },
+        ..Default::default()
+    };
+    let start = std::time::Instant::now();
+    println!("Loading (speech model, cleanup model {tier:?}, microphone)...");
+    let mut pipeline = Pipeline::start(cfg)?;
+    println!(
+        "Ready in {:.1} s. Microphone: {}. Hold Right Ctrl and speak; release to insert. Double-tap for hands-free, Esc cancels, Ctrl+C here quits.",
+        start.elapsed().as_secs_f64(),
+        pipeline.microphone().device_name()
+    );
+    pipeline.run(|d| {
+        let target = d.target.as_ref().map(|w| w.title.as_str()).unwrap_or("?");
+        println!();
+        println!("  heard:    {}", d.raw);
+        if d.text != d.raw {
+            println!("  cleaned:  {}", d.text);
+        }
+        match &d.inserted {
+            Ok(()) => println!("  inserted into \"{target}\""),
+            Err(e) => println!("  NOT inserted: {e}"),
+        }
+        println!(
+            "  {:.1} s of audio in {} segment(s) | key up -> transcribed {:.0} ms | cleanup {} | key up -> pasted {:.0} ms",
+            d.audio_s,
+            d.segments,
+            d.asr_ms,
+            match d.gate {
+                Some(why) => format!("{:.0} ms ({why})", d.cleanup_ms),
+                None => "skipped".to_owned(),
+            },
+            d.total_ms
+        );
+    })?;
+    Ok(())
+}
+
+fn e2e_bench(sets: &str, limit: usize, name: &str, tier: utter_llm::cleanup::Tier, gap: f64) -> Result<()> {
+    use utter_pipeline::{Pipeline, PipelineConfig};
+
+    let mut pipeline = Pipeline::start(PipelineConfig { tier, ..Default::default() })?;
+    let eval = utter_core::data_dir().join("eval");
+    let e2e_dir = eval.join("results").join("e2e").join(name);
+    let asr_dir = eval.join("results").join("asr").join(format!("e2e-{name}"));
+    std::fs::create_dir_all(&e2e_dir)?;
+    std::fs::create_dir_all(&asr_dir)?;
+    let mut all_total = Vec::new();
+    for set in sets.split(',') {
+        let rows = read_manifest(&eval.join(set).join("manifest.jsonl"), limit)?;
+        let mut e2e = BufWriter::new(File::create(e2e_dir.join(format!("{set}.jsonl")))?);
+        let mut asr = BufWriter::new(File::create(asr_dir.join(format!("{set}.jsonl")))?);
+        let (mut total, mut asr_t, mut cleaned) = (Vec::new(), Vec::new(), 0usize);
+        for row in &rows {
+            let audio = read_wav(&eval.join(set).join(&row.audio))?;
+            // Idle between dictations, as in real use (the GPU's clocks drop meanwhile).
+            std::thread::sleep(std::time::Duration::from_secs_f64(gap));
+            let d = pipeline.replay(&audio)?;
+            serde_json::to_writer(
+                &mut e2e,
+                &serde_json::json!({
+                    "id": row.id, "ref": row.text, "raw": d.raw, "text": d.text, "gate": d.gate,
+                    "segments": d.segments, "audio_s": d.audio_s, "asr_ms": d.asr_ms,
+                    "cleanup_ms": d.cleanup_ms, "total_ms": d.total_ms,
+                }),
+            )?;
+            e2e.write_all(b"\n")?;
+            serde_json::to_writer(
+                &mut asr,
+                &serde_json::json!({
+                    "id": row.id, "lang": row.lang, "ref": row.text, "hyp": d.raw, "detected": null,
+                    "latency_s": d.asr_ms / 1e3, "duration_s": row.duration_s,
+                }),
+            )?;
+            asr.write_all(b"\n")?;
+            total.push(d.total_ms);
+            asr_t.push(d.asr_ms);
+            cleaned += d.gate.is_some() as usize;
+        }
+        e2e.flush()?;
+        asr.flush()?;
+        let (t50, t95) = pct(&mut total);
+        let (a50, a95) = pct(&mut asr_t);
+        println!(
+            "{set:>14}: {} clips | key up -> text ready p50 {t50:.0} ms p95 {t95:.0} | transcribed p50 {a50:.0} p95 {a95:.0} | cleanup ran on {cleaned}",
+            rows.len()
+        );
+        all_total.extend(total);
+    }
+    let (t50, t95) = pct(&mut all_total);
+    println!("{:>14}: key up -> text ready p50 {t50:.0} ms p95 {t95:.0} ms", "all");
+    Ok(())
+}
+
+fn pct(v: &mut [f64]) -> (f64, f64) {
+    v.sort_by(f64::total_cmp);
+    (percentile(v, 0.5), percentile(v, 0.95))
 }
 
 fn vad(file: &Path) -> Result<()> {

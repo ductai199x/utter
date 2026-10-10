@@ -1,0 +1,20 @@
+[package]
+name = "utter-pipeline"
+description = "The dictation pipeline: hotkey, microphone, segmenting, recognition, cleanup gate, cleanup, insertion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+utter-core.workspace = true
+utter-platform.workspace = true
+utter-audio.workspace = true
+utter-asr.workspace = true
+utter-llm.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

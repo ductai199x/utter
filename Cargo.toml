@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-audio", "crates/utter-asr", "crates/utter-llm", "crates/utter-cli"]
+members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-audio", "crates/utter-asr", "crates/utter-llm", "crates/utter-pipeline", "crates/utter-cli"]
 
 [workspace.package]
 version = "0.0.1"
@@ -16,6 +16,7 @@ utter-runtime = { path = "crates/utter-runtime" }
 utter-audio = { path = "crates/utter-audio" }
 utter-asr = { path = "crates/utter-asr" }
 utter-llm = { path = "crates/utter-llm" }
+utter-pipeline = { path = "crates/utter-pipeline" }
 
 anyhow = "1.0.104"
 cpal = "0.18.2"
