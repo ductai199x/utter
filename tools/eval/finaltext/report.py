@@ -41,6 +41,7 @@ PRODUCT_SERVER_ARGS = [
     "--spec-ngram-simple-size-m",
     "6",
 ]
+SCREEN_EXCLUDES = {"typo", "capitalization", "shorthand", "not_prose"}
 MARKS_REPORTED = [".", ",", "?", "!", ":", ";", "—", "(", ")", '"', "'", "\n", "\n\n"]
 MARK_NAMES = {"—": "dash", "\n": "line break", "\n\n": "paragraph", '"': "quote", "'": "apostrophe"}
 
@@ -168,10 +169,13 @@ def score_cmd(
     rows = _manifest(eval_set)
     screen_path = eval_dir() / "finaltext" / "screen-eval.jsonl"
     if clean_only and screen_path.exists():
+        # A passage is excluded only for gold problems the screen judges reliably enough; its
+        # punctuation opinions are too noisy to exclude on (2026-10-10: 259 of 445 flags, many
+        # wrong). Score without the screen too (--no-clean-only) to see what this changes.
         clean = {
             r["id"]
             for r in (json.loads(line) for line in screen_path.open(encoding="utf-8"))
-            if r["clean"]
+            if not any(p["kind"] in SCREEN_EXCLUDES for p in r["problems"])
         }
         before = len(rows)
         rows = [r for r in rows if r["id"].rsplit("-", 1)[0] in clean]
@@ -208,7 +212,8 @@ def score_cmd(
         summary[system] = {k: t.row() for k, t in sorted(groups.items())}
         summary[system]["all"]["latency"] = latency[system]
 
-    out = eval_dir() / "results" / "finaltext" / f"{eval_set}--{asr_name}.json"
+    view = "screened" if clean_only else "all"
+    out = eval_dir() / "results" / "finaltext" / f"{eval_set}--{asr_name}--{view}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     _print(summary)
