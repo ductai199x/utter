@@ -68,6 +68,11 @@ def cleanup(
     model: str = "gemma4-e4b-qat",
     prompt: Path | None = typer.Option(None, help="A system prompt file instead of the product's."),
     gguf: Path | None = typer.Option(None, help="A GGUF file instead of an installed model."),
+    only_new: bool = typer.Option(
+        False,
+        help="Clean only inputs this run has no output for (new or changed clips) and keep the "
+        "rest. Latency then covers only the new ones.",
+    ),
 ) -> None:
     from eval.finaltext.llm import model_path
 
@@ -77,10 +82,24 @@ def cleanup(
     ]
     cases = _results("llm", name)
     cases.mkdir(parents=True, exist_ok=True)
-    case_file = cases / f"{eval_set}-input.jsonl"
+    out_file = cases / f"{eval_set}-input.jsonl"
+    kept: dict[str, dict] = {}
+    if only_new and out_file.exists():
+        current = {h["id"]: h["hyp"] for h in hyps}
+        kept = {
+            r["id"]: r
+            for r in _rows(out_file)
+            if "output" in r and current.get(r["id"]) == r["input"]
+        }
+    todo = [h for h in hyps if h["id"] not in kept]
+    print(f"{len(todo)} to clean, {len(kept)} kept")
+    # llm-bench writes its results over the cases file, named after it.
+    case_file = cases / (f"{eval_set}-new.jsonl" if kept else out_file.name)
     with case_file.open("w", encoding="utf-8") as fh:
-        for h in hyps:
+        for h in todo:
             fh.write(json.dumps({"id": h["id"], "input": h["hyp"]}, ensure_ascii=False) + "\n")
+    if not todo:
+        return
     cmd = [
         str(CLI),
         "llm-bench",
@@ -95,6 +114,13 @@ def cleanup(
     if prompt is not None:
         cmd += ["--prompt", str(prompt.resolve())]
     subprocess.run(cmd, check=True)
+    if kept:
+        new = {r["id"]: r for r in _rows(case_file)}
+        with out_file.open("w", encoding="utf-8") as fh:
+            for h in hyps:
+                r = kept.get(h["id"]) or new[h["id"]]
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        case_file.unlink()
 
 
 class Tally:
