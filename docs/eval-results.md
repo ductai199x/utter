@@ -6,6 +6,49 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-10: phrase boosting
+
+Phrase boosting (crates/utter-asr/src/boost.rs) adds a bonus to dictionary phrases' tokens
+during Parakeet's greedy decoding. The weights are unchanged.
+
+Method (`utter-cli bench --phrases`, `tools/eval/boost_eval.py`):
+- **Dictionary:** 250 terms sampled from the final-text eval golds, as a user's dictionary would
+  hold them: words like MySQL, TF32 and Kerr-Newman. Paths, sizes and capitalized everyday words
+  are left out. The 115 terms not sampled are a control.
+- **Recall:** a dictionary term in the gold is written exactly, case and all.
+- **Inserted:** a dictionary term written more often than the gold has it.
+- **Harm test:** the same dictionary on VoxPopuli and Earnings-22, where these terms are almost
+  never spoken.
+
+| | term recall | inserted | other terms | WER | clips changed |
+|---|---|---|---|---|---|
+| no boost | 50.1% | 136 | 37.6% | 6.86% | |
+| continue +3, depth +1 (default) | 56.2% | 146 | 37.8% | 6.87% | 231 of 4756 |
+| continue +5, depth +1 | **59.6%** | 162 | 37.7% | 6.90% | 370 |
+
+| harm test: WER (clips changed) | VoxPopuli (300) | Earnings-22 (300) |
+|---|---|---|
+| no boost | 3.03% | 9.90% |
+| +3 | 3.03% (0) | 9.92% (2) |
+| +5 | 3.02% (1) | 10.00% (6), 3 of its own terms lost |
+
+What this says:
+- **The first version did harm**, and the reason is general. Adding a bonus to any non-blank
+  token is the same as lowering blank, so the decoder wrote words nobody said: "Period.",
+  "<unk>", "a" for "uh". A bonus for starting a phrase also pulled common words toward
+  dictionary starts ("um" -> "UM"). At +1.5 it changed 1353 clips, cost the control 1.9 points
+  and added 48 insertions, for the same recall as the fix at +3.
+- **The fix:** whether to emit stays the model's decision, made on the unboosted scores; the
+  bonus only chooses among non-blank tokens. Starting a phrase gets no bonus by default, and a
+  start bonus of +1 added nothing.
+- **Cost:** boosting needs per-frame decoding, about 6-8 ms more decode time at p50 (17 -> 24
+  ms on Earnings-22), and only when a dictionary is set. Folding it into the batched graph would
+  take a joint call per emitted token, which is close to the same cost.
+- **Not wired into dictation yet.** The dictionary UI and the cleanup prompt's dictionary line
+  come with it (docs/plan-final-text.md, "Vocabulary").
+
+---
+
 ## 2026-10-10: final-text baselines (eval v1)
 
 The eval docs/plan-final-text.md describes:

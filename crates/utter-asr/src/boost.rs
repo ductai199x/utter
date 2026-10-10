@@ -35,7 +35,9 @@ pub struct BoostConfig {
 
 impl Default for BoostConfig {
     fn default() -> Self {
-        Self { start_score: 0.0, score: 1.5, depth_bonus: 0.5, max_splits: 64 }
+        // Measured (docs/eval-results.md, "Phrase boosting"): more pulls a little harder on
+        // unrelated speech; a start bonus adds nothing.
+        Self { start_score: 0.0, score: 3.0, depth_bonus: 1.0, max_splits: 64 }
     }
 }
 
