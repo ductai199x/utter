@@ -85,7 +85,7 @@ fn worker(server: LlamaServer, system: String, dictionary: Vec<String>, jobs: Re
         let started = Instant::now();
         let params = ChatParams { max_tokens: (job.raw.len() as u32 / 2).max(64), ..ChatParams::default() };
         let text = server
-            .chat(&cleanup::messages_with(&system, &job.raw, &dictionary), &params)
+            .chat(&cleanup::messages_with(&system, &job.raw, &dictionary, &cleanup::Context::default()), &params)
             .map(|out| cleanup::tidy_output(&out.text))
             .map_err(|e| e.to_string());
         let cleaned =
