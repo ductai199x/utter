@@ -6,6 +6,68 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-10: fine-tuning the cleanup model (ft1)
+
+**Model:** a LoRA on Gemma 4 E4B (Google's unquantized QAT checkpoint), exported to the same
+Q4_0 GGUF the product runs. The system prompt is 28 words
+(crates/utter-llm/prompts/cleanup-ft.md); the rules are in the weights.
+
+**Training data:**
+- 6643 pairs from the final-text train split: real passages, rendered by the 26B in six kinds,
+  spoken by Kokoro, recognized by Parakeet.
+- No eval passage is in it. The split is by source document.
+
+**Training:**
+- On FLAME, one RTX A6000 per run, bf16.
+- 2 epochs in 42 minutes, at about 3 s per step of 16 sequences.
+
+**Sweep** (eval loss on 135 held-out pairs; two seeds of one setting differ by 0.0006):
+
+| rank | lr | epochs | eval loss |
+|---|---|---|---|
+| 16 | 1e-4 | 2 | 0.0287 |
+| 16 | 1e-4 | 3 | 0.0231 |
+| 32 | 1e-4 | 2 | 0.0229 |
+| 16 | **2e-4** | 2 | **0.0190** (seed 1: 0.0196) |
+| 32 | 2e-4 | 2 | 0.0189 |
+| 16 | 3e-4 | 2 | 0.0205 |
+
+**Final text** (corrected eval, below: 4318 dictations, fixed gold), comparing E4B v3 (the
+product), E4B v4, 26B v4, ft1 r16 at lr 2e-4, and ft1 r32 at lr 1e-4:
+
+| | E4B v3 | E4B v4 | 26B v4 | **ft1 r16 2e-4** | ft1 r32 1e-4 |
+|---|---|---|---|---|---|
+| no edit needed | 7.4% | 8.2% | 11.5% | **14.0%** | 12.7% |
+| characters to fix | 17.9% | 12.3% | 7.6% | **6.3%** | 8.8% |
+| word error | 14.0% | 10.1% | 6.4% | **4.7%** | 6.2% |
+| comma F1 | 0.67 | 0.67 | 0.70 | **0.73** | 0.72 |
+| parentheses F1 | 0.21 | 0.37 | 0.40 | **0.56** | 0.54 |
+| exact brackets / symbols / terms | 7 / 25 / 56% | 15 / 30 / 62% | 19 / 44 / 69% | **29 / 46 / 72%** | 28 / 45 / 71% |
+| restate set: characters to fix | 20.1% | 16.8% | 7.5% | **4.2%** | 5.7% |
+
+What this says:
+- **The 4-bit E4B, fine-tuned, beats the 26B prompted** on every headline number. It does so
+  at the E4B's size and speed. Latency is to be measured on a quiet GPU; the eval run shared
+  the GPU, and tokens per second matched the base model once it had it to itself.
+- **Its weak spot was the data's:** "scratch that" and "delete that" (13.9% and 13.6% characters
+  to fix, against 8.7% and 5.6% for the 26B). Their training renditions taught the wrong scope
+  (below). ft2 trains on the corrected data.
+
+**Eval fixes made along the way** (the baselines above are re-scored on the corrected set):
+- **Other languages:** 7 of 901 eval passages (and 27 train) were German, Italian, Dutch,
+  French or Finnish IRC lines, read by English voices. sources.py now keeps English only.
+- **"Scratch that" scope:** command renditions put a two-sentence false start before "scratch
+  that" or "delete that", and the gold dropped both sentences. These commands retract one
+  sentence (docs/cleanup-spec.md), and the restate kind used the same cue for one sentence, so
+  the data contradicted itself. Their false start is now one sentence, and the 401 eval and
+  1268 train renditions were re-rendered.
+- **The rendition checks** rejected faithful readings: decades ("the nineteen thirties"),
+  versions ("sixteen point ten"), "nineteen oh five", regnal numerals ("the second"). Half of
+  the new renditions failed; about a fifth do now. The rest fail for good reasons: dates read
+  as words, typos the gold keeps.
+
+---
+
 ## 2026-10-10: phrase boosting
 
 Phrase boosting (crates/utter-asr/src/boost.rs) adds a bonus to dictionary phrases' tokens
