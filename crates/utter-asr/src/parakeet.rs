@@ -278,14 +278,17 @@ impl ParakeetTdt {
                 let d = TensorRef::from_array_view(([1usize, self.hidden], &dec[..]))?;
                 let outputs = self.joint.run(ort::inputs!["encoded" => enc, "decoded" => d])?;
                 let (_, logits) = outputs["logits"].try_extract_tensor::<f32>()?;
+                let plain = argmax(&logits[..vocab_size]);
                 let token = match &self.boost {
-                    // Boosted: log-probabilities plus the phrase bonus (never on blank).
-                    Some(boost) => {
+                    // Whether to emit is the model's call alone: a bonus that beat blank would
+                    // insert words nobody said. Boosting picks which token, among the rest.
+                    Some(boost) if plain != blank => {
                         log_softmax(&logits[..vocab_size], &mut scores);
                         boost.apply(boost_state, &mut scores, blank);
+                        scores[blank] = f32::NEG_INFINITY;
                         argmax(&scores)
                     }
-                    None => argmax(&logits[..vocab_size]),
+                    _ => plain,
                 };
                 (token, self.cfg.durations[argmax(&logits[vocab_size..])])
             };
