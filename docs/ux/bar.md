@@ -37,12 +37,17 @@ and it simply never shows. Showing then hiding a flash would be worse.
 
 ## Geometry (logical pixels; scaled by the monitor's DPI)
 
-- Pill height 40; corner radius 20 (a full pill).
-- Width 124 with waveform only (16 bars plus 14 px padding each side). With live words it grows to fit them, up to 520; longer text
-  keeps its newest words visible and fades the oldest out at the left edge (a 32 px mask
-  gradient).
-- Waveform: 16 bars, 3 wide, 3 apart (93 px), centered vertically, heights 3 to 22.
-- Live words: 14 px, one line, 12 px to the right of the waveform, 16 px padding at the end.
+- Pill height 40 for one line; corner radius 20 (a full pill when one line high).
+- Width 124 with waveform only (16 bars plus 14 px padding each side). With words it grows to
+  fit them on one line, up to 520. Past 520 the words wrap, as text does: the pill grows
+  upward one line (20 px) at a time, its bottom edge fixed, up to 5 lines (120 px). Past 5
+  lines the oldest lines scroll off the top under a 16 px fade; the newest line is always
+  the bottom one.
+- Waveform (and the Done check, and the error icon): in a 38 px box at the bottom left, so it
+  sits beside the newest line. 16 bars, 3 wide, 3 apart (93 px), heights 3 to 22.
+- Words: 14 px on a 20 px line, 12 px to the right of the waveform, 16 px padding at the end,
+  9 px above and below.
+- The window is 576 x 168: the tallest pill, its shadow, and the 12 px below it.
 
 ## Motion
 
@@ -66,6 +71,12 @@ Live words arrive in pieces (each segment, and the preview of the segment being 
 words fade in over 120 ms. Words already shown never jump: a preview may only extend or
 correct its own tail, and a correction cross-fades the changed words in place.
 
+What you see is what is pasted. Words that are not yet the text to be pasted are shown as
+provisional (dimmed, `--bar-words-provisional`). The text being pasted replaces them at full
+weight as the paste happens, and stays under the Done check. (Today the words are provisional
+until key up; once cleanup runs while you speak, only the newest words are:
+docs/plan-final-text.md.)
+
 ## Color
 
 The Bar is always dark, whatever the theme: it floats over arbitrary content and must read on
@@ -77,7 +88,8 @@ white and black alike.
 | border | 1 px `rgba(255, 255, 255, 0.08)` |
 | shadow | `0 8px 24px rgba(0, 0, 0, 0.28)` |
 | waveform | `rgba(255, 255, 255, 0.92)` |
-| live words | `rgba(255, 255, 255, 0.86)`; the newest word `0.98` |
+| words being pasted | `rgba(255, 255, 255, 0.86)` |
+| provisional words | `rgba(255, 255, 255, 0.5)` |
 | hands-free dot | `#ff453a` |
 | error text | `#ffb340` |
 
@@ -119,7 +131,9 @@ themes, over a white page and a black terminal.
 4. Live words appear while speaking; words already shown never jump.
 5. Right Ctrl + C copies and the Bar never appears.
 6. Esc cancels with no check, no sound.
-7. A long dictation keeps the newest words readable, oldest faded at the left.
+7. A long dictation wraps into up to 5 lines, the newest at the bottom; older lines scroll
+   off the top under a fade.
 8. Done shows the check briefly and hides; nothing lingers.
 9. "Focus moved" shows when the target window closed or changed during the dictation.
 10. Text is crisp at every scale; the pill's edge is anti-aliased, no seams or halos on white.
+11. The text under the Done check is exactly the text that was pasted.
