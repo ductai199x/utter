@@ -18,6 +18,7 @@ Run: uv run python -m eval.finaltext.goldfix --split train
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -85,12 +86,15 @@ def apply(text: str, not_prose: bool, fixes: list[dict], spoken_safe: bool) -> O
     changed = 0
     for f in fixes:
         wrong, right = f["wrong"], f["right"]
-        if not wrong or wrong == right or text.count(wrong) != 1:
+        # Whole words only: "sea" must not match inside "research".
+        where = list(re.finditer(rf"(?<!\w){re.escape(wrong)}(?!\w)", text)) if wrong else []
+        if wrong == right or len(where) != 1:
             continue  # vague or ambiguous: not applied
         if spoken_safe and (f["kind"] != "capitalization" or wrong.lower() != right.lower()):
             # The spoken form was made from the unfixed text: only case may change.
             return Outcome(None, [], f"needs a {f['kind']} fix")
-        text = text.replace(wrong, right)
+        m = where[0]
+        text = text[: m.start()] + right + text[m.end() :]
         # Characters actually changed: "ubuntu" -> "Ubuntu" is one.
         changed += edit_distance(wrong, right)
         applied.append(f)

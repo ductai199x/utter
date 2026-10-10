@@ -44,3 +44,20 @@ def test_spoken_safe_allows_case_only():
         "I d/l it daily.", False, [{"kind": "shorthand", "wrong": "d/l", "right": "download"}], True
     )
     assert bad.text is None
+
+
+def test_fixes_match_whole_words_only():
+    o = apply(
+        "Our research is by the sea.",
+        False,
+        [{"kind": "capitalization", "wrong": "sea", "right": "Sea"}],
+        False,
+    )
+    assert o.text == "Our research is by the Sea."
+    inside = apply(
+        "Our research team.",
+        False,
+        [{"kind": "capitalization", "wrong": "sea", "right": "Sea"}],
+        False,
+    )
+    assert inside.text == "Our research team."
