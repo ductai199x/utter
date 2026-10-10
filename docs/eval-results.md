@@ -6,6 +6,51 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-10: final-text baselines (eval v1)
+
+The eval docs/plan-final-text.md describes:
+- **Gold:** 1000 real written passages, 200 each of technical, everyday, science, chat and
+  prose.
+- **Spoken forms:** 5 kinds, rendered by Gemma 4 26B with the gold known by construction (4756
+  renditions after checks).
+- **Audio:** Kokoro (12 voices).
+- **Recognizer:** Parakeet, through Utter's runtime.
+- **Scored set:** passages the gold screen did not flag for typos, capitalization, shorthand or
+  non-prose: 3683 dictations.
+
+The cleanup prompt v4 (tools/eval/finaltext/prompts/cleanup-v4.md) adds punctuation inferred
+from meaning, spoken symbols, acronyms and correction scope to the product's v3.
+
+| | Parakeet alone | E4B v3 (product) | E4B v4 | 26B v3 | 26B v4 |
+|---|---|---|---|---|---|
+| no edit needed | 5.0% | 7.9% | 8.4% | 10.4% | **11.8%** |
+| word error | 20.6% | 15.3% | 11.1% | 11.4% | **7.4%** |
+| retraction commands: no edit / word error | 0 / 59% | 1.8 / 50% | 5.4 / 28% | 5.4 / 34% | 11.9 / 15% |
+| corrections: no edit | 0% | 3.6% | 3.9% | 9.2% | 9.4% |
+| disfluent: no edit | 0% | 2.8% | 2.8% | 2.7% | 3.3% |
+| comma F1 | 0.58 | 0.67 | 0.67 | 0.70 | 0.70 |
+| colon / semicolon F1 | 0.16 / 0 | 0.43 / 0.25 | 0.42 / 0.29 | 0.42 / 0.24 | 0.43 / 0.33 |
+| parentheses / quotes F1 | 0 / 0 | 0.22 / 0.17 | 0.38 / 0.30 | 0.26 / 0.30 | 0.41 / 0.45 |
+| exact: numbers / symbols / terms | 65 / 14 / 51% | 73 / 27 / 56% | 70 / 33 / 63% | 72 / 33 / 58% | 73 / 45 / 69% |
+| cleanup time p50 / p95 | | 196 / 444 ms | 209 / 488 ms | 212 / 457 ms | 238 / 561 ms |
+
+What this says:
+- **The product today gets about 1 dictation in 13 exactly right.** Prompting helps the 26B
+  more than the E4B. The best prompted model is still near 1 in 8.
+- **Retraction commands and disfluencies are where it fails most.** "Never mind, let's start
+  over" drops one sentence, not everything before it. Injected false starts and fillers survive.
+- **Most misses are 2-3 small differences**: punctuation conventions (semicolon or period,
+  quote style), recognition errors on names (no vocabulary yet), and quirks of the gold that
+  the screen misses.
+- Fine-tuning (next) is the lever both the research and these numbers point to.
+
+Known gaps in eval v1:
+- No sentence-scope corrections: the LLM never chose that scope; a supplement set fills it.
+- The gold screen is noisy: gold fixes replace it.
+- Kokoro is one TTS engine; a Chatterbox set with cloned donated voices follows.
+
+---
+
 ## 2026-10-10: GPU clocks while the user speaks
 
 The pipeline's first end-to-end bench (`utter-cli e2e-bench`, clips replayed in real time
