@@ -13,6 +13,7 @@ utter-runtime.workspace = true
 utter-asr.workspace = true
 utter-audio.workspace = true
 utter-llm.workspace = true
+utter-pipeline.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 hound.workspace = true
