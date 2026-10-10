@@ -1781,6 +1781,7 @@ dependencies = [
  "utter-audio",
  "utter-core",
  "utter-llm",
+ "utter-pipeline",
  "utter-runtime",
 ]
 
@@ -1804,6 +1805,20 @@ dependencies = [
  "utter-core",
  "utter-platform",
  "utter-runtime",
+]
+
+[[package]]
+name = "utter-pipeline"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "utter-asr",
+ "utter-audio",
+ "utter-core",
+ "utter-llm",
+ "utter-platform",
 ]
 
 [[package]]
