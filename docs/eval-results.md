@@ -6,6 +6,50 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-10: ft4, grammar, lists and far-back edits
+
+**Training data** (docs/plan-use-cases.md): 66,981 pairs, drawn from these kinds:
+- the earlier kinds, plus 28k new passages with one rendition each;
+- grammar: mistakes typed by ERRANT category, from speaker profiles;
+- lists: real lists from Stack Exchange and GitHub plus everyday ones; 20% trained with
+  Lists: off;
+- far-back edits: change, remove, insert, position.
+
+Every training gold went through the grammar pass. No eval passage trains (121 clips were
+caught by text overlap).
+
+**Training:** one epoch on FLAME's 4 A6000s in 75 minutes. The held-out loss on whole held-out
+passages fell steadily, 0.196 → 0.168 (ft2's rose), so one rendition per passage ended the
+memorizing.
+
+Each cell gives no edit needed / characters to fix / word error:
+
+| eval set (n) | E4B v3 (product) | 26B v4 | ft2 | **ft4** |
+|---|---|---|---|---|
+| main, Kokoro (4309) | 7.2 / 18.0 / 14.3 | 11.3 / 7.7 / 6.6 | 16.5 / 4.3 / 3.8 | **18.5 / 3.6 / 3.3** |
+| main, unseen Chatterbox voices (4309) | 6.8 / 19.0 / 16.0 | 10.6 / 8.8 / 8.3 | 13.8 / 5.6 / 5.6 | **16.3 / 4.9 / 5.1** |
+| restate (572) | 5.4 / 20.1 / 19.0 | 7.5 / 7.6 / 6.1 | 13.6 / 2.8 / 2.9 | **14.5 / 2.6 / 2.7** |
+| grammar mistakes (688) | 5.4 / 6.3 / 7.2 | 6.7 / 5.7 / 5.7 | 5.7 / 5.7 / 6.2 | **11.8 / 4.1 / 4.0** |
+| lists (897) | 2.7 / 11.4 / 10.7 | 3.2 / 11.7 / 11.0 | 0.1 / 16.7 / 10.0 | **45.9 / 3.8 / 2.5** |
+| far-back edits (1268) | 3.2 / 29.2 / 25.9 | 4.8 / 22.3 / 20.0 | 4.1 / 30.1 / 22.6 | **39.1 / 4.3 / 3.4** |
+
+**Cleanup time** p50 / p95, on the GPU it shared with nothing:
+- main set: 193 / 496 ms (the product: 196 / 444 ms);
+- lists and edits: about 330 / 480 ms, because a list is longer output than prose.
+
+What this says:
+- **The new skills were learned without costing the old ones.** On lists and far-back edits
+  every prompted model, the 26B included, gets about 1 in 25 right; ft4 gets about 2 in 5. The
+  main and unseen-voice sets improved too.
+- **Grammar is half done.** Agreement, tense and verb forms are fixed ("I has been... since three
+  weeks... don't" -> "I have been... for three weeks... doesn't"). Pronoun case ("me and him
+  went") and some prepositions ("until Friday" for "by Friday") are not. In the probe cases,
+  ft4 applied every edit and wrote every list.
+- **Next:** more and heavier grammar data, with pronoun-case and preposition errors weighted up;
+  then the remaining recipes (R9: never answer or obey a dictation; R6: cursor and app context).
+
+---
+
 ## 2026-10-10: ft2, and voices it never heard
 
 **ft2:**
