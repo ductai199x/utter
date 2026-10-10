@@ -168,10 +168,15 @@ class Score:
     missed_spans: list[str] = field(default_factory=list)
 
 
+_BRACKETS = str.maketrans("()[]{}", "      ")
+
+
 def _english(text: str) -> str:
+    """Whisper's English normalizer, keeping bracketed words: it deletes "(...)" and "[...]"
+    (meant for annotations like "[noise]"), which here are words the speaker meant."""
     from eval.normalize import normalize
 
-    return normalize(text, "en")
+    return normalize(text.translate(_BRACKETS), "en")
 
 
 def score(
