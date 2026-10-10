@@ -3,7 +3,8 @@ for turning a fine-tuned model into the GGUF the product loads.
 
 - llama-quantize.exe comes from the same release zip as the component (URL and SHA-256 from
   crates/utter-runtime/components.json), so it is checksummed;
-- convert_hf_to_gguf.py and its gguf-py package come from llama.cpp's source at the same tag.
+- convert_hf_to_gguf.py and the gguf-py and conversion packages it imports come from
+  llama.cpp's source at the same tag.
 
 Both land in <data dir>/tools/llama-<version>/. Dev only.
 
@@ -49,7 +50,7 @@ def _fetch(url: str) -> bytes:
 def install() -> Path:
     c = component()
     out = tools_dir()
-    if (out / "llama-quantize.exe").exists() and (out / "convert_hf_to_gguf.py").exists():
+    if all((out / f).exists() for f in ("llama-quantize.exe", "convert_hf_to_gguf.py", "conversion")):
         return out
     out.mkdir(parents=True, exist_ok=True)
 
@@ -71,7 +72,8 @@ def install() -> Path:
             if len(parts) < 2 or not m.isfile():
                 continue
             rel = parts[1]
-            if rel == "convert_hf_to_gguf.py" or rel.startswith("gguf-py/"):
+            # The converter imports gguf-py and the conversion package beside it.
+            if rel == "convert_hf_to_gguf.py" or rel.startswith(("gguf-py/", "conversion/")):
                 target = out / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
                 f = t.extractfile(m)
