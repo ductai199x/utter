@@ -156,7 +156,24 @@
         }
       ],
       "license": "Apache-2.0 (Google, google/gemma-4-E4B-it-qat-q4_0-gguf)",
-      "purpose": "Cleanup and Command Mode model, light tier (default): Gemma 4 E4B, QAT 4-bit; about 3.3 GB of GPU memory."
+      "purpose": "Gemma 4 E4B, QAT 4-bit, prompted: the light tier before the fine-tuned model; kept for evals and Command Mode experiments.",
+      "optional": true
+    },
+    {
+      "id": "utter-cleanup-e4b",
+      "version": "aa697b58",
+      "os": "any",
+      "arch": "any",
+      "files": [
+        {
+          "name": "utter-cleanup-e4b-ft4.q4_0.gguf",
+          "url": "https://huggingface.co/ductai199x/utter-cleanup-e4b/resolve/aa697b58ff1fa4831cade0388b1b774547c7fe1c/utter-cleanup-e4b-ft4.q4_0.gguf",
+          "sha256": "67cc2d2a74a2905dc36c468f701af3602baaadf5a52e56439c4195e6c5bdc2b5",
+          "size": 5154940832
+        }
+      ],
+      "license": "Apache-2.0 (Gemma 4 E4B fine-tuned by Utter, ductai199x/utter-cleanup-e4b)",
+      "purpose": "Cleanup model, light tier (default): Gemma 4 E4B fine-tuned for dictation cleanup (ft4), Q4_0; about 3.3 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
     },
     {
       "id": "gemma4-26b-a4b-qat",

@@ -317,7 +317,7 @@ impl Pipeline {
             None
         } else {
             let server = LlamaServer::start(&cleanup::server_options(cfg.tier)?)?;
-            let system = cfg.prompt.clone().unwrap_or_else(|| cleanup::SYSTEM_PROMPT.to_owned());
+            let system = cfg.prompt.clone().unwrap_or_else(|| cfg.tier.system_prompt().to_owned());
             // The first request after loading is slow; pay for it now.
             let warm = "Um, this is a warm-up, no, a second warm-up.";
             server.chat(
