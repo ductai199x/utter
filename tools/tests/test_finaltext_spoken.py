@@ -139,3 +139,24 @@ def test_jobs_go_passage_by_passage_and_skip_what_is_done():
 
     jobs = jobs_for([("a", "A."), ("b", "B.")], ["natural", "explicit"], done={("a", "natural")})
     assert jobs == [("a", "A.", "explicit"), ("b", "B.", "natural"), ("b", "B.", "explicit")]
+
+
+def test_only_passages_of_two_sentences_get_a_restatement():
+    from eval.finaltext.spoken import jobs_for
+
+    jobs = jobs_for([("a", "One."), ("b", "One. Two.")], ["natural", "restate"])
+    assert jobs == [
+        ("a", "One.", "natural"),
+        ("b", "One. Two.", "natural"),
+        ("b", "One. Two.", "restate"),
+    ]
+
+
+def test_per_passage_picks_that_many_kinds_the_same_way_every_time():
+    from eval.finaltext.spoken import KINDS, jobs_for
+
+    passages = [(f"p{i}", "One. Two.") for i in range(50)]
+    jobs = jobs_for(passages, KINDS, per_passage=2)
+    assert len(jobs) == 100
+    assert jobs == jobs_for(passages, KINDS, per_passage=2)
+    assert {k for _, _, k in jobs} == set(KINDS)  # spread over every kind

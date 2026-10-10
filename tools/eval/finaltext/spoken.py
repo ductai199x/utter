@@ -381,13 +381,25 @@ def jobs_for(
     passages: Iterable[tuple[str, str]],
     kinds: Iterable[str],
     done: AbstractSet[tuple[str, str]] = frozenset(),
+    per_passage: int = 0,
 ) -> list[tuple[str, str, str]]:
     """(passage id, text, kind) still to render, passage by passage: a run stopped partway
-    leaves every kind equally covered, not the first kinds only."""
+    leaves every kind equally covered, not the first kinds only.
+
+    A restatement needs a sentence to correct and one to keep, so only passages of two or more
+    sentences get one. With `per_passage`, each passage gets that many of its kinds, chosen by
+    its id: a model trained on six renditions of one passage learns the passage by heart."""
     kinds = list(kinds)
-    return [
-        (pid, text, kind) for pid, text in passages for kind in kinds if (pid, kind) not in done
-    ]
+    jobs = []
+    for pid, text in passages:
+        mine = [k for k in kinds if k != "restate" or len(_SENTENCE_ENDS.findall(text)) >= 2]
+        if per_passage:
+            mine = random.Random(f"kinds:{pid}").sample(mine, min(per_passage, len(mine)))
+        jobs += [(pid, text, k) for k in mine if (pid, k) not in done]
+    return jobs
+
+
+_SENTENCE_ENDS = re.compile(r"[.!?](?:\s|$)")
 
 
 def render(
@@ -399,10 +411,11 @@ def render(
     seed: int = 0,
     done: AbstractSet[tuple[str, str]] = frozenset(),
     llm_name: str = "",
+    per_passage: int = 0,
 ):
     """Yields (passage_id, kind, Rendition | None, rejections) for every passage and kind not
     already `done`. `llm` is an eval.finaltext.llm.Chat; `llm_name` is recorded per row."""
-    jobs = jobs_for(passages, kinds, done)
+    jobs = jobs_for(passages, kinds, done, per_passage)
 
     def one(job: tuple[str, str, str]):
         pid, text, kind = job
@@ -452,6 +465,7 @@ def main(
     llm_url: str = typer.Option(
         "", help="An OpenAI-style server to use instead of a local llama-server (e.g. vLLM)."
     ),
+    per_passage: int = typer.Option(0, help="Kinds per passage, chosen by its id (0: every kind)."),
 ) -> None:
     """Renders every passage of a split in each kind; resumes where a previous run stopped."""
     from eval.finaltext.llm import Remote, Server, model_path
@@ -463,9 +477,6 @@ def main(
     ]
     if limit:
         passages = passages[:limit]
-    if "restate" in kinds:
-        # A sentence correction needs a sentence to correct and one to keep.
-        passages = [p for p in passages if len(re.findall(r"[.!?](?:\s|$)", p["text"])) >= 2]
     out = root / f"{out_name or f'renditions-{split}'}.jsonl"
     done: set[tuple[str, str]] = set()
     if out.exists():
@@ -478,7 +489,9 @@ def main(
         name = llm.served_model or model
         print(f"{len(passages)} passages, {len(done)} renditions already done, llm {name}")
         todo = [(p["id"], p["text"]) for p in passages]
-        jobs = render(llm, todo, kinds=kinds, workers=slots, done=done, llm_name=name)
+        jobs = render(
+            llm, todo, kinds=kinds, workers=slots, done=done, llm_name=name, per_passage=per_passage
+        )
         for pid, kind, r, rejections in jobs:
             if r is None:
                 failed += 1
