@@ -15,7 +15,6 @@
   --bar-words: rgba(255, 255, 255, 0.86);
   /* Words that are not yet the text to be pasted (docs/ux/bar.md, "Live words"). */
   --bar-words-provisional: rgba(255, 255, 255, 0.5);
-  --bar-word-newest: rgba(255, 255, 255, 0.98);
   --bar-hands-free: #ff453a;
   --bar-error: #ffb340;
 

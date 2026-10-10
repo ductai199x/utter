@@ -11,7 +11,9 @@
   let handsFree = $state(false);
   let committed = $state('');
   let preview = $state('');
-  // True once the words are the text being pasted; until then they are provisional.
+  // `committed` is the dictation cleaned up to the last pause (shown as text); `preview` is what
+  // was heard after it, not cleaned yet (provisional, dimmed). `isFinal`: the words are the
+  // text being pasted.
   let isFinal = $state(false);
   let message = $state('');
 
@@ -47,6 +49,8 @@
   const textAreaW = $derived(Math.min(MAX_TEXT_W, Math.ceil(textWidth)));
 
   const hasWords = $derived(committed.length + preview.length > 0);
+  // Exactly the text the pill shows, for the measuring copies.
+  const shownText = $derived(committed && preview ? `${committed} ${preview}` : committed || preview);
   // Words show while listening and finishing, and stay under the Done check once they are
   // the pasted text.
   const showWords = $derived(
@@ -188,17 +192,17 @@
       </div>
     {/if}
     {#if showWords}
-      <div class="words" class:provisional={!isFinal} class:overflowing={lines > MAX_LINES}>
-        <div class="text">
+      <div class="words" class:overflowing={lines > MAX_LINES}>
+        <!-- Laid out at the pill's target width, not its animated one: as the pill grows it
+             reveals the text instead of reflowing it, so lines never spill past the height. -->
+        <div class="text" style:width="{textAreaW + 1}px">
           {committed}{#if preview}{#key preview}<span class="preview">{committed ? ' ' : ''}{preview}</span>{/key}{/if}
         </div>
       </div>
     {/if}
   </div>
-  <span class="measure" bind:this={measureEl} aria-hidden="true">{committed}{preview ? ' ' + preview : ''}</span>
-  <div class="measure wrap" bind:this={wrapEl} style:width="{textAreaW + 1}px" aria-hidden="true">
-    {committed}{preview ? ' ' + preview : ''}
-  </div>
+  <span class="measure" bind:this={measureEl} aria-hidden="true">{shownText}</span>
+  <div class="measure wrap" bind:this={wrapEl} style:width="{textAreaW + 1}px" aria-hidden="true">{shownText}</div>
 </div>
 
 <style>
@@ -284,10 +288,6 @@
     line-height: var(--line-h);
     transition: color var(--dur-word) var(--ease-out);
   }
-  .words.provisional,
-  .words.provisional .preview {
-    color: var(--bar-words-provisional);
-  }
   /* Nothing shows in the top padding (no sliced letters); the oldest full line fades in. */
   .words.overflowing {
     mask-image: linear-gradient(to bottom, transparent 9px, rgba(0, 0, 0, 0.35) 9px, black 29px);
@@ -310,8 +310,9 @@
     line-height: var(--line-h);
     overflow-wrap: anywhere;
   }
+  /* Heard but not cleaned yet: provisional until the next cleanup replaces it. */
   .preview {
-    color: var(--bar-word-newest);
+    color: var(--bar-words-provisional);
     animation: word-in var(--dur-word) var(--ease-out);
   }
   @keyframes word-in {

@@ -7,6 +7,7 @@
 //! polls the microphone every [`POLL`] while listening. Every dictation's stage times are
 //! measured from key up, the moment the user starts waiting.
 
+mod clean;
 pub mod gate;
 pub mod log;
 
@@ -23,6 +24,7 @@ use utter_platform::hotkey::{self, Action, HotkeyConfig};
 use utter_platform::insert::{self, PasteOptions};
 use utter_runtime::gpu::GpuWarmer;
 
+use crate::clean::Cleaner;
 use crate::log::{DictationLog, Entry, Finished, LogConfig, Timings};
 
 /// How often the pipeline reads the microphone while listening.
@@ -55,6 +57,10 @@ pub struct PipelineConfig {
     pub hotkey: HotkeyConfig,
     /// Skip the cleanup model entirely (raw transcripts).
     pub no_cleanup: bool,
+    /// Clean every dictation (true), or only those the gate flags (false).
+    pub always_clean: bool,
+    /// The cleanup system prompt (None: the product's, prompts/cleanup.md).
+    pub prompt: Option<String>,
     pub log: LogConfig,
 }
 
@@ -66,10 +72,15 @@ impl Default for PipelineConfig {
             mic: MicConfig::default(),
             hotkey: HotkeyConfig::default(),
             no_cleanup: false,
+            always_clean: true,
+            prompt: None,
             log: LogConfig::default(),
         }
     }
 }
+
+/// The longest the paste waits for the final cleanup before inserting the raw text instead.
+const CLEANUP_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// What happened in one dictation, with times measured from key up.
 #[derive(Debug, Clone)]
@@ -98,8 +109,9 @@ pub enum Event {
         hands_free: bool,
         target: Option<isize>,
     },
-    /// The words so far: `committed` (finished segments) never changes once shown; `preview`
-    /// is the segment being spoken, re-transcribed as it grows.
+    /// The words so far: `committed` is the dictation cleaned up to the last pause (the text
+    /// as it will be typed, though a later correction can still change it); `preview` is what
+    /// was heard after that, not cleaned yet (provisional).
     Words {
         committed: String,
         preview: String,
@@ -279,7 +291,7 @@ struct Engine {
     vad: SileroVad,
     jobs: Sender<Job>,
     done: Receiver<Done>,
-    llm: Option<LlamaServer>,
+    cleaner: Option<Cleaner>,
     generation: u64,
     /// Holds the GPU at full clocks from key down to key up (see utter_runtime::gpu).
     gpu: GpuWarmer,
@@ -301,20 +313,21 @@ impl Pipeline {
             .spawn(move || speech_worker(asr, job_rx, done_tx))
             .map_err(|_| PipelineError::WorkerGone)?;
 
-        let llm = if cfg.no_cleanup {
+        let cleaner = if cfg.no_cleanup {
             None
         } else {
             let server = LlamaServer::start(&cleanup::server_options(cfg.tier)?)?;
+            let system = cfg.prompt.clone().unwrap_or_else(|| cleanup::SYSTEM_PROMPT.to_owned());
             // The first request after loading is slow; pay for it now.
             let warm = "Um, this is a warm-up, no, a second warm-up.";
-            server.chat(&cleanup::messages(warm, &cfg.dictionary), &ChatParams::default())?;
-            Some(server)
+            server.chat(&cleanup::messages_with(&system, warm, &cfg.dictionary), &ChatParams::default())?;
+            Some(Cleaner::start(server, system, cfg.dictionary.clone()))
         };
         let vad = SileroVad::load_installed()?;
         let mic = Microphone::open(&cfg.mic)?;
         Ok(Self {
             mic,
-            engine: Engine { cfg, vad, jobs: job_tx, done: done_rx, llm, generation: 0, gpu: GpuWarmer::new() },
+            engine: Engine { cfg, vad, jobs: job_tx, done: done_rx, cleaner, generation: 0, gpu: GpuWarmer::new() },
         })
     }
 
@@ -356,6 +369,11 @@ impl Pipeline {
 }
 
 impl Engine {
+    /// Whether this dictation's text goes through the cleanup model.
+    fn should_clean(&self, raw: &str) -> bool {
+        self.cfg.always_clean || gate::reason(raw, &self.cfg.dictionary).is_some()
+    }
+
     /// What the dictation ran with, for its log record.
     fn log_config(&self) -> serde_json::Value {
         let version = |id: &str| utter_runtime::component(id).map(|c| c.version.clone()).ok();
@@ -412,6 +430,10 @@ impl Engine {
         let mut preview = String::new();
         let mut last_job = Instant::now();
         let mut last_preview = Instant::now();
+        // The newest cleanup while speaking: (the raw text it cleaned, the result), and the raw
+        // text of the newest request (so the same text is never sent twice).
+        let mut latest: Option<(String, String)> = None;
+        let mut requested: Option<String> = None;
         let _ = self.jobs.send(Job::KeepAlive);
 
         let key_up = loop {
@@ -442,6 +464,7 @@ impl Engine {
             }
             // Results that came back while speaking: show them.
             let mut words_changed = false;
+            let mut segment_done = false;
             while let Ok(d) = self.done.try_recv() {
                 if d.generation != generation {
                     continue;
@@ -451,6 +474,7 @@ impl Engine {
                     DoneKind::Segment(i) => {
                         parts[i] = d.text;
                         received += 1;
+                        segment_done = true;
                         // The preview was of this segment (or earlier audio); the next one
                         // starts fresh.
                         preview.clear();
@@ -459,10 +483,36 @@ impl Engine {
                 }
                 words_changed = true;
             }
+            let committed_raw = join_parts(&parts);
+            if let Some(cleaner) = &self.cleaner {
+                // A segment finished: clean the dictation so far, while the user goes on.
+                if segment_done
+                    && !committed_raw.is_empty()
+                    && requested.as_deref() != Some(committed_raw.as_str())
+                    && self.should_clean(&committed_raw)
+                {
+                    cleaner.request(generation, committed_raw.clone());
+                    requested = Some(committed_raw.clone());
+                }
+                while let Some(c) = cleaner.try_recv() {
+                    if c.generation != generation {
+                        continue;
+                    }
+                    log.push(c.entry("live"));
+                    // A failed cleanup shows the raw text: the words are never lost.
+                    let text = c.text.unwrap_or_else(|_| c.raw.clone());
+                    latest = Some((c.raw, text));
+                    words_changed = true;
+                }
+            }
             if words_changed {
-                let committed = join_parts(&parts);
-                log.push(Entry::Bar { committed: committed.clone(), preview: preview.clone(), is_final: false });
-                on_event(Event::Words { committed, preview: preview.clone() });
+                let (committed, provisional) = if self.cleaner.is_some() {
+                    clean::bar_words(latest.as_ref().map(|(r, t)| (r.as_str(), t.as_str())), &committed_raw, &preview)
+                } else {
+                    (committed_raw, preview.clone())
+                };
+                log.push(Entry::Bar { committed: committed.clone(), preview: provisional.clone(), is_final: false });
+                on_event(Event::Words { committed, preview: provisional });
             }
 
             let new = source.take_new();
@@ -537,35 +587,55 @@ impl Engine {
         let asr_ms = key_up.elapsed().as_secs_f64() * 1e3;
         let raw = join_parts(&parts);
 
+        // The gate is logged either way; it decides only when not every dictation is cleaned.
         let gate = if raw.is_empty() { None } else { gate::reason(&raw, &self.cfg.dictionary) };
         log.push(Entry::Gate { reason: gate });
-        let (text, cleanup_ms) = match (&self.llm, gate) {
-            (Some(server), Some(_)) => {
-                let started = Instant::now();
-                let params = ChatParams { max_tokens: (raw.len() as u32 / 2).max(64), ..ChatParams::default() };
-                let result = server.chat(&cleanup::messages(&raw, &self.cfg.dictionary), &params);
-                let ms = started.elapsed().as_secs_f64() * 1e3;
-                match result {
-                    Ok(out) => {
-                        let text = cleanup::tidy_output(&out.text);
-                        log.push(Entry::Cleanup { input: raw.clone(), output: text.clone(), ms, error: None });
-                        (text, ms)
-                    }
-                    // The words are never lost to a cleanup failure: the raw text goes in.
-                    Err(e) => {
-                        tracing::warn!("cleanup failed, inserting the raw text: {e}");
+        let started = Instant::now();
+        let text = match &self.cleaner {
+            Some(cleaner) if !raw.is_empty() && self.should_clean(&raw) => {
+                match latest {
+                    // Nothing was heard since the last pause's cleanup: it is the final text.
+                    Some((done_raw, done_text)) if done_raw == raw => {
                         log.push(Entry::Cleanup {
+                            when: "reused",
                             input: raw.clone(),
-                            output: raw.clone(),
-                            ms,
-                            error: Some(e.to_string()),
+                            output: done_text.clone(),
+                            ms: 0.0,
+                            error: None,
                         });
-                        (raw.clone(), ms)
+                        done_text
+                    }
+                    _ => {
+                        if requested.as_deref() != Some(raw.as_str()) {
+                            cleaner.request(generation, raw.clone());
+                        }
+                        match cleaner.wait_for(generation, &raw, CLEANUP_TIMEOUT) {
+                            Some(c) => {
+                                log.push(c.entry("final"));
+                                // The words are never lost to a cleanup failure: the raw text goes in.
+                                c.text.unwrap_or_else(|e| {
+                                    tracing::warn!("cleanup failed, inserting the raw text: {e}");
+                                    raw.clone()
+                                })
+                            }
+                            None => {
+                                tracing::warn!("cleanup took over {CLEANUP_TIMEOUT:?}; inserting the raw text");
+                                log.push(Entry::Cleanup {
+                                    when: "final",
+                                    input: raw.clone(),
+                                    output: raw.clone(),
+                                    ms: started.elapsed().as_secs_f64() * 1e3,
+                                    error: Some("timed out".into()),
+                                });
+                                raw.clone()
+                            }
+                        }
                     }
                 }
             }
-            _ => (raw.clone(), 0.0),
+            _ => raw.clone(),
         };
+        let cleanup_ms = started.elapsed().as_secs_f64() * 1e3;
 
         // The Bar shows exactly what is pasted, as it is pasted.
         log.push(Entry::Bar { committed: text.clone(), preview: String::new(), is_final: true });
