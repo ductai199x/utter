@@ -91,6 +91,11 @@
   const waveColor =
     getComputedStyle(document.documentElement).getPropertyValue('--bar-wave').trim() || 'rgba(255,255,255,0.92)';
   function frame(now: number) {
+    // Nothing to draw while hidden; `wake` restarts the loop when the Bar shows again.
+    if (barState === 'hidden') {
+      raf = 0;
+      return;
+    }
     const dt = Math.min(50, now - last);
     last = now;
     const cv = canvas;
@@ -127,6 +132,13 @@
     raf = requestAnimationFrame(frame);
   }
 
+  function wake() {
+    if (raf === 0) {
+      last = performance.now();
+      raf = requestAnimationFrame(frame);
+    }
+  }
+
   onMount(() => {
     // The measuring copies report their own size after every layout, before paint: the
     // one-line width sets the pill's width, and the wrapped height at that width (which
@@ -137,7 +149,6 @@
     });
     if (measureEl) sizes.observe(measureEl);
     if (wrapEl) sizes.observe(wrapEl);
-    raf = requestAnimationFrame(frame);
     const unlisten = [
       on<{ state: BarState; handsFree?: boolean; message?: string }>('bar:state', (e) => {
         const p = e.payload;
@@ -148,6 +159,7 @@
           levels.fill(0);
         }
         barState = p.state;
+        if (p.state !== 'hidden') wake();
         if (p.handsFree !== undefined) handsFree = p.handsFree;
         if (p.state === 'hidden') handsFree = false;
         message = p.message ?? '';
@@ -196,7 +208,9 @@
         <!-- Laid out at the pill's target width, not its animated one: as the pill grows it
              reveals the text instead of reflowing it, so lines never spill past the height. -->
         <div class="text" style:width="{textAreaW + 1}px">
-          {committed}{#if preview}{#key preview}<span class="preview">{committed ? ' ' : ''}{preview}</span>{/key}{/if}
+          <!-- The provisional words update in place: re-creating them on every recognizer pass
+               would replay their fade, a flicker every 300 ms. -->
+          {committed}{#if preview}<span class="preview">{committed ? ' ' : ''}{preview}</span>{/if}
         </div>
       </div>
     {/if}
