@@ -69,6 +69,22 @@ class Collator:
         return {"input_ids": ids, "labels": labels, "attention_mask": mask}
 
 
+def save_merged(model, tokenizer, merged_dir: Path) -> None:
+    """Folds the LoRA into the weights and writes the full model where the converter reads it."""
+    merged = model.merge_and_unload()
+    merged.save_pretrained(merged_dir, safe_serialization=True)
+    tokenizer.save_pretrained(merged_dir)
+    # The converter wants the processor and chat template files beside the weights.
+    from huggingface_hub import snapshot_download
+
+    src = Path(
+        snapshot_download(BASE, revision=BASE_REVISION, allow_patterns=["*.json", "*.jinja"])
+    )
+    for f in src.iterdir():
+        if f.suffix in (".json", ".jinja") and not (merged_dir / f.name).exists():
+            shutil.copy(f, merged_dir / f.name)
+
+
 def _load(path: Path, tokenizer, max_length: int) -> list[dict]:
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
     out = [e for r in rows if (e := encode(tokenizer, r, max_length)) is not None]
@@ -145,19 +161,7 @@ def main(
     trainer.train()
 
     model.save_pretrained(out / "adapter")
-    merged = model.merge_and_unload()
-    merged_dir = out / "merged"
-    merged.save_pretrained(merged_dir, safe_serialization=True)
-    tokenizer.save_pretrained(merged_dir)
-    # The converter wants the processor and chat template files beside the weights.
-    from huggingface_hub import snapshot_download
-
-    src = Path(
-        snapshot_download(BASE, revision=BASE_REVISION, allow_patterns=["*.json", "*.jinja"])
-    )
-    for f in src.iterdir():
-        if f.suffix in (".json", ".jinja") and not (merged_dir / f.name).exists():
-            shutil.copy(f, merged_dir / f.name)
+    save_merged(model, tokenizer, out / "merged")
     record = {
         "base": BASE,
         "revision": BASE_REVISION,
