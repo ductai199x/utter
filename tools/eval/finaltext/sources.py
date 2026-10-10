@@ -197,7 +197,9 @@ def documents(path: Path, kind: str) -> Iterator[tuple[str, str, str, str]]:
             )
 
 
-def candidates(path: Path, kind: str) -> Iterator[tuple[str, str, str, str]]:
+def candidates(
+    path: Path, kind: str, keep_titles: bool = False
+) -> Iterator[tuple[str, str, str, str]]:
     for doc_id, text, url, lic in documents(path, kind):
         if kind == "irc":
             pieces = _irc_messages(text)
@@ -205,6 +207,10 @@ def candidates(path: Path, kind: str) -> Iterator[tuple[str, str, str, str]]:
             # One paragraph per line; headings are their own lines (and do not end like a
             # sentence, so the filter drops them).
             pieces = (line.strip() for line in text.split("\n"))
+        elif kind in ("se", "gh") and not keep_titles:
+            # The first line is the question's or issue's title, followed by a single newline:
+            # joined to the first paragraph it makes a run-on ("...RAID 5 array I have a...").
+            pieces = paragraphs(text.split("\n", 1)[1] if "\n" in text else "")
         else:
             pieces = paragraphs(text)
         for p in pieces:
@@ -216,6 +222,12 @@ def candidates(path: Path, kind: str) -> Iterator[tuple[str, str, str, str]]:
 def main(
     per_domain: int = typer.Option(200, help="Passages per domain and split... per eval split."),
     train_per_domain: int = typer.Option(0, help="Train passages per domain (0: none yet)."),
+    splits: list[str] = typer.Option(["eval", "train"], "--split", help="Which splits to write."),
+    keep_titles: bool = typer.Option(
+        False,
+        help="Keep Stack Exchange and GitHub titles glued to the first paragraph, as eval v1 "
+        "(2026-10-10) was built; reproduces that set exactly.",
+    ),
     seed: int = 0,
 ) -> None:
     from huggingface_hub import hf_hub_download
@@ -226,7 +238,7 @@ def main(
     for domain, repo, file, kind in SHARDS:
         path = Path(hf_hub_download(repo, file, repo_type="dataset"))
         n = 0
-        for doc_id, text, url, lic in candidates(path, kind):
+        for doc_id, text, url, lic in candidates(path, kind, keep_titles):
             if text in seen:
                 continue
             seen.add(text)
@@ -243,7 +255,7 @@ def main(
     out = eval_dir() / "finaltext"
     out.mkdir(parents=True, exist_ok=True)
     for split, want in (("eval", per_domain), ("train", train_per_domain)):
-        if not want:
+        if not want or split not in splits:
             continue
         chosen: list[Passage] = []
         for domain in sorted({d for d, _ in pools}):
