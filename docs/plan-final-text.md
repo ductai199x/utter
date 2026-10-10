@@ -64,6 +64,12 @@ Category metrics (below) show where the misses come from.
 
 ### 1. One document, cleaned as you speak
 
+First version (built 2026-10-10, `crates/utter-pipeline/src/clean.rs`): at every pause the whole
+dictation so far is cleaned, so a correction can reach back anywhere; if nothing was heard after
+the last pause's cleanup, it is the final text and the paste does not wait for the model. Most
+dictations are short, so this is the window below with no settled part. The settled part comes
+when long dictations need it (measured by the e2e bench).
+
 While the key is down, Utter keeps one document with three parts:
 
 | Part | What it is | Can it change? |

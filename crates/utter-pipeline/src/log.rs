@@ -60,7 +60,10 @@ pub enum Entry {
     Gate {
         reason: Option<&'static str>,
     },
+    /// A cleanup: "live" (while speaking, of the dictation so far), "final" (at key up), or
+    /// "reused" (at key up, the last live cleanup already covered everything).
     Cleanup {
+        when: &'static str,
         input: String,
         output: String,
         ms: f64,
