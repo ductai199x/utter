@@ -263,6 +263,10 @@ def synth(
         return {"id": pid, "domain": "list-everyday", "split": split, "text": md,
                 "source": "synthetic", "url": "", "license": "generated", "topic": topic}  # fmt: skip
 
+    # The same list twice would be one passage id with two renditions writing one WAV.
+    seen = (
+        {json.loads(line)["id"] for line in out.open(encoding="utf-8")} if out.exists() else set()
+    )
     kept = 0
     with (
         Remote(llm_url) as llm,
@@ -270,7 +274,8 @@ def synth(
         out.open("a", encoding="utf-8", newline="\n") as fh,
     ):
         for row in pool.map(one, range(count)):
-            if row:
+            if row and row["id"] not in seen:
+                seen.add(row["id"])
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 kept += 1
     print(f"{kept} of {count} everyday lists -> {out}")
