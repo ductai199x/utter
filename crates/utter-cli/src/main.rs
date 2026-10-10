@@ -137,6 +137,12 @@ enum Command {
         /// Seconds of silence between clips, as between dictations.
         #[arg(long, default_value_t = 1.0)]
         gap: f64,
+        /// A cleanup system prompt file instead of the product's.
+        #[arg(long)]
+        prompt: Option<PathBuf>,
+        /// Clean only the dictations the gate flags (the old behavior), not every one.
+        #[arg(long)]
+        gated: bool,
     },
     /// Show where voice activity detection cuts a 16 kHz mono WAV file into segments.
     Vad { file: PathBuf },
@@ -271,8 +277,15 @@ fn main() -> Result<()> {
         Command::Doctor => return doctor(),
         Command::Record { out, seconds, device } => return record(out, *seconds, device.clone()),
         Command::Vad { file } => return vad(file),
-        Command::E2eBench { sets, limit, name, tier, gap } => {
-            return e2e_bench(sets, *limit, name, (*tier).into(), *gap);
+        Command::E2eBench { sets, limit, name, tier, gap, prompt, gated } => {
+            let prompt = prompt.as_ref().map(std::fs::read_to_string).transpose().context("reading --prompt")?;
+            let cfg = utter_pipeline::PipelineConfig {
+                tier: (*tier).into(),
+                prompt,
+                always_clean: !*gated,
+                ..Default::default()
+            };
+            return e2e_bench(sets, *limit, name, cfg, *gap);
         }
         Command::Dictate { tier, dictionary, no_cleanup, device } => {
             return dictate((*tier).into(), dictionary, *no_cleanup, device.clone());
@@ -618,10 +631,10 @@ fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, d
     Ok(())
 }
 
-fn e2e_bench(sets: &str, limit: usize, name: &str, tier: utter_llm::cleanup::Tier, gap: f64) -> Result<()> {
-    use utter_pipeline::{Pipeline, PipelineConfig};
+fn e2e_bench(sets: &str, limit: usize, name: &str, cfg: utter_pipeline::PipelineConfig, gap: f64) -> Result<()> {
+    use utter_pipeline::Pipeline;
 
-    let mut pipeline = Pipeline::start(PipelineConfig { tier, ..Default::default() })?;
+    let mut pipeline = Pipeline::start(cfg)?;
     let eval = utter_core::data_dir().join("eval");
     let e2e_dir = eval.join("results").join("e2e").join(name);
     let asr_dir = eval.join("results").join("asr").join(format!("e2e-{name}"));
