@@ -33,8 +33,9 @@ from eval.finaltext.numbers import spoken_digits
 
 KINDS = ("natural", "explicit", "disfluent", "correction", "command")
 # Also available: "restate", a correction of a whole sentence (a wrong sentence, a cue such as
-# "scratch that", the right sentence), added to eval v1 as a supplement.
-EXTRA_KINDS = ("restate",)
+# "scratch that", the right sentence), added to eval v1 as a supplement; and "grammar", the
+# passage said with grammar mistakes (grammar.py).
+EXTRA_KINDS = ("restate", "grammar")
 
 # ---------------------------------------------------------------------------------------------
 # Step 2: reading a script aloud.
@@ -284,6 +285,10 @@ def make_script(kind: str, passage: str, rng: random.Random, llm, seed: int) -> 
         return correction_script(passage, rng, llm, seed)
     if kind == "command":
         return command_script(passage, rng, llm, seed)
+    if kind == "grammar":
+        from eval.finaltext.grammar import grammar_script
+
+        return grammar_script(passage, rng, llm, seed)
     raise ValueError(kind)
 
 
