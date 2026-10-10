@@ -16,17 +16,17 @@ pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
 /// must be sent exactly this.
 pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
 
-/// Which cleanup model runs. Both are Google's Gemma 4 QAT 4-bit builds, chosen by measurement
-/// (docs/eval-results.md); both run with [`SERVER_ARGS`].
+/// Which cleanup model runs, chosen by measurement (docs/eval-results.md); both run with
+/// [`SERVER_ARGS`], each with its own system prompt ([`Tier::system_prompt`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tier {
-    /// Gemma 4 E4B: about 3.3 GB of GPU memory (its 2.7 GB of per-layer embeddings stay in
-    /// system RAM), 97% of the cleanup checks, 124 ms p50 on real speech. The default: with
-    /// the speech model, Utter takes about 5.6 GB of GPU memory in all (2026-10-09).
+    /// Gemma 4 E4B fine-tuned for cleanup (ft4, huggingface.co/ductai199x/utter-cleanup-e4b):
+    /// about 3.3 GB of GPU memory (its per-layer embeddings stay in system RAM), and better than
+    /// the prompted 26B on every final-text eval (2026-10-10). The default: with the speech model,
+    /// Utter takes about 5.6 GB of GPU memory in all (2026-10-09).
     #[default]
     Light,
-    /// Gemma 4 26B-A4B: about 15 GB of GPU memory, 99% of the checks, 137 ms p50. Optional, for
-    /// GPUs with room.
+    /// Gemma 4 26B-A4B, prompted: about 15 GB of GPU memory. Optional, for GPUs with room.
     Quality,
 }
 
@@ -34,15 +34,24 @@ impl Tier {
     /// The runtime component holding the model (crates/utter-runtime/components.json).
     pub fn component(self) -> &'static str {
         match self {
-            Tier::Light => "gemma4-e4b-qat",
+            Tier::Light => "utter-cleanup-e4b",
             Tier::Quality => "gemma4-26b-a4b-qat",
         }
     }
 
     pub fn model_file(self) -> &'static str {
         match self {
-            Tier::Light => "gemma-4-E4B_q4_0-it.gguf",
+            Tier::Light => "utter-cleanup-e4b-ft4.q4_0.gguf",
             Tier::Quality => "gemma-4-26B_q4_0-it.gguf",
+        }
+    }
+
+    /// The system prompt this tier's model expects: the fine-tuned model was trained with
+    /// [`FINE_TUNED_PROMPT`] and must get exactly it.
+    pub fn system_prompt(self) -> &'static str {
+        match self {
+            Tier::Light => FINE_TUNED_PROMPT,
+            Tier::Quality => SYSTEM_PROMPT,
         }
     }
 }
@@ -77,9 +86,9 @@ pub fn server_options(tier: Tier) -> Result<ServerOptions, LlmError> {
     Ok(opts)
 }
 
-/// The messages for cleaning up `transcript`, with the user's dictionary words.
-pub fn messages(transcript: &str, dictionary: &[String]) -> [Message; 2] {
-    messages_with(SYSTEM_PROMPT, transcript, dictionary, &Context::default())
+/// The messages for cleaning up `transcript` with `tier`'s model and the user's dictionary words.
+pub fn messages(tier: Tier, transcript: &str, dictionary: &[String]) -> [Message; 2] {
+    messages_with(tier.system_prompt(), transcript, dictionary, &Context::default())
 }
 
 /// Where the dictation goes, as far as the platform can tell (docs/plan-use-cases.md, "The
@@ -154,15 +163,23 @@ mod tests {
 
     #[test]
     fn the_dictionary_comes_before_the_transcript() {
-        let [system, user] = messages("  hello there ", &["Utter".into(), "Nguyen".into()]);
+        let [system, user] = messages(Tier::Quality, "  hello there ", &["Utter".into(), "Nguyen".into()]);
         assert_eq!(system.role, "system");
         assert_eq!(user.content, "Dictionary: Utter, Nguyen\nDictated: hello there");
     }
 
     #[test]
     fn no_dictionary_line_without_words() {
-        let [_, user] = messages("hi", &[]);
+        let [_, user] = messages(Tier::Quality, "hi", &[]);
         assert_eq!(user.content, "Dictated: hi");
+    }
+
+    #[test]
+    fn each_tier_sends_the_prompt_its_model_expects() {
+        let [system, _] = messages(Tier::Light, "hi", &[]);
+        assert_eq!(system.content, FINE_TUNED_PROMPT);
+        let [system, _] = messages(Tier::Quality, "hi", &[]);
+        assert_eq!(system.content, SYSTEM_PROMPT);
     }
 
     #[test]

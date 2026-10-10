@@ -384,7 +384,7 @@ fn clean(text: &str, dictionary: &str, tier: utter_llm::cleanup::Tier) -> Result
     println!("cleanup model ({tier:?}) ready in {:.1} s", start.elapsed().as_secs_f64());
     let params = ChatParams { max_tokens: (text.len() as u32 / 2).max(64), ..ChatParams::default() };
     for round in ["cold", "warm"] {
-        let out = server.chat(&cleanup::messages(text, &dictionary), &params)?;
+        let out = server.chat(&cleanup::messages(tier, text, &dictionary), &params)?;
         println!("{round}: {:.0} ms", out.wall.as_secs_f64() * 1e3);
         if round == "warm" {
             println!("{}", cleanup::tidy_output(&out.text));
