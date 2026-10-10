@@ -144,8 +144,16 @@ class Tally:
         return out
 
 
-def _outputs(path: Path, field: str) -> dict[str, str]:
-    return {r["id"]: r[field] for r in (json.loads(line) for line in path.open(encoding="utf-8"))}
+def _rows(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def _latency(rows: list[dict], field: str, scale: float) -> dict[str, float]:
+    """p50 and p95 of a per-row time, in milliseconds."""
+    ms = sorted(r[field] * scale for r in rows if r.get(field) is not None)
+    if not ms:
+        return {}
+    return {"p50_ms": ms[len(ms) // 2], "p95_ms": ms[min(len(ms) - 1, int(len(ms) * 0.95))]}
 
 
 @app.command("score")
@@ -166,9 +174,14 @@ def score_cmd(
             if r["clean"]
         }
         rows = [r for r in rows if r["id"].rsplit("-", 1)[0] in clean]
-    systems = {"parakeet": _outputs(_results("asr", asr_name) / f"{eval_set}.jsonl", "hyp")}
+    asr_rows = _rows(_results("asr", asr_name) / f"{eval_set}.jsonl")
+    systems = {"parakeet": {r["id"]: r["hyp"] for r in asr_rows}}
+    # Each system's own time: the recognizer's per clip; a cleanup's per request (on top of it).
+    latency = {"parakeet": _latency(asr_rows, "latency_s", 1000.0)}
     for name in cleanup_names:
-        systems[name] = _outputs(_results("llm", name) / f"{eval_set}-input.jsonl", "output")
+        rows_out = _rows(_results("llm", name) / f"{eval_set}-input.jsonl")
+        systems[name] = {r["id"]: r["output"] for r in rows_out}
+        latency[name] = _latency(rows_out, "wall_ms", 1.0)
 
     summary: dict[str, dict[str, dict]] = {}
     for system, outs in systems.items():
@@ -189,6 +202,7 @@ def score_cmd(
             for k in keys:
                 groups[k].add(s, span_kinds)
         summary[system] = {k: t.row() for k, t in sorted(groups.items())}
+        summary[system]["all"]["latency"] = latency[system]
 
     out = eval_dir() / "results" / "finaltext" / f"{eval_set}--{asr_name}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -249,6 +263,15 @@ def _print(summary: dict[str, dict[str, dict]]) -> None:
             *[f"{summary[s]['all'][k]['hit_pct']:.1f}" for s in systems],
         )
     console.print(sp)
+
+    lat = Table(title="Time per dictation (recognizer per clip; cleanup per request, on top of it)")
+    lat.add_column("system")
+    lat.add_column("p50 ms", justify="right")
+    lat.add_column("p95 ms", justify="right")
+    for s in systems:
+        t = summary[s]["all"].get("latency") or {}
+        lat.add_row(s, f"{t.get('p50_ms', 0):.0f}", f"{t.get('p95_ms', 0):.0f}")
+    console.print(lat)
 
 
 if __name__ == "__main__":
