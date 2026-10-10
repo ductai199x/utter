@@ -22,6 +22,8 @@ _TENS = {
     "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
     "eighty": 80, "ninety": 90,
 }  # fmt: skip
+# Decades: "the nineteen thirties" is "the 1930s".
+_TENS |= {w[:-1] + "ies": v for w, v in _TENS.items()}
 _SCALES = {"hundred": 100, "thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000}
 _ORDINALS = {
     "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7,
@@ -32,6 +34,12 @@ _ORDINALS = {
     "thousandth": 1000,
 }  # fmt: skip
 _TOKEN = re.compile(r"[a-z]+|\d+")
+# Capital Roman numerals of two letters or more ("I", "V" and "X" alone are too often words).
+_ROMAN_VALUES = {
+    "II": 2, "III": 3, "IV": 4, "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "XI": 11, "XII": 12,
+    "XIII": 13, "XIV": 14, "XV": 15, "XVI": 16, "XVII": 17, "XVIII": 18, "XIX": 19, "XX": 20,
+}  # fmt: skip
+_ROMAN = re.compile(r"\b(?:" + "|".join(sorted(_ROMAN_VALUES, key=len, reverse=True)) + r")\b")
 
 
 def _is_number_word(w: str) -> bool:
@@ -58,7 +66,18 @@ class _Phrase:
 
     def add(self, w: str) -> None:
         if self.in_decimals:
-            self.decimals += str(_UNITS[w]) if w in _UNITS and _UNITS[w] < 10 else ""
+            # Digit by digit ("point zero four"), or as numbers, as versions are read
+            # ("sixteen point ten", "point twenty five").
+            if w in _UNITS:
+                v = _UNITS[w]
+                if v < 10 and self.last == "tens":
+                    self.decimals = self.decimals[:-1] + str(v)
+                else:
+                    self.decimals += str(v)
+                self.last = "unit"
+            elif w in _TENS:
+                self.decimals += str(_TENS[w])
+                self.last = "tens"
             return
         if w in _UNITS:
             v = _UNITS[w]
@@ -96,6 +115,7 @@ class _Phrase:
 
     def point(self) -> None:
         self.in_decimals = True
+        self.last = ""
 
     def half(self) -> None:
         self.in_decimals = True
@@ -112,6 +132,8 @@ def spoken_digits(text: str) -> str:
     number dropped)."""
     # Thousands separators join one number ("1,000"), not two.
     text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
+    # Regnal and sequel numerals are said as numbers ("Theodosius II" -> "the second").
+    text = _ROMAN.sub(lambda m: str(_ROMAN_VALUES[m.group()]), text)
     toks = _TOKEN.findall(text.lower())
     out: list[str] = []
     phrase: _Phrase | None = None
@@ -128,8 +150,15 @@ def spoken_digits(text: str) -> str:
             phrase = phrase or _Phrase()
             if t != "a":
                 phrase.add(t)
-        elif phrase and t == "point" and nxt in _UNITS:
+        elif phrase and t == "point" and (nxt in _UNITS or nxt in _TENS or nxt == "oh"):
             phrase.point()
+        elif phrase and phrase.in_decimals and t == "oh":
+            phrase.decimals += "0"  # "sixteen point oh four"
+        elif phrase and t == "oh" and nxt in _UNITS:
+            # "nineteen oh five" is 1905; "oh" outside a number is just "oh".
+            out.extend(phrase.groups())
+            out.append("0")
+            phrase = None
         elif phrase and t == "and" and nxt == "a" and i + 2 < len(toks) and toks[i + 2] == "half":
             phrase.half()
             i += 2

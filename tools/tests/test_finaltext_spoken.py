@@ -19,6 +19,15 @@ def test_words_accept_longer_and_shorter_forms():
     assert words_in_order("videos per min", "videos per minute")
 
 
+def test_abbreviations_match_the_words_read():
+    assert words_in_order("the UK loan vs a mortgage", "the u k loan versus a mortgage", 1.0)
+
+
+def test_a_typo_read_as_the_word_meant_does_not_match():
+    # The gold keeps the typo; a pair from this rendition would teach misspelling.
+    assert not words_in_order("a UK morgage", "a u k mortgage", min_ratio=1.0)
+
+
 def test_dropped_words_fail():
     assert not words_in_order(
         "send the report to the platform team by friday",
