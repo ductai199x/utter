@@ -7,7 +7,7 @@ messages_with): a system prompt, then a user message "Dictionary: ...\\n" (when 
 and "Dictated: <transcript>". The completion is the passage.
 
 Run: uv run python -m eval.finaltext.trainset --set en-finaltext-train-kokoro --asr NAME
-     --system PROMPT.md --out pairs.jsonl
+     --system PROMPT.md --passages passages-train --out pairs.jsonl
 """
 
 from __future__ import annotations
@@ -63,43 +63,71 @@ def _passage_of(clip_id: str) -> str:
     return clip_id.rsplit("-", 1)[0]
 
 
+def _jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
 def main(
-    eval_set: str = typer.Option(..., "--set"),
+    eval_sets: list[str] = typer.Option(..., "--set", help="Synthesized sets (repeatable)."),
     asr_name: str = typer.Option(..., "--asr"),
     system: Path = typer.Option(...),
     out: Path = typer.Option(...),
+    passages: list[str] = typer.Option(
+        [],
+        "--passages",
+        help="Passage files (stems under finaltext/, repeatable) whose text is the gold, by "
+        "passage id: they carry later gold fixes (goldfix --grammar). Without one, or for a "
+        "passage in none, the gold is the one the clip was synthesized with.",
+    ),
+    lists_off_share: float = typer.Option(
+        0.2, help="Share of list clips trained with Lists: off and the prose gold."
+    ),
     holdout: float = typer.Option(
         0.02, help="Fraction held out for the training run's own eval loss."
     ),
     seed: int = 0,
 ) -> None:
+    from eval.finaltext.lists import parse, prose_gold
+
     prompt = system.read_text(encoding="utf-8")
-    manifest = {
-        r["id"]: r
-        for r in (
-            json.loads(line)
-            for line in (eval_dir() / eval_set / "manifest.jsonl").open(encoding="utf-8")
+    golds: dict[str, str] = {}
+    for stem in passages:
+        golds.update(
+            {p["id"]: p["text"] for p in _jsonl(eval_dir() / "finaltext" / f"{stem}.jsonl")}
         )
-    }
-    hyp_path = eval_dir() / "results" / "asr" / asr_name / f"{eval_set}.jsonl"
-    hyps = [json.loads(line) for line in hyp_path.read_text(encoding="utf-8").splitlines() if line]
+    rng = random.Random(seed)
     rows = []
-    for h in hyps:
-        m = manifest.get(h["id"])
-        # Clips synthesized before sources.py filtered other languages are skipped here.
-        if m is None or not h["hyp"].strip() or not english(m["gold"]):
-            continue
-        rows.append(
-            {
-                "id": h["id"],
-                "kind": m["kind"],
-                "prompt": [
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_message(h["hyp"], [])},
-                ],
-                "completion": [{"role": "assistant", "content": m["gold"]}],
-            }
-        )
+    stale = 0
+    for eval_set in eval_sets:
+        manifest = {r["id"]: r for r in _jsonl(eval_dir() / eval_set / "manifest.jsonl")}
+        hyps = _jsonl(eval_dir() / "results" / "asr" / asr_name / f"{eval_set}.jsonl")
+        for h in hyps:
+            m = manifest.get(h["id"])
+            # Clips synthesized before sources.py filtered other languages are skipped here.
+            if m is None or not h["hyp"].strip() or not english(m["gold"]):
+                continue
+            pid = _passage_of(h["id"])
+            gold: str = golds[pid] if pid in golds else m["gold"]
+            stale += bool(passages) and pid not in golds
+            ctx = Context()
+            if m["kind"] == "list" and rng.random() < lists_off_share:
+                lp = parse(gold)
+                if lp is not None:
+                    gold = prose_gold(lp, m["tags"]["variant"])
+                    ctx = Context(lists_off=True)
+            rows.append(
+                {
+                    "id": h["id"],
+                    "kind": m["kind"],
+                    "prompt": [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_message(h["hyp"], [], ctx)},
+                    ],
+                    "completion": [{"role": "assistant", "content": gold}],
+                }
+            )
+    if stale:
+        print(f"{stale} clips' passages are in no --passages file: their synthesized gold is used")
     random.Random(seed).shuffle(rows)
     # Whole passages are held out: a passage's other renditions in training would make the
     # eval loss look better than it is.
