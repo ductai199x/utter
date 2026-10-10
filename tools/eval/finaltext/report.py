@@ -67,6 +67,7 @@ def cleanup(
     name: str = typer.Option(...),
     model: str = "gemma4-e4b-qat",
     prompt: Path | None = typer.Option(None, help="A system prompt file instead of the product's."),
+    gguf: Path | None = typer.Option(None, help="A GGUF file instead of an installed model."),
 ) -> None:
     from eval.finaltext.llm import model_path
 
@@ -84,7 +85,7 @@ def cleanup(
         str(CLI),
         "llm-bench",
         "--gguf",
-        str(model_path(model)),
+        str(gguf.resolve() if gguf else model_path(model)),
         "--name",
         name,
         "--cases",
