@@ -1,0 +1,16 @@
+[package]
+name = "utter-audio"
+description = "Microphone capture for Utter: native-rate capture, 16 kHz mono, pre-roll, levels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+cpal.workspace = true
+rubato.workspace = true
+audioadapter-buffers.workspace = true
+ringbuf.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

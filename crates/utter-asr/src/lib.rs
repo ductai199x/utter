@@ -7,6 +7,7 @@ mod config;
 pub mod frontend;
 pub mod parakeet;
 pub mod runtime;
+pub mod vad;
 mod vocab;
 
 use std::path::{Path, PathBuf};
