@@ -185,6 +185,9 @@ enum Command {
         /// does from key down to key up.
         #[arg(long)]
         warm_gpu: bool,
+        /// A system prompt file to use instead of the product's (prompts/cleanup.md).
+        #[arg(long)]
+        prompt: Option<PathBuf>,
     },
     /// Clean up dictated text with the installed cleanup model and its product settings.
     Clean {
@@ -286,9 +289,16 @@ fn main() -> Result<()> {
             gap_ms,
             keepalive_ms,
             warm_gpu,
+            prompt,
         } => {
             let pacing = Pacing { gap_ms: *gap_ms, keepalive_ms: *keepalive_ms };
-            return llm_bench(gguf, cases, name, server_args, *limit, *prefill_fraction, pacing, *warm_gpu);
+            let opts = LlmBenchOptions {
+                prefill_fraction: *prefill_fraction,
+                pacing,
+                warm_gpu: *warm_gpu,
+                prompt: prompt.clone(),
+            };
+            return llm_bench(gguf, cases, name, server_args, *limit, &opts);
         }
         _ => {}
     }
@@ -378,19 +388,30 @@ fn chat(gguf: &Path, system: &str, message: &str, server_args: &[String]) -> Res
     Ok(())
 }
 
-#[expect(clippy::too_many_arguments, reason = "one per command-line option")]
+/// How llm-bench runs each case (its command-line options).
+struct LlmBenchOptions {
+    prefill_fraction: f64,
+    pacing: Pacing,
+    warm_gpu: bool,
+    prompt: Option<PathBuf>,
+}
+
 fn llm_bench(
     gguf: &Path,
     case_files: &[PathBuf],
     name: &str,
     server_args: &[String],
     limit: usize,
-    prefill_fraction: f64,
-    pacing: Pacing,
-    warm_gpu: bool,
+    bench: &LlmBenchOptions,
 ) -> Result<()> {
     use utter_llm::{ChatParams, LlamaServer, ServerOptions, cleanup};
 
+    let LlmBenchOptions { prefill_fraction, pacing, warm_gpu, .. } = *bench;
+    let system = match &bench.prompt {
+        Some(path) => std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
+        None => cleanup::SYSTEM_PROMPT.to_owned(),
+    };
+    let messages = |text: &str, dictionary: &[String]| cleanup::messages_with(&system, text, dictionary);
     let mut opts = ServerOptions::new(gguf);
     opts.extra_args = server_args.to_vec();
     let server = LlamaServer::start(&opts).with_context(|| format!("starting llama-server on {}", gguf.display()))?;
@@ -406,7 +427,7 @@ fn llm_bench(
             "keepalive_ms": pacing.keepalive_ms,
             "warm_gpu": warm_gpu,
             "llama_cpp": utter_runtime::component("llama-cpp")?.version,
-            "prompt": "crates/utter-llm/prompts/cleanup.md",
+            "prompt": bench.prompt.as_ref().map_or("crates/utter-llm/prompts/cleanup.md".to_owned(), |p| p.display().to_string()),
         }))?,
     )?;
     // Cleanup output is about as long as its input; a cap stops a model that starts
@@ -414,7 +435,7 @@ fn llm_bench(
     let warmer = warm_gpu.then(utter_runtime::gpu::GpuWarmer::new);
     let params = |input: &str| ChatParams { max_tokens: (input.len() as u32 / 2).max(64), ..ChatParams::default() };
     for warm in ["Um, this is a warm-up.", "The the second warm-up, no, third."] {
-        server.chat(&cleanup::messages(warm, &[]), &params(warm))?;
+        server.chat(&messages(warm, &[]), &params(warm))?;
     }
     for file in case_files {
         let mut rows: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
@@ -451,7 +472,7 @@ fn llm_bench(
                 }
                 std::thread::sleep(left.min(std::time::Duration::from_millis(pacing.keepalive_ms)));
                 if std::time::Instant::now() < gap_end {
-                    server.keep_warm(&cleanup::messages("", &dictionary))?;
+                    server.keep_warm(&messages("", &dictionary))?;
                 }
             }
             if let Some(w) = &warmer {
@@ -462,12 +483,12 @@ fn llm_bench(
                 let keep = ((words.len() as f64) * prefill_fraction).floor() as usize;
                 if keep > 0 {
                     let partial = words[..keep].join(" ");
-                    let pre = server.prefill(&cleanup::messages(&partial, &dictionary))?;
+                    let pre = server.prefill(&messages(&partial, &dictionary))?;
                     row.insert("prefill_ms".into(), (pre.wall.as_secs_f64() * 1e3).into());
                     row.insert("prefill_predicted_n".into(), pre.server.predicted_n.into());
                 }
             }
-            let out = server.chat(&cleanup::messages(&input, &dictionary), &params(&input))?;
+            let out = server.chat(&messages(&input, &dictionary), &params(&input))?;
             let s = out.server;
             row.insert("output".into(), cleanup::tidy_output(&out.text).into());
             row.insert("raw_output".into(), out.text.clone().into());

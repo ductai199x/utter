@@ -74,6 +74,11 @@ pub fn server_options(tier: Tier) -> Result<ServerOptions, LlmError> {
 
 /// The messages for cleaning up `transcript`, with the user's dictionary words.
 pub fn messages(transcript: &str, dictionary: &[String]) -> [Message; 2] {
+    messages_with(SYSTEM_PROMPT, transcript, dictionary)
+}
+
+/// [`messages`] with another system prompt: for measuring prompt changes before they ship.
+pub fn messages_with(system: &str, transcript: &str, dictionary: &[String]) -> [Message; 2] {
     let mut user = String::new();
     if !dictionary.is_empty() {
         user.push_str("Dictionary: ");
@@ -82,7 +87,7 @@ pub fn messages(transcript: &str, dictionary: &[String]) -> [Message; 2] {
     }
     user.push_str("Dictated: ");
     user.push_str(transcript.trim());
-    [Message::system(SYSTEM_PROMPT), Message::user(user)]
+    [Message::system(system), Message::user(user)]
 }
 
 /// What a model returns, minus wrapping some models add despite the prompt: a leading
