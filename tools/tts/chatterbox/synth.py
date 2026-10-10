@@ -25,7 +25,7 @@ import soxr
 import typer
 
 VOICE_REPO = "kyutai/tts-voices"
-VOICE_REVISION = "main"
+VOICE_REVISION = "323332d33f997de8394f24a193e1a76df720e01a"
 RATE = 16_000
 
 
@@ -47,16 +47,29 @@ def voices(split: str) -> list[str]:
     return [f for f in ids if (_unit(f + ":split") < 0.3) == (split == "eval")]
 
 
-def main(renditions: Path, passages: Path, name: str = "chatterbox", split: str = "eval", limit: int = 0) -> None:
+def main(
+    renditions: Path,
+    passages: Path,
+    name: str = "chatterbox",
+    split: str = "eval",
+    limit: int = 0,
+    shard: str = typer.Option("0/1", help="I/N: speak only this share, for N processes at once."),
+) -> None:
+    """Resumes where a previous run stopped. With N > 1, shard I writes manifest.I-of-N.jsonl;
+    concatenate the parts into manifest.jsonl when all are done."""
     import torch
     from chatterbox.tts import ChatterboxTTS
     from huggingface_hub import hf_hub_download
 
+    index, count = (int(x) for x in shard.split("/"))
     gold = {}
     for line in passages.open(encoding="utf-8"):
         p = json.loads(line)
         gold[p["id"]] = p
     rows = [json.loads(line) for line in renditions.open(encoding="utf-8")]
+    # Renditions of passages since dropped from the passage file (sources.py filters) are not spoken.
+    rows = [r for r in rows if r["passage_id"] in gold]
+    rows = [r for r in rows if int(_unit(f"{r['passage_id']}-{r['kind']}:shard") * count) % count == index]
     if limit:
         rows = rows[:limit]
     pool = voices(split)
@@ -64,10 +77,10 @@ def main(renditions: Path, passages: Path, name: str = "chatterbox", split: str 
 
     out = eval_dir() / f"en-finaltext-{name}"
     out.mkdir(parents=True, exist_ok=True)
-    manifest = out / "manifest.jsonl"
+    manifest = out / ("manifest.jsonl" if count == 1 else f"manifest.{index}-of-{count}.jsonl")
     done = set()
-    if manifest.exists():
-        done = {json.loads(line)["id"] for line in manifest.open(encoding="utf-8")}
+    for part in out.glob("manifest*.jsonl"):
+        done |= {json.loads(line)["id"] for line in part.open(encoding="utf-8")}
 
     model = ChatterboxTTS.from_pretrained(device="cuda")
     with manifest.open("a", encoding="utf-8") as fh:
