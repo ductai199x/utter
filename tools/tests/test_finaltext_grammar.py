@@ -37,7 +37,10 @@ def test_no_change_is_rejected():
 
 
 def test_punctuation_and_case_are_not_grammar():
-    assert edit_types("the results are in the table below", "The results are in the table below.") == []
+    assert (
+        edit_types("the results are in the table below", "The results are in the table below.")
+        == []
+    )
 
 
 def test_plans_draw_types_from_their_profile():
