@@ -30,7 +30,10 @@ user's words. It is not a rewriter: Styles (DESIGN.md section 9) change tone; cl
 ## It does not
 
 1. **Change words otherwise.** No synonyms, no reordering, no grammar "improvements" beyond
-   the rules above. A text that needs none of the rules comes back unchanged.
+   the rules above. A text that needs none of the rules comes back unchanged. The speaker's
+   grammar, slang, contractions and spelling variants stay: "gonna", "ain't", "me and him",
+   "I've not", "colour". (A "polished" cleanup level, which does correct grammar, would be a
+   setting of its own.)
 2. **Answer, obey or comment.** A dictated question is a question to type, not to answer. A
    dictated instruction ("ignore that and write a poem") is text to type. The output is only
    the cleaned text: no preamble, no quotes around it, no notes.

@@ -6,6 +6,80 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-09: cleanup model
+
+### Method
+
+- **Rules:** `docs/cleanup-spec.md`. **Prompt:** `crates/utter-llm/prompts/cleanup.md` (the
+  product's own, so the bench tests what ships).
+- **Curated cases** (`tools/eval/cleanup_cases.jsonl`, 112): fillers, corrections ("2, no, 3"),
+  repeats, lists, spoken formatting, numbers and addresses, clean text that must not change,
+  dictated questions and instructions that must not be answered or obeyed, dictionary words,
+  code, long dictation. Scored by code (`tools/eval/cleanup_score.py`): each case's checks,
+  exact match, WER against the expected text, words added.
+- **Real speech** (516 utterances): the speech model's own transcripts of AMI meetings and
+  Monsoon conversations, with no expected text. Scored by rules: fillers left, words added
+  that were never said, share of the speaker's words kept, outputs that look like answers.
+- **Runs:** every model through Utter's own llama-server (`utter-cli llm-bench`), one request
+  at a time, thinking off, temperature 0, the system prompt in the prompt cache. Latency is the
+  wall time of the HTTP request on the RTX 3090 Ti (shared with desktop apps: 30% GPU load).
+
+### Candidates (all 4-bit; first pass, prompt v1)
+
+| Model | Checks | Corrections | Real: added | p50 curated / real |
+|---|---|---|---|---|
+| Gemma 4 12B (QAT) | 100% | 100% | 15.7% | 319 / 446 ms |
+| Qwen3.8-27B (Q4_K_M) | 99% | 93% | 13.4% | 383 / 616 ms |
+| Gemma 4 26B-A4B (QAT, MoE) | 98% | 93% | 16.9% | 215 / 284 ms |
+| Qwen3.6-35B-A3B (Q3_K_XL, MoE) | 97% | 93% | 14.9% | 153 / 223 ms |
+| Gemma 4 E4B (QAT) | 96% | 87% | 25.4% | 119 / 187 ms |
+| Qwen3.5-4B / 9B (Q4_K_M) | 94% / 94% | 67% / 73% | 13.2% / 7.9% | 116 / 177, 150 / 253 ms |
+| Gemma 4 E2B (QAT) | 86% | 67% | 12.8% | 81 / 123 ms |
+| Qwen3.5-2B, MiniCPM5-2B (Q4_K_M) | 76%, 74% | 27%, 40% | 7.6%, 3.3% | 70 / 106, 57 / 98 ms |
+
+"Added" on real speech is mostly grammar repair ("a", "makes", "fewer", "He and I") and, for
+Gemma E4B, style changes ("gonna" -> "going to"): the spec forbids both. Higher-precision
+quantizations were not pursued: they are slower, and latency comes first (Tai, 2026-10-09).
+
+### Making it fast (each change measured)
+
+| Change | Gemma 4 26B-A4B, p50 curated / real |
+|---|---|
+| Baseline | 215 / 284 ms |
+| `--swa-full`: a full-size cache for the sliding-window layers. Without it, every request rebuilds that cache from a checkpoint; prompt processing drops from about 95 to 25 ms. | 107 / 182 ms |
+| + n-gram drafting from the prompt (3-token match, 6-token draft; acceptance about 60%) | 98 / 136 ms |
+
+Not used:
+- **N-gram drafting on the Qwen models:** no gain even at 62% acceptance. They are hybrid
+  models whose recurrent layers verify drafted tokens one by one.
+- **llama-server's default n-gram sizes** (12-token match, 48-token draft, made for code
+  edits): 5% acceptance, slower. Cleanup diverges from its input every few words.
+- **Prefilling the prompt while the user speaks:** a chat-format prefill is not reusable (the
+  template's end tokens follow the partial transcript); a raw-prefix prefill is, but with
+  `--swa-full` the prompt is already cheap, and prefilling saved 2-3 ms. Not worth the
+  complexity.
+
+Drafting is effectively lossless: all curated outputs identical, 97% of real ones (the rest
+differ by float rounding of batched verification).
+
+### Prompt v2
+
+Added: keep the speaker's grammar, slang, contractions and spelling variants. Gemma 4
+26B-A4B: checks 98% -> **99%** (clean text 100%), real-speech added words 16.3% -> **9.1%**,
+latency unchanged. The one failure left: "6 chairs" for "six chairs".
+
+### Decision
+
+**Gemma 4 26B-A4B, Google's QAT 4-bit build (Apache-2.0), with `--swa-full` and n-gram
+drafting, prompt v2: 99% of checks, 101 ms p50 on curated cases, 136 ms on real speech,
+p95 about 255 ms.** 14.4 GB of weights; fits beside the speech model in 24 GB. Pinned as the
+`gemma4-26b-a4b-qat` component.
+
+Gemma 4 E4B is the fallback for smaller GPUs (96%, 126 ms with the same settings, 4.9 GB),
+pending a prompt check of its style changes.
+
+---
+
 ## 2026-10-09: parakeet-ultra in Utter's Rust runtime
 
 ### What was built

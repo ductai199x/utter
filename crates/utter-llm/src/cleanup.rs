@@ -4,10 +4,47 @@
 //! The system prompt never changes between requests and comes first, so llama-server keeps
 //! it in its prompt cache: after the first request, only the transcript is new work.
 
-use crate::Message;
+use std::path::PathBuf;
+
+use crate::{LlmError, Message, ServerOptions};
 
 /// The cleanup system prompt.
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
+
+/// The runtime component holding the cleanup model (crates/utter-runtime/components.json):
+/// Gemma 4 26B-A4B, Google's QAT 4-bit build. Chosen by measurement, docs/eval-results.md.
+pub const MODEL_COMPONENT: &str = "gemma4-26b-a4b-qat";
+pub const MODEL_FILE: &str = "gemma-4-26B_q4_0-it.gguf";
+
+/// llama-server settings measured for this model (docs/eval-results.md, 2026-10-09):
+/// - `--swa-full`: a full-size cache for the sliding-window layers. Without it every request
+///   rebuilds that cache from a checkpoint; with it, prompt processing drops from about 95 ms
+///   to 25 ms. Wall time per cleanup halves.
+/// - n-gram drafting from the prompt, 3-token match, 6-token draft: cleanup copies most of its
+///   input, so drafts are accepted about 60% of the time. Another 25% off on real speech;
+///   outputs are the same as without it (all curated cases, 97% of real ones; the rest differ
+///   by float rounding of batched verification).
+pub const SERVER_ARGS: &[&str] = &[
+    "--swa-full",
+    "--spec-type",
+    "ngram-simple",
+    "--spec-ngram-simple-size-n",
+    "3",
+    "--spec-ngram-simple-size-m",
+    "6",
+];
+
+/// The installed cleanup model's file, or an error naming how to install it.
+pub fn installed_model() -> Result<PathBuf, LlmError> {
+    Ok(utter_runtime::component(MODEL_COMPONENT)?.installed_dir()?.join(MODEL_FILE))
+}
+
+/// Server options for the installed cleanup model with its measured settings.
+pub fn server_options() -> Result<ServerOptions, LlmError> {
+    let mut opts = ServerOptions::new(installed_model()?);
+    opts.extra_args = SERVER_ARGS.iter().map(|s| (*s).to_owned()).collect();
+    Ok(opts)
+}
 
 /// The messages for cleaning up `transcript`, with the user's dictionary words.
 pub fn messages(transcript: &str, dictionary: &[String]) -> [Message; 2] {

@@ -33,6 +33,7 @@ def main(
     server_arg: list[str] = typer.Option([], help="Passed to llama-server, repeatable."),
     suffix: str = typer.Option("", help="Appended to result names, e.g. '-ngram'."),
     redo: bool = typer.Option(False),
+    prefill: float = typer.Option(0.0, help="Prefill this fraction of each transcript first."),
 ) -> None:
     for c in candidates():
         if names and c["name"] not in names:
@@ -43,6 +44,8 @@ def main(
             print(f"{name}: done, skipped", flush=True)
             continue
         cmd = [str(CLI), "llm-bench", "--gguf", str(local_path(c)), "--name", name]
+        if prefill:
+            cmd += ["--prefill-fraction", str(prefill)]
         for case in CASES:
             cmd += ["--cases", str(case)]
         for a in server_arg:
