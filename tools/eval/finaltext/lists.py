@@ -194,6 +194,88 @@ def extract(
     print(f"wrote {len(rows)} -> {out}")
 
 
+# Everyday lists, which the sources (mostly technical) lack: what people dictate on the go.
+TOPICS = (
+    "a grocery list", "a packing list for a trip", "today's to-do list", "errands to run",
+    "a meeting agenda", "action items from a meeting", "steps of a recipe", "gift ideas",
+    "things to bring to a party", "a moving checklist", "steps to set up a new phone",
+    "questions to ask a landlord", "books to read", "a workout plan", "chores for the weekend",
+    "a reading list for a class", "bugs to fix this sprint", "a hardware shopping list",
+    "steps to reset a router", "topics for a one-on-one",
+)  # fmt: skip
+
+_PROPOSE_LIST = """You help build test data for a dictation app. Write one realistic list a
+person might dictate: {topic}. Return JSON with:
+- "intro": a short line introducing it, ending with a colon ("Groceries for Saturday:"), or ""
+  for none;
+- "ordered": true for steps or a sequence, false for a set of items;
+- "items": 3 to 8 items, written the way a careful person types them: short noun phrases or
+  short sentences, consistent with each other, with quantities and names where natural."""
+
+_LIST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intro": {"type": "string"},
+        "ordered": {"type": "boolean"},
+        "items": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["intro", "ordered", "items"],
+}
+
+
+@app.command()
+def synth(
+    split: str = typer.Option("train", "--split"),
+    count: int = 2000,
+    slots: int = 64,
+    llm_url: str = typer.Option(..., help="An OpenAI-style server (e.g. vLLM)."),
+) -> None:
+    """Appends LLM-written everyday lists to passages-lists-<split>.jsonl (domain
+    "list-everyday", source "synthetic"). Eval and train use different seeds."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from eval.finaltext.llm import Remote
+
+    out = eval_dir() / "finaltext" / f"passages-lists-{split}.jsonl"
+    base = 1_000_000 if split == "eval" else 0
+
+    def one(i: int) -> dict | None:
+        topic = TOPICS[i % len(TOPICS)]
+        reply = llm.chat(
+            [{"role": "user", "content": _PROPOSE_LIST.format(topic=topic)}],
+            max_tokens=400,
+            temperature=1.0,
+            seed=base + i,
+            json_schema=_LIST_SCHEMA,
+        )
+        try:
+            p = json.loads(reply)
+        except json.JSONDecodeError:
+            return None
+        items = [str(it).strip() for it in p["items"] if str(it).strip()]
+        intro = p["intro"].strip()
+        if not 3 <= len(items) <= 10 or not all(map(_dictatable_item, items)):
+            return None
+        if intro and not intro.endswith(":"):
+            intro += ":"
+        md = ListPassage(intro, consistent(items), bool(p["ordered"])).markdown()
+        pid = hashlib.sha256(md.encode()).hexdigest()[:12]
+        return {"id": pid, "domain": "list-everyday", "split": split, "text": md,
+                "source": "synthetic", "url": "", "license": "generated", "topic": topic}  # fmt: skip
+
+    kept = 0
+    with (
+        Remote(llm_url) as llm,
+        ThreadPoolExecutor(slots) as pool,
+        out.open("a", encoding="utf-8", newline="\n") as fh,
+    ):
+        for row in pool.map(one, range(count)):
+            if row:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                kept += 1
+    print(f"{kept} of {count} everyday lists -> {out}")
+
+
 # ---------------------------------------------------------------------------------------------
 # Spoken scripts and the prose gold.
 
