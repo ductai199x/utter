@@ -26,9 +26,14 @@ from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 
+import typer
+
 from eval.finaltext.numbers import spoken_digits
 
 KINDS = ("natural", "explicit", "disfluent", "correction", "command")
+# Also available: "restate", a correction of a whole sentence (a wrong sentence, a cue such as
+# "scratch that", the right sentence), added to eval v1 as a supplement.
+EXTRA_KINDS = ("restate",)
 
 # ---------------------------------------------------------------------------------------------
 # Step 2: reading a script aloud.
@@ -204,8 +209,10 @@ def disfluent_script(passage: str, rng: random.Random, llm, seed: int) -> Script
     return Script("disfluent", "natural", text, tags)
 
 
-def correction_script(passage: str, rng: random.Random, llm, seed: int) -> Script | None:
-    want = rng.choice(SCOPES)
+def correction_script(
+    passage: str, rng: random.Random, llm, seed: int, scope: str | None = None
+) -> Script | None:
+    want = scope or rng.choice(SCOPES)
     try:
         p = _ask(llm, _PROPOSE_CORRECTION, passage, _CORRECTION_SCHEMA, seed, note=f"Scope: {want}")
     except (ValueError, KeyError):
@@ -263,6 +270,9 @@ def make_script(kind: str, passage: str, rng: random.Random, llm, seed: int) -> 
         return Script(kind, kind, passage)
     if kind == "disfluent":
         return disfluent_script(passage, rng, llm, seed)
+    if kind == "restate":
+        s = correction_script(passage, rng, llm, seed, scope="sentence")
+        return Script("restate", s.style, s.text, s.tags) if s else None
     if kind == "correction":
         return correction_script(passage, rng, llm, seed)
     if kind == "command":
@@ -405,8 +415,10 @@ def main(
     model: str = "gemma4-26b-a4b-qat",
     slots: int = 6,
     limit: int = 0,
+    kinds: list[str] = typer.Option(list(KINDS), "--kind", help="Kinds to render (repeatable)."),
+    out_name: str = typer.Option("", help="Renditions file stem (default: renditions-<split>)."),
 ) -> None:
-    """Renders every passage of a split in every kind; resumes where a previous run stopped."""
+    """Renders every passage of a split in each kind; resumes where a previous run stopped."""
     from eval.finaltext.llm import Server, model_path
     from eval.paths import eval_dir
 
@@ -416,7 +428,10 @@ def main(
     ]
     if limit:
         passages = passages[:limit]
-    out = root / f"renditions-{split}.jsonl"
+    if "restate" in kinds:
+        # A sentence correction needs a sentence to correct and one to keep.
+        passages = [p for p in passages if len(re.findall(r"[.!?](?:\s|$)", p["text"])) >= 2]
+    out = root / f"{out_name or f'renditions-{split}'}.jsonl"
     done: set[tuple[str, str]] = set()
     if out.exists():
         for line in out.open(encoding="utf-8"):
@@ -424,7 +439,7 @@ def main(
             done.add((r["passage_id"], r["kind"]))
     failed = kept = 0
     with Server(model_path(model), slots=slots) as llm, out.open("a", encoding="utf-8") as fh:
-        for kind in KINDS:
+        for kind in kinds:
             todo = [(p["id"], p["text"]) for p in passages if (p["id"], kind) not in done]
             for pid, _, r, rejections in render(llm, todo, kinds=[kind], workers=slots):
                 if r is None:
@@ -440,6 +455,4 @@ def main(
 
 
 if __name__ == "__main__":
-    import typer
-
     typer.run(main)
