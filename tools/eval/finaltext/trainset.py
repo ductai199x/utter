@@ -63,6 +63,11 @@ def _passage_of(clip_id: str) -> str:
     return clip_id.rsplit("-", 1)[0]
 
 
+def _norm(text: str) -> str:
+    """Text compared for overlap: case and spacing do not make a passage new."""
+    return " ".join(text.lower().split())
+
+
 def _jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
@@ -90,6 +95,13 @@ def main(
     from eval.finaltext.lists import parse, prose_gold
 
     prompt = system.read_text(encoding="utf-8")
+    # Nothing an eval set scores may train: a passage can recur across documents (boilerplate
+    # lists, quotes), so the split by document alone does not guarantee it.
+    held_out: set[str] = set()
+    for path in (eval_dir() / "finaltext").glob("passages-*eval*.jsonl"):
+        for p in _jsonl(path):
+            held_out |= {p["id"], _norm(p["text"])}
+    leaked = 0
     golds: dict[str, str] = {}
     for stem in passages:
         golds.update(
@@ -109,6 +121,9 @@ def main(
             pid = _passage_of(h["id"])
             gold: str = golds[pid] if pid in golds else m["gold"]
             stale += bool(passages) and pid not in golds
+            if pid in held_out or _norm(gold) in held_out or _norm(m["gold"]) in held_out:
+                leaked += 1
+                continue
             ctx = Context()
             if m["kind"] == "list" and rng.random() < lists_off_share:
                 lp = parse(gold)
@@ -128,6 +143,7 @@ def main(
             )
     if stale:
         print(f"{stale} clips' passages are in no --passages file: their synthesized gold is used")
+    print(f"{leaked} clips left out: their passage is in an eval set")
     random.Random(seed).shuffle(rows)
     # Whole passages are held out: a passage's other renditions in training would make the
     # eval loss look better than it is.
