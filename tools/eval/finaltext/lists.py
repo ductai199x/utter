@@ -33,6 +33,7 @@ app = typer.Typer(add_completion=False)
 def _commands() -> None:
     """Lists for the final-text eval and training data."""
 
+
 _ITEM = re.compile(r"^[ \t]*(?:([-*•])|(\d+)[.)])[ \t]+(\S.*)$")
 _ORDINALS = [
     "first",
@@ -81,14 +82,39 @@ def parse(text: str) -> ListPassage | None:
 # Extraction from the sources.
 
 
+# Shell and code fragments the code filter misses: commands, flags, operators.
+_SHELL = re.compile(
+    r"(?:^|\s)(?:sudo|apt(?:-get)?|dpkg|chmod|chown|chgrp|grep|cd|ls|rm|mv|cp|fi|done|esac)\b"
+    r"|\s--?[a-z]|[+=_/\\|<>{}$]"
+)
+
+
 def _dictatable_item(item: str) -> bool:
     words = item.split()
     if not 1 <= len(words) <= 20:
         return False
-    if _URL.search(item) or _CODE.search(item) or _LATEX.search(item):
+    if _URL.search(item) or _CODE.search(item) or _LATEX.search(item) or _SHELL.search(item):
         return False
     letters = sum(c.isalpha() for c in item)
     return letters / max(1, sum(not c.isspace() for c in item)) >= 0.75 and item.isascii()
+
+
+def consistent(items: list[str]) -> list[str]:
+    """Items written one way: a final period on all or none, and a capital first letter on all
+    or none, as most of them have it. A careful writer is consistent, and the gold is what a
+    careful writer types."""
+    stripped = [it.rstrip(".;,") for it in items]
+    period = sum(it.endswith(".") for it in items) * 2 > len(items)
+    capital = sum(it[:1].isupper() for it in stripped) * 2 > len(items)
+
+    def first(it: str) -> str:
+        head = it.split(" ", 1)[0]
+        # Acronyms and names keep their case ("GPU", "iPhone").
+        if head[1:] != head[1:].lower() or (head.isupper() and len(head) > 1):
+            return it
+        return (it[0].upper() if capital else it[0].lower()) + it[1:]
+
+    return [first(it) + ("." if period else "") for it in stripped]
 
 
 def lists_in(text: str) -> list[ListPassage]:
@@ -115,7 +141,7 @@ def lists_in(text: str) -> list[ListPassage]:
             else ""
         )
         if 3 <= len(items) <= 10 and (ordered or unordered) and all(map(_dictatable_item, items)):
-            lp = ListPassage(intro, items, ordered)
+            lp = ListPassage(intro, consistent(items), ordered)
             if english(lp.markdown()):
                 out.append(lp)
         i = j
