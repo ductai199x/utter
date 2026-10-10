@@ -106,6 +106,18 @@ enum Command {
         /// Cases per file (0: all).
         #[arg(long, default_value_t = 0)]
         limit: usize,
+        /// Before each case, prefill the prompt cache with this fraction of its words, as the
+        /// pipeline does while the user speaks (0: off). The timed request is the one after.
+        #[arg(long, default_value_t = 0.0)]
+        prefill_fraction: f64,
+    },
+    /// Clean up dictated text with the installed cleanup model and its product settings.
+    Clean {
+        /// The text, as the speech model would write it.
+        text: Vec<String>,
+        /// Dictionary words, comma-separated.
+        #[arg(long, default_value = "")]
+        dictionary: String,
     },
     /// Start Utter's llama-server on a GGUF model and send one chat message.
     Chat {
@@ -177,8 +189,9 @@ fn main() -> Result<()> {
         Command::Setup { ids } => return setup(ids),
         Command::Doctor => return doctor(),
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
-        Command::LlmBench { gguf, cases, name, server_args, limit } => {
-            return llm_bench(gguf, cases, name, server_args, *limit);
+        Command::Clean { text, dictionary } => return clean(&text.join(" "), dictionary),
+        Command::LlmBench { gguf, cases, name, server_args, limit, prefill_fraction } => {
+            return llm_bench(gguf, cases, name, server_args, *limit, *prefill_fraction);
         }
         _ => {}
     }
@@ -201,10 +214,33 @@ fn main() -> Result<()> {
         Command::Bench { sets, limit, name, gap_ms, keepalive_ms } => {
             bench(&mut asr, &sets, limit, &name, Pacing { gap_ms, keepalive_ms })
         }
-        Command::Setup { .. } | Command::Doctor | Command::Chat { .. } | Command::LlmBench { .. } => {
+        Command::Setup { .. }
+        | Command::Doctor
+        | Command::Chat { .. }
+        | Command::LlmBench { .. }
+        | Command::Clean { .. } => {
             unreachable!("handled before the speech model loads")
         }
     }
+}
+
+fn clean(text: &str, dictionary: &str) -> Result<()> {
+    use utter_llm::{ChatParams, LlamaServer, cleanup};
+
+    let dictionary: Vec<String> =
+        dictionary.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect();
+    let start = std::time::Instant::now();
+    let server = LlamaServer::start(&cleanup::server_options()?).context("starting the cleanup model")?;
+    println!("cleanup model ready in {:.1} s", start.elapsed().as_secs_f64());
+    let params = ChatParams { max_tokens: (text.len() as u32 / 2).max(64), ..ChatParams::default() };
+    for round in ["cold", "warm"] {
+        let out = server.chat(&cleanup::messages(text, &dictionary), &params)?;
+        println!("{round}: {:.0} ms", out.wall.as_secs_f64() * 1e3);
+        if round == "warm" {
+            println!("{}", cleanup::tidy_output(&out.text));
+        }
+    }
+    Ok(())
 }
 
 fn chat(gguf: &Path, system: &str, message: &str, server_args: &[String]) -> Result<()> {
@@ -241,7 +277,14 @@ fn chat(gguf: &Path, system: &str, message: &str, server_args: &[String]) -> Res
     Ok(())
 }
 
-fn llm_bench(gguf: &Path, case_files: &[PathBuf], name: &str, server_args: &[String], limit: usize) -> Result<()> {
+fn llm_bench(
+    gguf: &Path,
+    case_files: &[PathBuf],
+    name: &str,
+    server_args: &[String],
+    limit: usize,
+    prefill_fraction: f64,
+) -> Result<()> {
     use utter_llm::{ChatParams, LlamaServer, ServerOptions, cleanup};
 
     let mut opts = ServerOptions::new(gguf);
@@ -254,6 +297,7 @@ fn llm_bench(gguf: &Path, case_files: &[PathBuf], name: &str, server_args: &[Str
         serde_json::to_string_pretty(&serde_json::json!({
             "gguf": gguf.display().to_string(),
             "server_args": server_args,
+            "prefill_fraction": prefill_fraction,
             "llama_cpp": utter_runtime::component("llama-cpp")?.version,
             "prompt": "crates/utter-llm/prompts/cleanup.md",
         }))?,
@@ -287,6 +331,16 @@ fn llm_bench(gguf: &Path, case_files: &[PathBuf], name: &str, server_args: &[Str
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default();
+            if prefill_fraction > 0.0 {
+                let words: Vec<&str> = input.split_whitespace().collect();
+                let keep = ((words.len() as f64) * prefill_fraction).floor() as usize;
+                if keep > 0 {
+                    let partial = words[..keep].join(" ");
+                    let pre = server.prefill(&cleanup::messages(&partial, &dictionary))?;
+                    row.insert("prefill_ms".into(), (pre.wall.as_secs_f64() * 1e3).into());
+                    row.insert("prefill_predicted_n".into(), pre.server.predicted_n.into());
+                }
+            }
             let out = server.chat(&cleanup::messages(&input, &dictionary), &params(&input))?;
             let s = out.server;
             row.insert("output".into(), cleanup::tidy_output(&out.text).into());
