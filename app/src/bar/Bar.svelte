@@ -2,7 +2,7 @@
   // The Bar (docs/ux/bar.md). The window it lives in is fixed-size, transparent and
   // click-through; the pill animates inside it, anchored at the bottom center. Rust drives the
   // states and shows/hides the native window; this page only draws.
-  import { listen } from '@tauri-apps/api/event';
+  import { on } from './events';
   import { onMount } from 'svelte';
 
   type BarState = 'hidden' | 'listening' | 'finishing' | 'done' | 'cancelled' | 'error' | 'exit';
@@ -11,6 +11,8 @@
   let handsFree = $state(false);
   let committed = $state('');
   let preview = $state('');
+  // True once the words are the text being pasted; until then they are provisional.
+  let isFinal = $state(false);
   let message = $state('');
 
   // Geometry, logical px (docs/ux/bar.md "Geometry").
@@ -25,19 +27,39 @@
   const WAVE_W = BARS * BAR_W + (BARS - 1) * BAR_GAP;
   const BASE_W = WAVE_W + 2 * PAD;
   const MAX_W = 520;
+  const LINE_H = 20;
+  const MAX_LINES = 5;
+  const BASE_H = 40;
+
+  // Everything in the pill but the words' own width: border 2, padding 28 less the words' 2 px
+  // end padding (so 16 at the end), the waveform slot and the gap, and 1 px of slack so a
+  // line that fits is never wrapped by rounding.
+  const CHROME_W = 2 + 2 * PAD + WAVE_W + TEXT_GAP + (TEXT_END - PAD) + 1;
+  const MAX_TEXT_W = MAX_W - CHROME_W;
 
   let canvas = $state<HTMLCanvasElement>();
-  let textEl = $state<HTMLSpanElement>();
+  // Hidden copies measure the words at the pill's target size, not its animated one: one line
+  // gives the natural width, one wrapped at the target width gives the line count.
+  let measureEl = $state<HTMLSpanElement>();
+  let wrapEl = $state<HTMLDivElement>();
   let textWidth = $state(0);
+  let lines = $state(1);
+  const textAreaW = $derived(Math.min(MAX_TEXT_W, Math.ceil(textWidth)));
 
   const hasWords = $derived(committed.length + preview.length > 0);
+  // Words show while listening and finishing, and stay under the Done check once they are
+  // the pasted text.
+  const showWords = $derived(
+    hasWords && (barState === 'listening' || barState === 'finishing' || (barState === 'done' && isFinal)),
+  );
   const pillWidth = $derived(
-    hasWords && (barState === 'listening' || barState === 'finishing')
-      ? Math.min(MAX_W, BASE_W + TEXT_GAP + textWidth + TEXT_END - PAD)
+    showWords
+      ? CHROME_W + textAreaW
       : barState === 'error'
         ? MAX_W
         : BASE_W,
   );
+  const pillHeight = $derived(showWords ? BASE_H + (Math.min(lines, MAX_LINES) - 1) * LINE_H : BASE_H);
 
   // Waveform: levels arrive at about 60 Hz; each bar shows the peak of its slice of the last
   // 600 ms, newest on the right, with a fast attack and a gentle release.
@@ -102,20 +124,29 @@
   }
 
   $effect(() => {
-    // Re-measure the words whenever they change.
+    // Re-measure the words whenever they change: the one-line width sets the pill's width,
+    // then the wrapped height (at that width) sets its line count.
     committed;
     preview;
-    if (textEl) textWidth = textEl.scrollWidth;
+    if (measureEl) textWidth = measureEl.getBoundingClientRect().width;
+  });
+  $effect(() => {
+    // The wrapped copy is laid out at `textAreaW`; read its height once that has applied.
+    textAreaW;
+    committed;
+    preview;
+    if (wrapEl) lines = Math.max(1, Math.round(wrapEl.getBoundingClientRect().height / LINE_H));
   });
 
   onMount(() => {
     raf = requestAnimationFrame(frame);
     const unlisten = [
-      listen<{ state: BarState; handsFree?: boolean; message?: string }>('bar:state', (e) => {
+      on<{ state: BarState; handsFree?: boolean; message?: string }>('bar:state', (e) => {
         const p = e.payload;
         if (p.state === 'listening' && barState !== 'listening') {
           committed = '';
           preview = '';
+          isFinal = false;
           levels.fill(0);
         }
         barState = p.state;
@@ -123,11 +154,12 @@
         if (p.state === 'hidden') handsFree = false;
         message = p.message ?? '';
       }),
-      listen<{ committed: string; preview: string }>('bar:words', (e) => {
+      on<{ committed: string; preview: string; final: boolean }>('bar:words', (e) => {
         committed = e.payload.committed;
         preview = e.payload.preview;
+        isFinal = e.payload.final;
       }),
-      listen<number[]>('bar:levels', (e) => {
+      on<number[]>('bar:levels', (e) => {
         for (const l of e.payload) pushLevel(l);
       }),
     ];
@@ -144,24 +176,33 @@
     class:shown={barState !== 'hidden' && barState !== 'exit' && barState !== 'cancelled'}
     class:finishing={barState === 'finishing'}
     style:width="{pillWidth}px"
+    style:height="{pillHeight}px"
   >
     {#if handsFree && barState === 'listening'}<span class="dot"></span>{/if}
-    {#if barState === 'done'}
-      <svg class="check" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-        <path d="M5 12.5l4.2 4.2L19 7" />
-      </svg>
-    {:else if barState === 'error'}
+    {#if barState === 'error'}
       <span class="error">{message}</span>
     {:else}
-      <canvas bind:this={canvas} style:width="{WAVE_W}px" style:height="{BAR_MAX}px"></canvas>
-    {/if}
-    {#if hasWords && (barState === 'listening' || barState === 'finishing')}
-      <div class="words">
-        <span class="line" bind:this={textEl}
-          >{committed}{#if preview}{#key preview}<span class="preview">{committed ? ' ' : ''}{preview}</span>{/key}{/if}</span
-        >
+      <div class="lead" class:done={barState === 'done'}>
+        {#if barState === 'done'}
+          <svg class="check" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M5 12.5l4.2 4.2L19 7" />
+          </svg>
+        {:else}
+          <canvas bind:this={canvas} style:width="{WAVE_W}px" style:height="{BAR_MAX}px"></canvas>
+        {/if}
       </div>
     {/if}
+    {#if showWords}
+      <div class="words" class:provisional={!isFinal} class:overflowing={lines > MAX_LINES}>
+        <div class="text">
+          {committed}{#if preview}{#key preview}<span class="preview">{committed ? ' ' : ''}{preview}</span>{/key}{/if}
+        </div>
+      </div>
+    {/if}
+  </div>
+  <span class="measure" bind:this={measureEl} aria-hidden="true">{committed}{preview ? ' ' + preview : ''}</span>
+  <div class="measure wrap" bind:this={wrapEl} style:width="{textAreaW + 1}px" aria-hidden="true">
+    {committed}{preview ? ' ' + preview : ''}
   </div>
 </div>
 
@@ -189,7 +230,8 @@
     border-radius: 20px;
     padding: 0 14px;
     display: flex;
-    align-items: center;
+    /* The waveform sits beside the newest line, at the bottom, as the pill grows upward. */
+    align-items: flex-end;
     gap: 12px;
     overflow: hidden;
     background: var(--bar-bg);
@@ -201,7 +243,8 @@
     transition:
       opacity var(--dur-exit) var(--ease-in),
       transform var(--dur-exit) var(--ease-in),
-      width var(--dur-resize) var(--ease-out);
+      width var(--dur-resize) var(--ease-out),
+      height var(--dur-resize) var(--ease-out);
   }
   .pill.shown {
     opacity: 1;
@@ -209,31 +252,66 @@
     transition:
       opacity var(--dur-enter) var(--ease-out),
       transform var(--dur-enter) var(--ease-out),
-      width var(--dur-resize) var(--ease-out);
+      width var(--dur-resize) var(--ease-out),
+      height var(--dur-resize) var(--ease-out);
+  }
+  /* A fixed-width slot, so the words never move when the waveform becomes the check. */
+  .lead {
+    flex: none;
+    width: 93px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* The Done check alone (no words) is centered in the pill. */
+  .lead.done:last-child {
+    flex: 1;
+    justify-content: center;
   }
   canvas {
-    flex: none;
     display: block;
   }
-  /* The line is right-aligned in a box that clips: when it is longer than the box, its start
-     (the oldest words) overflows on the left and the newest words stay in view. Left to
-     right throughout, so punctuation stays where it belongs. */
+  /* The words wrap at the pill's width. The newest line is the bottom one; when there are more
+     lines than fit, the oldest overflow the top, under a fade. */
   .words {
     flex: 1 1 auto;
+    align-self: stretch;
     min-width: 0;
+    box-sizing: border-box;
+    padding: 9px 2px 9px 0;
     display: flex;
+    flex-direction: column;
     justify-content: flex-end;
     overflow: hidden;
     color: var(--bar-words);
     font-size: 14px;
-    line-height: 40px;
+    line-height: 20px;
+    transition: color var(--dur-word) var(--ease-out);
   }
-  .words:has(.line:not(:empty)) {
-    mask-image: linear-gradient(to right, transparent 0, black 32px);
+  .words.provisional,
+  .words.provisional .preview {
+    color: var(--bar-words-provisional);
   }
-  .line {
+  .words.overflowing {
+    mask-image: linear-gradient(to bottom, transparent 0, black 25px);
+  }
+  .text {
     flex: none;
+    overflow-wrap: anywhere;
+  }
+  .measure {
+    position: absolute;
+    left: -10000px;
+    top: 0;
+    visibility: hidden;
     white-space: nowrap;
+    font-size: 14px;
+  }
+  .measure.wrap {
+    white-space: normal;
+    line-height: 20px;
+    overflow-wrap: anywhere;
   }
   .preview {
     color: var(--bar-word-newest);
@@ -273,7 +351,6 @@
   }
   .check {
     flex: none;
-    margin: 0 auto;
     fill: none;
     stroke: var(--bar-wave);
     stroke-width: 2.4;
@@ -291,6 +368,7 @@
   .error {
     color: var(--bar-error);
     font-size: 13px;
+    line-height: 38px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

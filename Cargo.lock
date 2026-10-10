@@ -4882,6 +4882,8 @@ dependencies = [
 name = "utter-pipeline"
 version = "0.0.1"
 dependencies = [
+ "hound",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tracing",

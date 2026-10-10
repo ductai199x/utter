@@ -8,6 +8,7 @@
 //! measured from key up, the moment the user starts waiting.
 
 pub mod gate;
+pub mod log;
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -21,6 +22,8 @@ use utter_platform::focus::{self, Window};
 use utter_platform::hotkey::{self, Action, HotkeyConfig};
 use utter_platform::insert::{self, PasteOptions};
 use utter_runtime::gpu::GpuWarmer;
+
+use crate::log::{DictationLog, Entry, Finished, LogConfig, Timings};
 
 /// How often the pipeline reads the microphone while listening.
 pub const POLL: Duration = Duration::from_millis(30);
@@ -52,6 +55,7 @@ pub struct PipelineConfig {
     pub hotkey: HotkeyConfig,
     /// Skip the cleanup model entirely (raw transcripts).
     pub no_cleanup: bool,
+    pub log: LogConfig,
 }
 
 impl Default for PipelineConfig {
@@ -62,6 +66,7 @@ impl Default for PipelineConfig {
             mic: MicConfig::default(),
             hotkey: HotkeyConfig::default(),
             no_cleanup: false,
+            log: LogConfig::default(),
         }
     }
 }
@@ -101,6 +106,10 @@ pub enum Event {
     },
     /// Key up: transcribing the rest, cleaning up, pasting.
     Finishing,
+    /// The text being pasted, exactly: the Bar shows it as the paste happens.
+    Final {
+        text: String,
+    },
     Done(Box<Dictation>),
     Cancelled,
 }
@@ -129,6 +138,22 @@ struct Done {
     generation: u64,
     kind: DoneKind,
     text: String,
+    audio_s: f64,
+    ms: f64,
+}
+
+impl Done {
+    fn entry(&self) -> Entry {
+        let (pass, index) = match self.kind {
+            DoneKind::Segment(i) => ("segment", Some(i)),
+            DoneKind::Preview => ("preview", None),
+        };
+        Entry::Recognized { pass, index, audio_s: self.audio_s, ms: self.ms, text: self.text.clone() }
+    }
+}
+
+fn log_target(target: &Option<Window>) -> Option<(String, u32)> {
+    target.as_ref().map(|w| (w.title.clone(), w.process_id))
 }
 
 fn transcribe_text(asr: &mut ParakeetTdt, audio: &[f32]) -> String {
@@ -155,17 +180,19 @@ fn speech_worker(mut asr: ParakeetTdt, jobs: Receiver<Job>, done: Sender<Done>) 
                 Err(_) => break,
             }
         }
-        let (generation, kind, text) = match job {
+        let started = Instant::now();
+        let (generation, kind, audio) = match job {
             Job::KeepAlive => {
                 let _ = asr.transcribe(&silence);
                 continue;
             }
-            Job::Preview { generation, audio } => (generation, DoneKind::Preview, transcribe_text(&mut asr, &audio)),
-            Job::Segment { generation, index, audio } => {
-                (generation, DoneKind::Segment(index), transcribe_text(&mut asr, &audio))
-            }
+            Job::Preview { generation, audio } => (generation, DoneKind::Preview, audio),
+            Job::Segment { generation, index, audio } => (generation, DoneKind::Segment(index), audio),
         };
-        if done.send(Done { generation, kind, text }).is_err() {
+        let text = transcribe_text(&mut asr, &audio);
+        let audio_s = audio.len() as f64 / utter_audio::SAMPLE_RATE as f64;
+        let ms = started.elapsed().as_secs_f64() * 1e3;
+        if done.send(Done { generation, kind, text, audio_s, ms }).is_err() {
             break;
         }
     }
@@ -329,6 +356,20 @@ impl Pipeline {
 }
 
 impl Engine {
+    /// What the dictation ran with, for its log record.
+    fn log_config(&self) -> serde_json::Value {
+        let version = |id: &str| utter_runtime::component(id).map(|c| c.version.clone()).ok();
+        serde_json::json!({
+            "speech_model": { "id": utter_asr::MODEL_COMPONENT, "version": version(utter_asr::MODEL_COMPONENT) },
+            "cleanup_model": if self.cfg.no_cleanup {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!({ "id": self.cfg.tier.component(), "version": version(self.cfg.tier.component()) })
+            },
+            "dictionary": self.cfg.dictionary,
+        })
+    }
+
     /// One dictation, from the Start action: returns `None` if it was cancelled.
     fn dictate(
         &mut self,
@@ -354,6 +395,9 @@ impl Engine {
     ) -> Result<Option<Dictation>, PipelineError> {
         self.generation += 1;
         let generation = self.generation;
+        // Live dictations only: a replay (the bench) is not the user's.
+        let mut log = DictationLog::start(LogConfig { enabled: self.cfg.log.enabled && do_insert, ..self.cfg.log });
+        log.push(Entry::Listening { hands_free: false });
         source.start();
         self.gpu.start();
         let target_handle = target.as_ref().map(|w| w.handle);
@@ -377,11 +421,23 @@ impl Engine {
             match next_action(POLL) {
                 Some((Action::Finish, at)) => break at,
                 Some((Action::Cancel, _)) => {
-                    source.stop(Duration::ZERO);
+                    let audio = source.stop(Duration::ZERO);
                     on_event(Event::Cancelled);
+                    log.push(Entry::Cancelled);
+                    log.finish(Finished {
+                        target: log_target(&target),
+                        config: self.log_config(),
+                        raw: None,
+                        text: None,
+                        audio,
+                        timings: None,
+                    });
                     return Ok(None);
                 }
-                Some((Action::HandsFree, _)) => on_event(Event::Listening { hands_free: true, target: target_handle }),
+                Some((Action::HandsFree, _)) => {
+                    log.push(Entry::Listening { hands_free: true });
+                    on_event(Event::Listening { hands_free: true, target: target_handle });
+                }
                 Some((Action::Start, _)) | None => {}
             }
             // Results that came back while speaking: show them.
@@ -390,6 +446,7 @@ impl Engine {
                 if d.generation != generation {
                     continue;
                 }
+                log.push(d.entry());
                 match d.kind {
                     DoneKind::Segment(i) => {
                         parts[i] = d.text;
@@ -403,7 +460,9 @@ impl Engine {
                 words_changed = true;
             }
             if words_changed {
-                on_event(Event::Words { committed: join_parts(&parts), preview: preview.clone() });
+                let committed = join_parts(&parts);
+                log.push(Entry::Bar { committed: committed.clone(), preview: preview.clone(), is_final: false });
+                on_event(Event::Words { committed, preview: preview.clone() });
             }
 
             let new = source.take_new();
@@ -415,6 +474,11 @@ impl Engine {
             for cut in segmenter.push(&probs) {
                 let cut_sample = (cut * FRAME).min(audio.len());
                 if cut_sample > last_cut {
+                    log.push(Entry::Segment {
+                        index: sent,
+                        start_s: last_cut as f64 / utter_audio::SAMPLE_RATE as f64,
+                        end_s: cut_sample as f64 / utter_audio::SAMPLE_RATE as f64,
+                    });
                     let segment = audio[last_cut..cut_sample].to_vec();
                     self.jobs
                         .send(Job::Segment { generation, index: sent, audio: segment })
@@ -440,6 +504,7 @@ impl Engine {
 
         // Key up: the user is waiting from here on.
         self.gpu.stop();
+        log.push(Entry::KeyUp);
         on_event(Event::Finishing);
         let rest = source.stop(SETTLE);
         // `stop` returns the whole utterance; keep only what `take_new` had not delivered.
@@ -447,6 +512,11 @@ impl Engine {
             audio.extend_from_slice(&rest[audio.len()..]);
         }
         if audio.len() > last_cut {
+            log.push(Entry::Segment {
+                index: sent,
+                start_s: last_cut as f64 / utter_audio::SAMPLE_RATE as f64,
+                end_s: audio.len() as f64 / utter_audio::SAMPLE_RATE as f64,
+            });
             self.jobs
                 .send(Job::Segment { generation, index: sent, audio: audio[last_cut..].to_vec() })
                 .map_err(|_| PipelineError::WorkerGone)?;
@@ -458,6 +528,7 @@ impl Engine {
             if d.generation != generation {
                 continue;
             }
+            log.push(d.entry());
             if let DoneKind::Segment(i) = d.kind {
                 parts[i] = d.text;
                 received += 1;
@@ -467,16 +538,38 @@ impl Engine {
         let raw = join_parts(&parts);
 
         let gate = if raw.is_empty() { None } else { gate::reason(&raw, &self.cfg.dictionary) };
+        log.push(Entry::Gate { reason: gate });
         let (text, cleanup_ms) = match (&self.llm, gate) {
             (Some(server), Some(_)) => {
                 let started = Instant::now();
                 let params = ChatParams { max_tokens: (raw.len() as u32 / 2).max(64), ..ChatParams::default() };
-                let out = server.chat(&cleanup::messages(&raw, &self.cfg.dictionary), &params)?;
-                (cleanup::tidy_output(&out.text), started.elapsed().as_secs_f64() * 1e3)
+                let result = server.chat(&cleanup::messages(&raw, &self.cfg.dictionary), &params);
+                let ms = started.elapsed().as_secs_f64() * 1e3;
+                match result {
+                    Ok(out) => {
+                        let text = cleanup::tidy_output(&out.text);
+                        log.push(Entry::Cleanup { input: raw.clone(), output: text.clone(), ms, error: None });
+                        (text, ms)
+                    }
+                    // The words are never lost to a cleanup failure: the raw text goes in.
+                    Err(e) => {
+                        tracing::warn!("cleanup failed, inserting the raw text: {e}");
+                        log.push(Entry::Cleanup {
+                            input: raw.clone(),
+                            output: raw.clone(),
+                            ms,
+                            error: Some(e.to_string()),
+                        });
+                        (raw.clone(), ms)
+                    }
+                }
             }
             _ => (raw.clone(), 0.0),
         };
 
+        // The Bar shows exactly what is pasted, as it is pasted.
+        log.push(Entry::Bar { committed: text.clone(), preview: String::new(), is_final: true });
+        on_event(Event::Final { text: text.clone() });
         let inserted = match (&target, text.is_empty()) {
             (_, true) => Err("nothing was heard".to_owned()),
             (None, false) => Err("no window had the focus".to_owned()),
@@ -486,6 +579,15 @@ impl Engine {
             (Some(_), false) => Err("insertion off (replay)".to_owned()),
         };
         let total_ms = key_up.elapsed().as_secs_f64() * 1e3;
+        log.push(Entry::Inserted { ok: inserted.is_ok(), error: inserted.as_ref().err().cloned() });
+        log.finish(Finished {
+            target: log_target(&target),
+            config: self.log_config(),
+            raw: Some(raw.clone()),
+            text: Some(text.clone()),
+            audio: audio.clone(),
+            timings: Some(Timings { asr: asr_ms, cleanup: cleanup_ms, total: total_ms }),
+        });
         let dictation = Dictation {
             raw,
             text,

@@ -93,5 +93,8 @@ npm run check                                  # svelte-check
 It loads the same components as `utter-cli dictate`; run `setup` first. Logs go to the
 console in a debug build (`RUST_LOG=debug` for more).
 
+To look at the Bar without the native app: `npm run dev` in `app/`, then open
+`http://localhost:1430/bar.html?demo`, which plays a dictation through it (dev builds only).
+
 Benches of the Rust runtime are sensitive to everything else using the GPU; note the GPU's
 utilization (`nvidia-smi`) next to any number you record.
