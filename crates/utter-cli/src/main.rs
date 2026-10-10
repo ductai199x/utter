@@ -104,6 +104,19 @@ enum Command {
     },
     /// Show which runtime components and models are installed.
     Doctor,
+    /// Show where voice activity detection cuts a 16 kHz mono WAV file into segments.
+    Vad { file: PathBuf },
+    /// Record from the microphone (16 kHz mono, pre-roll included) to a WAV file.
+    Record {
+        /// Output WAV file.
+        out: PathBuf,
+        /// How long to record.
+        #[arg(long, default_value_t = 3.0)]
+        seconds: f64,
+        /// An input device whose name contains this text (default: the system default).
+        #[arg(long)]
+        device: Option<String>,
+    },
     /// Run the cleanup cases through Utter's llama-server on a GGUF model and write the outputs
     /// for tools/eval/cleanup_score.py.
     LlmBench {
@@ -207,6 +220,8 @@ fn main() -> Result<()> {
     match &cli.command {
         Command::Setup { ids } => return setup(ids),
         Command::Doctor => return doctor(),
+        Command::Record { out, seconds, device } => return record(out, *seconds, device.clone()),
+        Command::Vad { file } => return vad(file),
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
         Command::Clean { text, dictionary, tier } => return clean(&text.join(" "), dictionary, (*tier).into()),
         Command::LlmBench { gguf, cases, name, server_args, limit, prefill_fraction } => {
@@ -237,7 +252,9 @@ fn main() -> Result<()> {
         | Command::Doctor
         | Command::Chat { .. }
         | Command::LlmBench { .. }
-        | Command::Clean { .. } => {
+        | Command::Clean { .. }
+        | Command::Record { .. }
+        | Command::Vad { .. } => {
             unreachable!("handled before the speech model loads")
         }
     }
@@ -417,6 +434,88 @@ fn setup(ids: &[String]) -> Result<()> {
         .with_context(|| format!("installing {}", c.id))?;
         println!("  {} {}: installed", c.id, c.version);
     }
+    Ok(())
+}
+
+fn vad(file: &Path) -> Result<()> {
+    use utter_asr::vad::{FRAME, Segmenter, SegmenterConfig, SileroVad};
+
+    let audio = read_wav(file)?;
+    let mut vad = SileroVad::load_installed()?;
+    let start = std::time::Instant::now();
+    // Fed in 100 ms pieces, as the pipeline does while recording.
+    let mut probs = Vec::new();
+    for chunk in audio.chunks(1600) {
+        probs.extend(vad.push(chunk)?);
+    }
+    let elapsed = start.elapsed();
+    let mut seg = Segmenter::new(SegmenterConfig::default());
+    let cuts = seg.push(&probs);
+    let secs = |frame: usize| frame as f64 * FRAME as f64 / 16_000.0;
+    let speech = probs.iter().filter(|&&p| p >= 0.5).count();
+    println!(
+        "{}: {:.2} s, {} frames ({} speech), VAD {:.1} ms in all ({:.3} ms per frame)",
+        file.display(),
+        audio.len() as f64 / 16_000.0,
+        probs.len(),
+        speech,
+        elapsed.as_secs_f64() * 1e3,
+        elapsed.as_secs_f64() * 1e3 / probs.len().max(1) as f64
+    );
+    let line: String = probs
+        .iter()
+        .map(|&p| {
+            if p >= 0.5 {
+                '#'
+            } else if p >= 0.35 {
+                '+'
+            } else {
+                '.'
+            }
+        })
+        .collect();
+    for (i, row) in line.as_bytes().chunks(100).enumerate() {
+        println!("  {:>6.2}s {}", secs(i * 100), std::str::from_utf8(row).unwrap_or(""));
+    }
+    println!("cuts at: {:?}", cuts.iter().map(|&c| format!("{:.2}s", secs(c))).collect::<Vec<_>>());
+    Ok(())
+}
+
+fn record(out: &Path, seconds: f64, device: Option<String>) -> Result<()> {
+    use std::time::{Duration, Instant};
+
+    let mic = utter_audio::Microphone::open(&utter_audio::MicConfig { device, ..Default::default() })?;
+    println!("Device: {} ({} Hz native)", mic.device_name(), mic.native_rate());
+    // Let the pre-roll fill, as it would have long before any key press.
+    std::thread::sleep(Duration::from_millis(400));
+    mic.start();
+    let start = Instant::now();
+    let mut peak = 0.0f32;
+    while start.elapsed().as_secs_f64() < seconds {
+        peak = peak.max(mic.level());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let audio = mic.stop(Duration::from_millis(80));
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: utter_audio::SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(out, spec)?;
+    for s in &audio {
+        w.write_sample((s.clamp(-1.0, 1.0) * 32767.0) as i16)?;
+    }
+    w.finalize()?;
+    let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len().max(1) as f32).sqrt();
+    println!(
+        "{}: {:.2} s ({} samples, pre-roll included), RMS {:.4}, peak callback RMS {:.4}",
+        out.display(),
+        audio.len() as f64 / utter_audio::SAMPLE_RATE as f64,
+        audio.len(),
+        rms,
+        peak
+    );
     Ok(())
 }
 
