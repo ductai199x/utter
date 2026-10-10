@@ -210,9 +210,9 @@ def disfluent_script(passage: str, rng: random.Random, llm, seed: int) -> Script
 
 
 def correction_script(
-    passage: str, rng: random.Random, llm, seed: int, scope: str | None = None
+    passage: str, rng: random.Random, llm, seed: int, force_scope: str | None = None
 ) -> Script | None:
-    want = scope or rng.choice(SCOPES)
+    want = force_scope or rng.choice(SCOPES)
     try:
         p = _ask(llm, _PROPOSE_CORRECTION, passage, _CORRECTION_SCHEMA, seed, note=f"Scope: {want}")
     except (ValueError, KeyError):
@@ -271,7 +271,7 @@ def make_script(kind: str, passage: str, rng: random.Random, llm, seed: int) -> 
     if kind == "disfluent":
         return disfluent_script(passage, rng, llm, seed)
     if kind == "restate":
-        s = correction_script(passage, rng, llm, seed, scope="sentence")
+        s = correction_script(passage, rng, llm, seed, force_scope="sentence")
         return Script("restate", s.style, s.text, s.tags) if s else None
     if kind == "correction":
         return correction_script(passage, rng, llm, seed)
