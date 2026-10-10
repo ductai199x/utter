@@ -50,23 +50,35 @@ def _unit(key: str) -> float:
     return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
 
 
-def main(renditions: Path, passages: Path, name: str = "kokoro", limit: int = 0) -> None:
+def main(
+    renditions: Path,
+    passages: Path,
+    name: str = "kokoro",
+    limit: int = 0,
+    shard: str = typer.Option("0/1", help="I/N: speak only this share, for N processes at once."),
+) -> None:
+    """Resumes where a previous run stopped. With N > 1, shard I writes manifest.I-of-N.jsonl;
+    concatenate the parts into manifest.jsonl when all are done."""
     from kokoro import KPipeline
 
+    index, count = (int(x) for x in shard.split("/"))
     gold = {}
     for line in passages.open(encoding="utf-8"):
         p = json.loads(line)
         gold[p["id"]] = p
     rows = [json.loads(line) for line in renditions.open(encoding="utf-8")]
+    # Renditions of passages since dropped from the passage file (sources.py filters) are not spoken.
+    rows = [r for r in rows if r["passage_id"] in gold]
+    rows = [r for r in rows if int(_unit(f"{r['passage_id']}-{r['kind']}:shard") * count) % count == index]
     if limit:
         rows = rows[:limit]
 
     out = eval_dir() / f"en-finaltext-{name}"
     out.mkdir(parents=True, exist_ok=True)
-    manifest = out / "manifest.jsonl"
+    manifest = out / ("manifest.jsonl" if count == 1 else f"manifest.{index}-of-{count}.jsonl")
     done = set()
-    if manifest.exists():
-        done = {json.loads(line)["id"] for line in manifest.open(encoding="utf-8")}
+    for part in out.glob("manifest*.jsonl"):
+        done |= {json.loads(line)["id"] for line in part.open(encoding="utf-8")}
 
     pipelines = {lang: KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M") for lang in {v[0] for v in VOICES}}
     with manifest.open("a", encoding="utf-8") as fh:

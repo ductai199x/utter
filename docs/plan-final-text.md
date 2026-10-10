@@ -54,7 +54,8 @@ Category metrics (below) show where the misses come from.
   - punctuation from the audio beats text-only;
   - fine-tuned or constrained models beat prompted rewriting by a wide margin (comma F1 0.84
     vs 0.46);
-  - phrase boosting in the recognizer roughly doubles jargon recall.
+  - phrase boosting in the recognizer roughly doubles jargon recall (in NVIDIA's paper; on our
+    eval it lifts exact term recall from 50% to 56-60%, docs/eval-results.md).
 - **Live text:**
   - nobody shows raw words styled as final;
   - live cleaned text exists (per pause, per sentence);
