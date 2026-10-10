@@ -30,6 +30,11 @@ def user_message(transcript: str, dictionary: list[str]) -> str:
     return out + "Dictated: " + transcript.strip()
 
 
+def _passage_of(clip_id: str) -> str:
+    """A clip id is "<passage id>-<kind>"."""
+    return clip_id.rsplit("-", 1)[0]
+
+
 def main(
     eval_set: str = typer.Option(..., "--set"),
     asr_name: str = typer.Option(..., "--asr"),
@@ -68,8 +73,14 @@ def main(
             }
         )
     random.Random(seed).shuffle(rows)
-    n_hold = int(len(rows) * holdout)
-    for path, part in ((out.with_suffix(".eval.jsonl"), rows[:n_hold]), (out, rows[n_hold:])):
+    # Whole passages are held out: a passage's other renditions in training would make the
+    # eval loss look better than it is.
+    passages = sorted({_passage_of(r["id"]) for r in rows})
+    held = set(random.Random(seed).sample(passages, int(len(passages) * holdout)))
+    hold = [r for r in rows if _passage_of(r["id"]) in held]
+    train = [r for r in rows if _passage_of(r["id"]) not in held]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    for path, part in ((out.with_suffix(".eval.jsonl"), hold), (out, train)):
         with path.open("w", encoding="utf-8") as fh:
             for r in part:
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
