@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import dataclass
 from pathlib import Path
 
 import typer
@@ -22,9 +23,36 @@ from eval.finaltext.sources import english
 from eval.paths import eval_dir
 
 
-def user_message(transcript: str, dictionary: list[str]) -> str:
-    """Mirrors cleanup::messages_with in Rust."""
+@dataclass
+class Context:
+    """Mirrors cleanup::Context in Rust: where the dictation goes."""
+
+    app: str | None = None
+    single_line: bool = False
+    before: str | None = None
+    after: str | None = None
+    lists_off: bool = False
+
+
+BEFORE_CHARS = 200
+AFTER_CHARS = 50
+
+
+def user_message(transcript: str, dictionary: list[str], ctx: Context | None = None) -> str:
+    """Mirrors cleanup::messages_with in Rust, byte for byte."""
+    ctx = ctx or Context()
     out = ""
+    if ctx.app:
+        out += f"App: {ctx.app}\n"
+    if ctx.single_line:
+        out += "Field: single-line\n"
+    # JSON strings, as serde_json writes them (no ASCII escaping of other characters).
+    if ctx.before:
+        out += "Before: " + json.dumps(ctx.before[-BEFORE_CHARS:], ensure_ascii=False) + "\n"
+    if ctx.after:
+        out += "After: " + json.dumps(ctx.after[:AFTER_CHARS], ensure_ascii=False) + "\n"
+    if ctx.lists_off:
+        out += "Lists: off\n"
     if dictionary:
         out += "Dictionary: " + ", ".join(dictionary) + "\n"
     return out + "Dictated: " + transcript.strip()

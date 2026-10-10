@@ -450,7 +450,9 @@ fn llm_bench(
         Some(path) => std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
         None => cleanup::SYSTEM_PROMPT.to_owned(),
     };
-    let messages = |text: &str, dictionary: &[String]| cleanup::messages_with(&system, text, dictionary);
+    let messages = |text: &str, dictionary: &[String]| {
+        cleanup::messages_with(&system, text, dictionary, &cleanup::Context::default())
+    };
     let mut opts = ServerOptions::new(gguf);
     opts.extra_args = server_args.to_vec();
     let server = LlamaServer::start(&opts).with_context(|| format!("starting llama-server on {}", gguf.display()))?;

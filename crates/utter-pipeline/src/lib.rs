@@ -320,7 +320,10 @@ impl Pipeline {
             let system = cfg.prompt.clone().unwrap_or_else(|| cleanup::SYSTEM_PROMPT.to_owned());
             // The first request after loading is slow; pay for it now.
             let warm = "Um, this is a warm-up, no, a second warm-up.";
-            server.chat(&cleanup::messages_with(&system, warm, &cfg.dictionary), &ChatParams::default())?;
+            server.chat(
+                &cleanup::messages_with(&system, warm, &cfg.dictionary, &cleanup::Context::default()),
+                &ChatParams::default(),
+            )?;
             Some(Cleaner::start(server, system, cfg.dictionary.clone()))
         };
         let vad = SileroVad::load_installed()?;
