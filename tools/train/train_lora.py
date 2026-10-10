@@ -32,10 +32,14 @@ TARGETS = r".*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|d
 def encode(tokenizer, row: dict, max_length: int) -> dict | None:
     """Token ids of the whole conversation and labels that count the completion only; None if
     it is longer than `max_length`."""
-    prompt = tokenizer.apply_chat_template(row["prompt"], add_generation_prompt=True, tokenize=False)
+    prompt = tokenizer.apply_chat_template(
+        row["prompt"], add_generation_prompt=True, tokenize=False
+    )
     full = tokenizer.apply_chat_template(row["prompt"] + row["completion"], tokenize=False)
     if not full.startswith(prompt):
-        raise ValueError("the chat template does not render the prompt as a prefix of the conversation")
+        raise ValueError(
+            "the chat template does not render the prompt as a prefix of the conversation"
+        )
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
     full_ids = tokenizer(full, add_special_tokens=False)["input_ids"]
     if len(full_ids) > max_length:
@@ -104,7 +108,9 @@ def main(
     )
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
-    lora = LoraConfig(r=rank, lora_alpha=alpha, lora_dropout=0.05, target_modules=TARGETS, task_type="CAUSAL_LM")
+    lora = LoraConfig(
+        r=rank, lora_alpha=alpha, lora_dropout=0.05, target_modules=TARGETS, task_type="CAUSAL_LM"
+    )
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
@@ -146,7 +152,9 @@ def main(
     # The converter wants the processor and chat template files beside the weights.
     from huggingface_hub import snapshot_download
 
-    src = Path(snapshot_download(BASE, revision=BASE_REVISION, allow_patterns=["*.json", "*.jinja"]))
+    src = Path(
+        snapshot_download(BASE, revision=BASE_REVISION, allow_patterns=["*.json", "*.jinja"])
+    )
     for f in src.iterdir():
         if f.suffix in (".json", ".jinja") and not (merged_dir / f.name).exists():
             shutil.copy(f, merged_dir / f.name)

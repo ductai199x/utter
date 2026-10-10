@@ -50,7 +50,9 @@ def _fetch(url: str) -> bytes:
 def install() -> Path:
     c = component()
     out = tools_dir()
-    if all((out / f).exists() for f in ("llama-quantize.exe", "convert_hf_to_gguf.py", "conversion")):
+    if all(
+        (out / f).exists() for f in ("llama-quantize.exe", "convert_hf_to_gguf.py", "conversion")
+    ):
         return out
     out.mkdir(parents=True, exist_ok=True)
 
