@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
+use utter_asr::boost::BoostConfig;
 use utter_asr::{ConvSearch, Device, ParakeetOptions, ParakeetTdt, Timings};
 
 const WARMUP_CLIPS: usize = 3;
@@ -242,6 +243,18 @@ enum Command {
         /// and the next clip pays for it.
         #[arg(long, default_value_t = 0)]
         keepalive_ms: u64,
+        /// Boost these phrases while decoding, one per line (the user's dictionary).
+        #[arg(long)]
+        phrases: Option<PathBuf>,
+        /// Log-probability bonus for a token that starts a phrase.
+        #[arg(long, default_value_t = BoostConfig::default().start_score)]
+        boost_start: f32,
+        /// Log-probability bonus for a token that continues a phrase.
+        #[arg(long, default_value_t = BoostConfig::default().score)]
+        boost_score: f32,
+        /// Added per token of depth into a phrase.
+        #[arg(long, default_value_t = BoostConfig::default().depth_bonus)]
+        boost_depth: f32,
     },
 }
 
@@ -331,7 +344,20 @@ fn main() -> Result<()> {
     let mut asr = ParakeetTdt::load(&dir, opts).with_context(|| format!("loading {}", dir.display()))?;
     match cli.command {
         Command::Transcribe { files } => transcribe(&mut asr, &files),
-        Command::Bench { sets, limit, name, gap_ms, keepalive_ms } => {
+        Command::Bench { sets, limit, name, gap_ms, keepalive_ms, phrases, boost_start, boost_score, boost_depth } => {
+            if let Some(path) = phrases {
+                let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+                let list: Vec<String> =
+                    text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect();
+                let cfg = BoostConfig {
+                    start_score: boost_start,
+                    score: boost_score,
+                    depth_bonus: boost_depth,
+                    ..BoostConfig::default()
+                };
+                let usable = asr.set_phrases(&list, cfg);
+                println!("boosting {usable} of {} phrases ({cfg:?})", list.len());
+            }
             bench(&mut asr, &sets, limit, &name, Pacing { gap_ms, keepalive_ms })
         }
         Command::Setup { .. }
