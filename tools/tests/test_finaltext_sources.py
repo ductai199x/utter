@@ -1,6 +1,6 @@
 import pytest
 
-from eval.finaltext.sources import dictatable, paragraphs, split_of
+from eval.finaltext.sources import dictatable, english, paragraphs, split_of
 
 
 @pytest.mark.parametrize(
@@ -43,6 +43,31 @@ def test_paragraphs_with_indented_lines_are_dropped_whole():
         "A normal paragraph with words.\n\n    indented code line\nmore text here.\n\nAnother one."
     )
     assert list(paragraphs(text)) == ["A normal paragraph with words.", "Another one."]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Kannst das USB3 nicht einfach mal im BIOS abschalten?",
+        "Non ho ancora guardato ma è difficile come cosa?",
+        "Ik ben zo blij met deze IRC. Dankzij dit clubje ben ik verslaafd aan Ubuntu.",
+        "Les vélos sont acceptés à bord de certains cars équipés de rack à vélo.",
+    ],
+)
+def test_other_languages_are_not_english(text: str):
+    assert not english(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Homeschooling usually yields better results than many public schools.",
+        "The die was cast, so we went on with the plan anyway.",
+        "Conversion calculator converts units from meter per second squared.",
+    ],
+)
+def test_english_without_many_common_words_is_english(text: str):
+    assert english(text)
 
 
 def test_the_split_is_stable_per_document():

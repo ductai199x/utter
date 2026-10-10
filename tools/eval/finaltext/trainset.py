@@ -18,6 +18,7 @@ from pathlib import Path
 
 import typer
 
+from eval.finaltext.sources import english
 from eval.paths import eval_dir
 
 
@@ -52,7 +53,8 @@ def main(
     rows = []
     for h in hyps:
         m = manifest.get(h["id"])
-        if m is None or not h["hyp"].strip():
+        # Clips synthesized before sources.py filtered other languages are skipped here.
+        if m is None or not h["hyp"].strip() or not english(m["gold"]):
             continue
         rows.append(
             {

@@ -127,7 +127,42 @@ def dictatable(p: str) -> bool:
     if sum(ord(c) > 0x2FF and c not in "“”‘’—–…×~°€£" for c in p) > 0:
         return False  # other scripts, emoji, odd symbols: not this eval
     sentences = len(re.findall(r"[.!?](?:\s|$)", p))
-    return 1 <= sentences <= 5 and well_formed(p)
+    return 1 <= sentences <= 5 and well_formed(p) and english(p)
+
+
+# Common words of the other languages in the sources (chiefly Ubuntu IRC's German, Italian,
+# Dutch, French and Finnish channels), minus words English shares ("die", "on", "was").
+_ENGLISH_WORDS = frozenset({
+    "the", "a", "an", "to", "of", "and", "is", "in", "it", "you", "that", "i", "for", "on",
+    "with", "this", "be", "not", "are", "have", "but", "can", "my", "do", "was", "if", "or",
+    "as", "at", "so", "what", "how", "your", "me", "we", "they", "he", "she", "there", "from",
+    "by", "just", "no", "yes", "all", "will", "would", "one", "about",
+})  # fmt: skip
+_FOREIGN_WORDS = frozenset({
+    # German
+    "der", "das", "und", "ist", "nicht", "ich", "ein", "eine", "mit", "auf", "zu", "von",
+    "sich", "auch", "noch", "wenn", "aber", "dann", "habe", "kann",
+    # Italian
+    "il", "che", "di", "la", "sono", "del", "della", "una", "questo", "ho", "ma", "cosa",
+    "anche",
+    # French
+    "le", "les", "et", "est", "pas", "un", "une", "des", "du", "de", "sont", "pour", "avec",
+    "dans", "sur",
+    # Dutch and Afrikaans
+    "het", "een", "van", "ik", "niet", "zijn", "ook", "maar", "wat", "ons", "nie",
+    # Finnish
+    "se", "ja", "ei", "ole", "mutta",
+    # Slovenian and Croatian
+    "je", "da", "ki", "pa", "sem",
+})  # fmt: skip
+
+
+def english(p: str) -> bool:
+    """Not a passage in another language: its common words are English ones."""
+    words = re.findall(r"[a-z']+", p.lower())
+    en = sum(w in _ENGLISH_WORDS for w in words)
+    foreign = sum(w in _FOREIGN_WORDS for w in words)
+    return foreign < 2 or en > foreign
 
 
 # The gold must be what a careful typist writes: Utter aims at well-formed text, so sloppy
