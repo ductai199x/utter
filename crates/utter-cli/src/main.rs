@@ -565,7 +565,7 @@ fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, d
                 let _ = std::io::stdout().flush();
                 return;
             }
-            Event::Finishing => return,
+            Event::Finishing | Event::Final { .. } => return,
             Event::Cancelled => {
                 println!("\r\x1b[2Kcancelled");
                 return;

@@ -16,9 +16,9 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use utter_pipeline::{Event, Pipeline, PipelineConfig};
 use utter_platform::overlay;
 
-/// The Bar window's size in logical pixels (tauri.conf.json): room for the widest pill plus
+/// The Bar window's size in logical pixels (tauri.conf.json): room for the largest pill plus
 /// its shadow.
-const BAR_SIZE: (u32, u32) = (576, 88);
+const BAR_SIZE: (u32, u32) = (576, 168);
 /// The pill sits 12 px above the window's bottom edge, and 48 px above the work area's.
 const BAR_BOTTOM_MARGIN: u32 = 48 - 12;
 /// How long the Done check shows before the Bar leaves.
@@ -50,6 +50,9 @@ impl BarState {
 struct BarWords {
     committed: String,
     preview: String,
+    /// The text being pasted; until then, everything shown is provisional.
+    #[serde(rename = "final")]
+    is_final: bool,
 }
 
 /// Shows and hides the Bar. Every dictation bumps `generation`, so a timer left over from the
@@ -92,7 +95,12 @@ impl Bar {
                 }
             }
             Event::Words { committed, preview } => {
-                let _ = self.window.emit_to(self.window.label(), "bar:words", BarWords { committed, preview });
+                let words = BarWords { committed, preview, is_final: false };
+                let _ = self.window.emit_to(self.window.label(), "bar:words", words);
+            }
+            Event::Final { text } => {
+                let words = BarWords { committed: text, preview: String::new(), is_final: true };
+                let _ = self.window.emit_to(self.window.label(), "bar:words", words);
             }
             Event::Finishing => {
                 self.listening.store(false, Ordering::Relaxed);
