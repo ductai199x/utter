@@ -50,5 +50,26 @@ def test_lists_are_found_with_their_intro_and_code_is_not():
     assert found[0].items == ["a screwdriver", "pliers", "a multimeter"]
 
 
+def test_shell_commands_are_not_a_dictated_list():
+    assert lists_in("Do this:\n- clear\n- exit\n- fi\n") == []
+    assert lists_in("Then:\n1. Create a group\n2. chmod g+rws\n3. Reboot\n") == []
+
+
+def test_items_are_made_consistent():
+    from eval.finaltext.lists import consistent
+
+    assert consistent(["Removed packages.", "Made a list", "Reboot."]) == [
+        "Removed packages.",
+        "Made a list.",
+        "Reboot.",
+    ]
+    assert consistent(["eggs", "Milk", "bread", "GPU fans"]) == [
+        "eggs",
+        "milk",
+        "bread",
+        "GPU fans",
+    ]
+
+
 def test_a_paragraph_is_not_a_list():
     assert parse("Just a sentence. And another.") is None
