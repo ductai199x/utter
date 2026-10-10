@@ -29,6 +29,19 @@ The Hugging Face account is `ductai199x`. Its terms were accepted for the gated 
 Set `PYTHONUTF8=1` on Windows: Vietnamese text does not survive the console's default code
 page.
 
+Speech synthesis engines and model training each have their own uv project (`tools/tts/<engine>/`,
+`tools/train/`), because they pin their own PyTorch and Transformers. Their environments live
+on C: (D: is nearly full), selected per command:
+
+```
+cd tools/tts/kokoro
+UV_PROJECT_ENVIRONMENT=C:/Users/Tai/.cache/utter/envs/tts-kokoro uv run python synth.py ...
+```
+
+The final-text eval (docs/plan-final-text.md) runs in order: `eval.finaltext.sources`
+(passages), `eval.finaltext.spoken` (spoken forms), `eval.finaltext.screen` (gold quality),
+`tools/tts/<engine>/synth.py` (audio), then `eval.finaltext.report asr`, `cleanup` and `score`.
+
 ## The Rust core: standalone
 
 Utter depends on nothing installed on the machine except the GPU driver (Tai, 2026-10-09).
