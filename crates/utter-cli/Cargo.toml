@@ -11,6 +11,7 @@ rust-version.workspace = true
 utter-core.workspace = true
 utter-runtime.workspace = true
 utter-asr.workspace = true
+utter-audio.workspace = true
 utter-llm.workspace = true
 anyhow.workspace = true
 clap.workspace = true
