@@ -237,6 +237,13 @@ impl LlamaServer {
     pub fn prefill(&self, messages: &[Message]) -> Result<Completion, LlmError> {
         self.chat(messages, &ChatParams { max_tokens: 0, ..ChatParams::default() })
     }
+
+    /// One token, to keep the GPU and the server's threads from going idle: a request after
+    /// a few idle seconds takes more than twice as long (docs/eval-results.md). `messages`
+    /// should share the real request's system prompt, so the prompt cache keeps it.
+    pub fn keep_warm(&self, messages: &[Message]) -> Result<Completion, LlmError> {
+        self.chat(messages, &ChatParams { max_tokens: 1, ..ChatParams::default() })
+    }
 }
 
 impl Drop for LlamaServer {

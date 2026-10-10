@@ -18,3 +18,4 @@ thiserror.workspace = true
 tracing.workspace = true
 ureq.workspace = true
 zip.workspace = true
+libloading = "0.9.0"
