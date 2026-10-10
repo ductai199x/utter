@@ -49,3 +49,16 @@ def test_plans_draw_types_from_their_profile():
         profile, _level, requested = plan("word " * 40, rng)
         assert requested and all(t in PROFILES[profile] for t in requested)
         assert all(t in TYPES for t in requested)
+
+
+def test_gold_grammar_fixes_apply_and_rewording_does_not():
+    from eval.finaltext.goldfix import apply_grammar
+
+    text = "Why dont you come? me and him goes there every week on the desktop."
+    fixes = [
+        {"kind": "apostrophe", "wrong": "dont", "right": "don't"},
+        {"kind": "grammar", "wrong": "me and him goes", "right": "He and I go"},
+        {"kind": "grammar", "wrong": "desktop", "right": "laptop"},
+    ]
+    out = apply_grammar(text, fixes)
+    assert out.text == "Why don't you come? He and I go there every week on the desktop."

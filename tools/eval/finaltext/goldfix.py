@@ -71,6 +71,79 @@ SCHEMA = {
 # Fixes may change at most this share of a passage's characters.
 MAX_CHANGE = 0.12
 
+# The grammar pass (--grammar), run on passages already fixed above: Utter fixes grammar by
+# default (docs/cleanup-spec.md, rule 8), so an answer key with a grammar error would teach
+# and score keeping it.
+GRAMMAR_SYSTEM = """You proofread sentences that will be the answer key for a voice-typing app
+that writes correct, natural English. Propose fixes ONLY for grammar errors a careful editor
+would correct:
+
+- grammar: subject-verb agreement, tense, verb forms, articles, prepositions, noun number,
+  pronoun case, comparatives, word order, a missing word the grammar needs;
+- apostrophe: a missing or wrong apostrophe ("dont" -> "don't", "its" -> "it's", "users"
+  -> "user's" when possessive);
+- capitalization: a sentence or the pronoun "I" in lowercase ("i think" -> "I think").
+
+Keep everything else exactly: wording, tone, contractions, informal words ("gonna", "yeah"),
+fragments that read fine in writing ("Works for me."), punctuation style, British or American
+spelling. Do not rephrase correct sentences. Most sentences need nothing.
+
+Each fix is the shortest exact span from the sentence ("wrong") and its replacement ("right").
+Return JSON: {"fixes": [{"kind": ..., "wrong": ..., "right": ...}]}."""
+
+GRAMMAR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "fixes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"enum": ["grammar", "apostrophe", "capitalization"]},
+                    "wrong": {"type": "string"},
+                    "right": {"type": "string"},
+                },
+                "required": ["kind", "wrong", "right"],
+            },
+        },
+    },
+    "required": ["fixes"],
+}
+
+# ERRANT types a grammar-pass fix may make; a fix whose edits include anything else (a
+# different noun, a new idea) is not grammar and is not applied.
+GRAMMAR_TYPES = {
+    "DET", "PREP", "PRON", "VERB:TENSE", "VERB:SVA", "VERB:FORM", "VERB:INFL", "VERB",
+    "NOUN:NUM", "NOUN:INFL", "NOUN:POSS", "ADJ:FORM", "WO", "PART", "CONJ", "MORPH", "ORTH",
+    "CONTR", "PUNCT",
+}  # fmt: skip
+
+
+def apply_grammar(text: str, fixes: list[dict]) -> Outcome:
+    """Applies the grammar fixes ERRANT confirms are grammar, each where it matches once."""
+    from eval.finaltext.grammar import _annotator
+
+    a = _annotator()
+    applied = []
+    changed = 0
+    for f in fixes:
+        wrong, right = f["wrong"], f["right"]
+        where = list(re.finditer(rf"(?<!\w){re.escape(wrong)}(?!\w)", text)) if wrong else []
+        if wrong == right or len(where) != 1:
+            continue
+        m = where[0]
+        candidate = text[: m.start()] + right + text[m.end() :]
+        edits = a.annotate(a.parse(text, tokenise=True), a.parse(candidate, tokenise=True))
+        types = {e.type.split(":", 1)[1] for e in edits if e.type not in ("noop", "UNK")}
+        if not types or not types <= GRAMMAR_TYPES:
+            continue
+        text = candidate
+        changed += edit_distance(wrong, right)
+        applied.append(f)
+    if changed > MAX_CHANGE * len(text):
+        return Outcome(None, applied, "too many fixes")
+    return Outcome(text, applied)
+
 
 @dataclass
 class Outcome:
@@ -106,6 +179,9 @@ def apply(text: str, not_prose: bool, fixes: list[dict], spoken_safe: bool) -> O
 def main(
     split: str = "train",
     spoken_safe: bool = typer.Option(False, help="Only fixes that keep the spoken words (case)."),
+    grammar: bool = typer.Option(
+        False, help="The grammar pass, on passages already fixed (kept once as .pre-grammar)."
+    ),
     model: str = "gemma4-26b-a4b-qat",
     slots: int = 8,
     llm_url: str = typer.Option(
@@ -116,20 +192,24 @@ def main(
 
     root = eval_dir() / "finaltext"
     path = root / f"passages-{split}.jsonl"
-    raw = root / f"passages-{split}.raw.jsonl"
-    if not raw.exists():
-        shutil.copy(path, raw)  # the passages as extracted, kept once
-    passages = [json.loads(line) for line in raw.read_text(encoding="utf-8").splitlines() if line]
+    # Each pass reads the file it started from, kept once, so a rerun redoes it, not stacks it.
+    source = root / f"passages-{split}.{'pre-grammar' if grammar else 'raw'}.jsonl"
+    if not source.exists():
+        shutil.copy(path, source)
+    passages = [
+        json.loads(line) for line in source.read_text(encoding="utf-8").splitlines() if line
+    ]
+    system, schema = (GRAMMAR_SYSTEM, GRAMMAR_SCHEMA) if grammar else (SYSTEM, SCHEMA)
 
     server = Remote(llm_url) if llm_url else Server(model_path(model), slots=slots)
     with server as llm:
 
         def one(p: dict) -> tuple[dict, Outcome]:
             out = llm.chat(
-                [{"role": "system", "content": SYSTEM}, {"role": "user", "content": p["text"]}],
+                [{"role": "system", "content": system}, {"role": "user", "content": p["text"]}],
                 max_tokens=1024,
                 temperature=0.0,
-                json_schema=SCHEMA,
+                json_schema=schema,
             )
             try:
                 reply = json.loads(out)
@@ -137,6 +217,8 @@ def main(
                 # A reply cut off at the token limit: a passage needing that many fixes is not
                 # one to keep anyway.
                 return p, Outcome(None, [], "unreadable reply")
+            if grammar:
+                return p, apply_grammar(p["text"], reply["fixes"])
             return p, apply(p["text"], reply["not_prose"], reply["fixes"], spoken_safe)
 
         kept: list[dict] = []
@@ -147,7 +229,15 @@ def main(
                 if o.text is None:
                     dropped[o.why_dropped] = dropped.get(o.why_dropped, 0) + 1
                     continue
-                if o.applied:
+                if o.applied and grammar:
+                    fixed += 1
+                    p = {
+                        **p,
+                        "text": o.text,
+                        "before_grammar": p["text"],
+                        "grammar_fixes": o.applied,
+                    }
+                elif o.applied:
                     fixed += 1
                     p = {**p, "text": o.text, "original": p["text"], "fixes": o.applied}
                 kept.append(p)
