@@ -84,7 +84,8 @@ def terms(
 
     words = {line.strip() for line in phrases.read_text(encoding="utf-8").splitlines()}
     words.discard("")
-    gold = {r["id"]: r["gold"] for r in _manifest(eval_set)}
+    # ASR sets have no written gold; what was said stands in (for insertions and WER).
+    gold = {r["id"]: r.get("gold", r["text"]) for r in _manifest(eval_set)}
     others = {s.text for g in gold.values() for s in spans(g) if s.kind == "term"} - words
     print(f"{eval_set}: {len(gold)} clips, {len(words)} dictionary terms, {len(others)} others")
     print(f"{'run':<12} {'recall':>20} {'inserted':>9} {'others':>20} {'WER':>7} {'changed':>8}")
