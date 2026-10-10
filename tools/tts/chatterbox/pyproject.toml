@@ -8,6 +8,8 @@ dependencies = [
     # Direct, so the CUDA index below applies (uv sources only govern direct dependencies).
     "torch==2.6.0",
     "torchaudio==2.6.0",
+    # resemble-perth (the watermarker) imports pkg_resources, which setuptools 81+ removed.
+    "setuptools<81",
     "soundfile>=0.12",
     "soxr>=0.5",
     "typer>=0.12",
