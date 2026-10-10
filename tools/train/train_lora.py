@@ -12,11 +12,14 @@ Triton ships for Linux only.
 Output: <out>/adapter (the LoRA) and <out>/merged (full model, for convert_hf_to_gguf.py).
 
 Run: UV_PROJECT_ENVIRONMENT=%USERPROFILE%/.cache/utter/envs/train uv run python train_lora.py DATA OUT
+On N GPUs (Linux, e.g. a GPU cluster): uv run torchrun --nproc-per-node N train_lora.py DATA OUT --batch B
+(the effective batch is N x B x grad_accum).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -106,6 +109,11 @@ def main(
     seed: int = 0,
     device: str = "cuda",
     max_steps: int = -1,
+    merge: bool = typer.Option(
+        True,
+        help="Also write the merged model (for export_gguf.py); off when only the adapter "
+        "is copied back (merge_adapter.py merges it there).",
+    ),
 ) -> None:
     import torch
     from peft import LoraConfig, get_peft_model
@@ -115,11 +123,14 @@ def main(
     train_rows = _load(data, tokenizer, max_length)
     eval_rows = _load(eval_data, tokenizer, max_length) if eval_data else None
 
+    # Under torchrun (data parallel, one process per GPU) each process loads its copy straight
+    # onto its own GPU, so host memory holds no full copy per process.
+    local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
     model = AutoModelForImageTextToText.from_pretrained(
         BASE,
         revision=BASE_REVISION,
         dtype=torch.bfloat16,
-        device_map=device,
+        device_map={"": f"cuda:{local_rank}"} if local_rank >= 0 else device,
         attn_implementation="sdpa",
     )
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -150,6 +161,8 @@ def main(
         seed=seed,
         remove_unused_columns=False,
         dataloader_num_workers=0,
+        # Only the LoRA weights train, and all of them every step.
+        ddp_find_unused_parameters=False,
     )
     trainer = Trainer(
         model=model,
@@ -159,9 +172,12 @@ def main(
         data_collator=Collator(tokenizer.pad_token_id),
     )
     trainer.train()
+    if not trainer.is_world_process_zero():
+        return
 
     model.save_pretrained(out / "adapter")
-    save_merged(model, tokenizer, out / "merged")
+    if merge:
+        save_merged(model, tokenizer, out / "merged")
     record = {
         "base": BASE,
         "revision": BASE_REVISION,
@@ -175,6 +191,7 @@ def main(
         "grad_accum": grad_accum,
         "max_length": max_length,
         "seed": seed,
+        "processes": trainer.args.world_size,
     }
     (out / "train_args.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
     print(f"done -> {out}")
