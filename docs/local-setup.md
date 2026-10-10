@@ -12,6 +12,7 @@ How the development machine is laid out. Tai's choice (2026-10-09): downloads go
 | Eval results | `C:\Users\Tai\.cache\utter\eval\results\` | One JSONL per model and set, re-scored by the report commands. |
 | Local model exports | `C:\Users\Tai\.cache\utter\models\<name>\` | Output of `tools/export/export_parakeet.py`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
 | Logs | `C:\Users\Tai\.cache\utter\logs\` | `llama-server.log` |
+| Dictation log | `C:\Users\Tai\.cache\utter\dictations\` | One `<id>.json` per live dictation (every recognizer pass, Bar state, cleanup input and output, timings) and `<id>.wav`. Never leaves the machine. |
 
 The Hugging Face account is `ductai199x`. Its terms were accepted for the gated repos
 `speechcolab/gigaspeech2`, `linhtran92/viet_bud500` and `CohereLabs/cohere-transcribe-03-2026`.
