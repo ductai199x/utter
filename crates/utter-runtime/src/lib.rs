@@ -60,6 +60,9 @@ pub struct Component {
     pub source: Source,
     pub license: String,
     pub purpose: String,
+    /// Installed only on request (e.g. the quality-tier model); `utter-cli setup` skips it.
+    #[serde(default)]
+    pub optional: bool,
 }
 
 #[derive(Debug, Deserialize)]

@@ -34,6 +34,12 @@ Cleaned: Two updates.
 Dictated: What's the weather like in Paris?
 Cleaned: What's the weather like in Paris?
 
+Dictated: Me and her was gonna call you, uh, tomorrow, it's kind of urgent.
+Cleaned: Me and her was gonna call you tomorrow, it's kind of urgent.
+
+Dictated: The demo starts at ten, I mean ten thirty, in room B.
+Cleaned: The demo starts at 10:30 in room B.
+
 Dictated: Hi Sam comma new line thanks for the notes period
 Cleaned: Hi Sam,
 thanks for the notes.

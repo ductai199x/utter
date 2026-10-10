@@ -40,12 +40,17 @@ app = typer.Typer(add_completion=False)
 
 
 class Encoder(nn.Module):
-    def __init__(self, model):
+    """The encoder and its projection. Inputs and outputs are always float32; with
+    `dtype=float16` the weights and the computation are half precision, cast at both ends."""
+
+    def __init__(self, model, dtype: torch.dtype = torch.float32):
         super().__init__()
         self.encoder, self.projector = model.encoder, model.encoder_projector
+        self.dtype = dtype
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        return self.projector(self.encoder(input_features=features).last_hidden_state)
+        x = self.encoder(input_features=features.to(self.dtype)).last_hidden_state
+        return self.projector(x).float()
 
 
 class Decoder(nn.Module):
@@ -163,6 +168,9 @@ def main(
     max_frames: int = typer.Option(
         512, help="Longest clip, in encoder frames of 80 ms (depthwise=fixed)."
     ),
+    encoder_dtype: str = typer.Option(
+        "fp32", help="Encoder weights and math: fp32 | fp16 (half the size; IO stays fp32)."
+    ),
 ) -> None:
     from transformers import AutoProcessor, GenerationConfig, ParakeetForTDT
 
@@ -179,16 +187,29 @@ def main(
     hidden, layers = cfg.decoder_hidden_size, cfg.num_decoder_layers
 
     with torch.inference_mode():
-        console.print("encoder")
+        console.print(f"encoder ({encoder_dtype})")
+        if encoder_dtype == "fp16":
+            # Traced on the GPU: PyTorch's CPU kernels do not all run in half precision. The
+            # rest of the model is exported from a float32 copy below.
+            import copy
+
+            half = copy.deepcopy(model).half().cuda()
+            enc_module = Encoder(half, torch.float16)
+            dummy = torch.randn(1, 300, cfg.encoder_config.num_mel_bins, device="cuda")
+        else:
+            enc_module, dummy = Encoder(model), torch.randn(1, 300, cfg.encoder_config.num_mel_bins)
         export(
-            Encoder(model),
-            (torch.randn(1, 300, cfg.encoder_config.num_mel_bins),),
+            enc_module,
+            (dummy,),
             out / "encoder.onnx",
             ["features"],
             ["encoded"],
             {"features": {1: "frames"}, "encoded": {1: "encoded_frames"}},
-            large=True,
+            large=encoder_dtype == "fp32",
         )
+        if encoder_dtype == "fp16":
+            del half, enc_module
+            torch.cuda.empty_cache()
         console.print("decoder")
         zeros = torch.zeros(layers, 1, hidden)
         export(
@@ -235,6 +256,7 @@ def main(
             {
                 "weights": weights,
                 "front_end": FRONT_END_REPO,
+                "encoder_dtype": encoder_dtype,
                 "encoder_convolutions": f"rewritten, depthwise {depthwise}"
                 if conv_free
                 else "conv",
