@@ -123,22 +123,16 @@
     raf = requestAnimationFrame(frame);
   }
 
-  $effect(() => {
-    // Re-measure the words whenever they change: the one-line width sets the pill's width,
-    // then the wrapped height (at that width) sets its line count.
-    committed;
-    preview;
-    if (measureEl) textWidth = measureEl.getBoundingClientRect().width;
-  });
-  $effect(() => {
-    // The wrapped copy is laid out at `textAreaW`; read its height once that has applied.
-    textAreaW;
-    committed;
-    preview;
-    if (wrapEl) lines = Math.max(1, Math.round(wrapEl.getBoundingClientRect().height / LINE_H));
-  });
-
   onMount(() => {
+    // The measuring copies report their own size after every layout, before paint: the
+    // one-line width sets the pill's width, and the wrapped height at that width (which
+    // changes only once the new width is laid out) sets its line count.
+    const sizes = new ResizeObserver(() => {
+      if (measureEl) textWidth = measureEl.getBoundingClientRect().width;
+      if (wrapEl) lines = Math.max(1, Math.round(wrapEl.getBoundingClientRect().height / LINE_H));
+    });
+    if (measureEl) sizes.observe(measureEl);
+    if (wrapEl) sizes.observe(wrapEl);
     raf = requestAnimationFrame(frame);
     const unlisten = [
       on<{ state: BarState; handsFree?: boolean; message?: string }>('bar:state', (e) => {
@@ -164,13 +158,14 @@
       }),
     ];
     return () => {
+      sizes.disconnect();
       cancelAnimationFrame(raf);
       unlisten.forEach((p) => p.then((f) => f()));
     };
   });
 </script>
 
-<div class="stage">
+<div class="stage" style:--wave-w="{WAVE_W}px" style:--line-h="{LINE_H}px">
   <div
     class="pill"
     class:shown={barState !== 'hidden' && barState !== 'exit' && barState !== 'cancelled'}
@@ -258,7 +253,7 @@
   /* A fixed-width slot, so the words never move when the waveform becomes the check. */
   .lead {
     flex: none;
-    width: 93px;
+    width: var(--wave-w);
     height: 38px;
     display: flex;
     align-items: center;
@@ -285,16 +280,17 @@
     justify-content: flex-end;
     overflow: hidden;
     color: var(--bar-words);
-    font-size: 14px;
-    line-height: 20px;
+    font-size: var(--bar-text-size);
+    line-height: var(--line-h);
     transition: color var(--dur-word) var(--ease-out);
   }
   .words.provisional,
   .words.provisional .preview {
     color: var(--bar-words-provisional);
   }
+  /* Nothing shows in the top padding (no sliced letters); the oldest full line fades in. */
   .words.overflowing {
-    mask-image: linear-gradient(to bottom, transparent 0, black 25px);
+    mask-image: linear-gradient(to bottom, transparent 9px, rgba(0, 0, 0, 0.35) 9px, black 29px);
   }
   .text {
     flex: none;
@@ -302,15 +298,16 @@
   }
   .measure {
     position: absolute;
+    display: inline-block;
     left: -10000px;
     top: 0;
     visibility: hidden;
     white-space: nowrap;
-    font-size: 14px;
+    font-size: var(--bar-text-size);
   }
   .measure.wrap {
     white-space: normal;
-    line-height: 20px;
+    line-height: var(--line-h);
     overflow-wrap: anywhere;
   }
   .preview {
