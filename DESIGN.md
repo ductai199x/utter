@@ -123,7 +123,8 @@ idle ──key down──► listening ──key up──► finishing ──►
    speech segment is sent to Parakeet straight away, while the user is still talking. When
    the key comes up, only the last segment is left to recognize. A segment is at most 41 s
    (512 encoder frames, a limit of the exported encoder); longer speech is cut at its
-   quietest point before that.
+   quietest point before that. Past 8 s, a pause of 128 ms is enough for a cut (384 ms
+   before), so the last segment stays short (docs/eval-results.md).
 4. **Mode.** Plain dictation, Command Mode, or hands-free (section 4.1).
    While the key is held, the Bar shows the words as they are recognized (section 4.2).
 5. **Text pass (no model).** Snippet triggers, spoken punctuation ("comma", "new line") and
