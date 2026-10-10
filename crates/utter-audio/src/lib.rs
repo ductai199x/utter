@@ -201,7 +201,7 @@ where
     let shared = shared.clone();
     device
         .build_input_stream(
-            config.clone(),
+            *config,
             move |data: &[T], _: &cpal::InputCallbackInfo| {
                 // Real-time thread: no allocation, no locks.
                 let mut sum_sq = 0.0f32;
