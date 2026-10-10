@@ -241,7 +241,7 @@ def score_cmd(
 def _print(summary: dict[str, dict[str, dict]]) -> None:
     systems = list(summary)
     groups = sorted({g for s in summary.values() for g in s}, key=lambda g: (g != "all", g))
-    t = Table(title="Final text: no-edit rate % (word error %, casing error %)")
+    t = Table(title="Final text: no edit needed % | characters to fix % | word error %")
     t.add_column("group")
     t.add_column("n", justify="right")
     for s in systems:
@@ -256,7 +256,7 @@ def _print(summary: dict[str, dict[str, dict]]) -> None:
                 continue
             n = row["n"]
             cells.append(
-                f"{row['exact_pct']:.1f} ({row['word_error_pct']:.1f}, {row['casing_error_pct']:.1f})"
+                f"{row['exact_pct']:.1f} | {row['chars_to_fix_pct']:.1f} | {row['word_error_pct']:.1f}"
             )
         t.add_row(g, str(n), *cells)
     console.print(t)
