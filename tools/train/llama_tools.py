@@ -30,7 +30,9 @@ def data_dir() -> Path:
 
 
 def component() -> dict:
-    comps = json.loads((REPO / "crates" / "utter-runtime" / "components.json").read_text(encoding="utf-8"))
+    comps = json.loads(
+        (REPO / "crates" / "utter-runtime" / "components.json").read_text(encoding="utf-8")
+    )
     items = comps["components"] if isinstance(comps, dict) else comps
     return next(c for c in items if c["id"] == "llama-cpp")
 
