@@ -34,8 +34,9 @@ from eval.finaltext.numbers import spoken_digits
 KINDS = ("natural", "explicit", "disfluent", "correction", "command")
 # Also available: "restate", a correction of a whole sentence (a wrong sentence, a cue such as
 # "scratch that", the right sentence), added to eval v1 as a supplement; and "grammar", the
-# passage said with grammar mistakes (grammar.py).
-EXTRA_KINDS = ("restate", "grammar")
+# passage said with grammar mistakes (grammar.py); and "list", a list passage enumerated aloud
+# (lists.py; its passages are in passages-lists-<split>.jsonl).
+EXTRA_KINDS = ("restate", "grammar", "list")
 
 # ---------------------------------------------------------------------------------------------
 # Step 2: reading a script aloud.
@@ -289,6 +290,10 @@ def make_script(kind: str, passage: str, rng: random.Random, llm, seed: int) -> 
         from eval.finaltext.grammar import grammar_script
 
         return grammar_script(passage, rng, llm, seed)
+    if kind == "list":
+        from eval.finaltext.lists import list_script
+
+        return list_script(passage, rng)
     raise ValueError(kind)
 
 
@@ -471,6 +476,7 @@ def main(
         "", help="An OpenAI-style server to use instead of a local llama-server (e.g. vLLM)."
     ),
     per_passage: int = typer.Option(0, help="Kinds per passage, chosen by its id (0: every kind)."),
+    passages_name: str = typer.Option("", help="Passages file stem (default: passages-<split>)."),
 ) -> None:
     """Renders every passage of a split in each kind; resumes where a previous run stopped."""
     from eval.finaltext.llm import Remote, Server, model_path
@@ -478,7 +484,8 @@ def main(
 
     root = eval_dir() / "finaltext"
     passages = [
-        json.loads(line) for line in (root / f"passages-{split}.jsonl").open(encoding="utf-8")
+        json.loads(line)
+        for line in (root / f"{passages_name or f'passages-{split}'}.jsonl").open(encoding="utf-8")
     ]
     if limit:
         passages = passages[:limit]
