@@ -173,7 +173,11 @@ def score_cmd(
             for r in (json.loads(line) for line in screen_path.open(encoding="utf-8"))
             if r["clean"]
         }
+        before = len(rows)
         rows = [r for r in rows if r["id"].rsplit("-", 1)[0] in clean]
+        console.print(
+            f"{len(rows)} dictations scored; {before - len(rows)} excluded by the gold screen"
+        )
     asr_rows = _rows(_results("asr", asr_name) / f"{eval_set}.jsonl")
     systems = {"parakeet": {r["id"]: r["hyp"] for r in asr_rows}}
     # Each system's own time: the recognizer's per clip; a cleanup's per request (on top of it).
