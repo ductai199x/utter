@@ -103,6 +103,11 @@ pub struct SegmenterConfig {
     pub silence_threshold: f32,
     /// Silence after speech, in frames, before a cut (12 frames = 384 ms).
     pub min_silence_frames: usize,
+    /// A segment this long, in frames, is cut at a shorter pause: `long_min_silence_frames`.
+    /// Long speech otherwise reaches key up as one long segment, and the pass after key up
+    /// reads all of it again.
+    pub long_segment_frames: usize,
+    pub long_min_silence_frames: usize,
     /// The longest segment, in frames; a longer one is cut at its quietest frame.
     pub max_segment_frames: usize,
 }
@@ -113,6 +118,9 @@ impl Default for SegmenterConfig {
             speech_threshold: 0.5,
             silence_threshold: 0.35,
             min_silence_frames: 12,
+            // After 8 s, a pause of 128 ms.
+            long_segment_frames: 8 * 16_000 / FRAME,
+            long_min_silence_frames: 4,
             // 30 s: under the encoder's 41 s limit, with room for the pre-roll.
             max_segment_frames: 30 * 16_000 / FRAME,
         }
@@ -172,7 +180,7 @@ impl Segmenter {
                 self.in_speech = false;
                 if let Some(s) = self.silence_start
                     && self.had_speech
-                    && i + 1 - s >= self.cfg.min_silence_frames
+                    && i + 1 - s >= self.min_silence(s)
                 {
                     let cut = s + (i + 1 - s) / 2;
                     cuts.push(cut);
@@ -188,6 +196,15 @@ impl Segmenter {
             }
         }
         cuts
+    }
+
+    /// The pause that ends the segment, for one that began at frame `silence_start`.
+    fn min_silence(&self, silence_start: usize) -> usize {
+        if silence_start.saturating_sub(self.seg_start) >= self.cfg.long_segment_frames {
+            self.cfg.long_min_silence_frames
+        } else {
+            self.cfg.min_silence_frames
+        }
     }
 
     fn start_segment(&mut self, at: usize) {
@@ -263,5 +280,24 @@ mod tests {
         let mut probs = vec![0.9; 10];
         probs[6] = 0.6; // the quietest, still speech
         assert_eq!(s.push(&probs), vec![6]);
+    }
+
+    #[test]
+    fn a_long_segment_is_cut_at_a_shorter_pause() {
+        let cfg = SegmenterConfig {
+            min_silence_frames: 6,
+            long_segment_frames: 10,
+            long_min_silence_frames: 2,
+            max_segment_frames: 1000,
+            ..Default::default()
+        };
+        // A 2-frame pause early on is not enough...
+        let mut s = Segmenter::new(cfg);
+        let short = [0.9, 0.9, 0.9, 0.1, 0.1, 0.9, 0.9];
+        assert!(s.push(&short).is_empty());
+        // ...but it is once the segment is 10 frames long: speech to frame 11, pause at 12-13.
+        let mut s = Segmenter::new(cfg);
+        let long = [0.9; 12].iter().chain(&[0.1, 0.1]).copied().collect::<Vec<f32>>();
+        assert_eq!(s.push(&long), vec![13]);
     }
 }

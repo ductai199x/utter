@@ -51,9 +51,17 @@ End to end (40 clips per set, 1 s gaps, light tier), key up to text ready:
 
 No hang in the 80 clips. What is left of the tail: two VoxPopuli clips spoken as one 20 s
 segment took 205 and 244 ms to transcribe after key up. The final pass waits behind a
-preview pass of nearly the same 20 s that is already running. Next: cut long segments at
-soft pauses while speaking, or skip the final pass when the last preview already covered
-all the audio.
+preview pass of nearly the same 20 s that is already running.
+
+So a segment over 8 s is now cut at a 128 ms pause instead of 384 ms (VoxPopuli, 40 clips):
+
+| | 384 ms pauses only | soft cut after 8 s |
+|---|---|---|
+| key up to text p50 / p95 | 50 / 368 ms | **28 / 315 ms** |
+| transcribed p50 / p95 | 47 / 108 ms | **27 / 73 ms** |
+| WER | | +0.10 points, 95% CI -0.21 to +0.43 (noise) |
+
+Two clips still arrive as one segment (no pause of 128 ms in 18 s) and take 114 and 191 ms.
 
 ---
 
