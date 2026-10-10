@@ -28,6 +28,11 @@ from eval.paths import eval_dir
 
 app = typer.Typer(add_completion=False)
 
+
+@app.callback()
+def _commands() -> None:
+    """Lists for the final-text eval and training data."""
+
 _ITEM = re.compile(r"^[ \t]*(?:([-*•])|(\d+)[.)])[ \t]+(\S.*)$")
 _ORDINALS = [
     "first",
