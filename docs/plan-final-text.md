@@ -99,6 +99,23 @@ While the key is down, Utter keeps one document with three parts:
 - **Flicker:** measured as normalized erasure (words erased per final word), and kept low.
   Window text only changes when cleanup actually changes it.
 
+### Look and feel (as important as accuracy)
+
+The Bar and the app must look elegant and feel calm. That is a requirement with its own
+process, not a polish pass at the end.
+
+- **References first:** study how the best-regarded desktop overlays look and move (Wispr's
+  Flow Bar, Apple's dictation and Dynamic Island, Raycast, Arc), the same way the pipeline
+  was researched.
+- **Iterate visually:** every Bar change is reviewed in the demo page (`bar.html?demo`) and
+  in the real app, from screenshots and recordings:
+  - over white and black, at 100% and 150% scaling;
+  - provisional words, corrections cross-fading, wrapping, Done, errors.
+- **Motion:** every transition uses the motion tokens and is checked frame by frame (no jump,
+  no reflow, no flicker).
+- **Gate:** the acceptance checks in `docs/ux/bar.md`, plus Tai's eye: visuals go to Tai as
+  screenshots and recordings before they are called done.
+
 ### 3. The cleanup model
 
 - **Who owns what:**
