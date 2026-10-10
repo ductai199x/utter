@@ -13,8 +13,10 @@ utter-platform.workspace = true
 utter-audio.workspace = true
 utter-asr.workspace = true
 utter-llm.workspace = true
+utter-runtime.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+tracing-subscriber.workspace = true

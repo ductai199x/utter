@@ -142,6 +142,12 @@ impl Microphone {
         f32::from_bits(self.shared.level.load(Ordering::Relaxed))
     }
 
+    /// A handle that reads the level from any thread (the UI's), independent of who holds the
+    /// microphone.
+    pub fn level_meter(&self) -> LevelMeter {
+        LevelMeter(self.shared.clone())
+    }
+
     /// Starts an utterance with the pre-roll already in it.
     pub fn start(&self) {
         let mut c = self.shared.capture.lock().expect("capture lock");
@@ -174,6 +180,17 @@ impl Microphone {
         let mut c = self.shared.capture.lock().expect("capture lock");
         c.taken = 0;
         c.recording.take().unwrap_or_default()
+    }
+}
+
+/// Reads the microphone's level; cheap to clone, safe to share.
+#[derive(Clone)]
+pub struct LevelMeter(Arc<Shared>);
+
+impl LevelMeter {
+    /// RMS level of the latest audio, 0 to 1.
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.0.level.load(Ordering::Relaxed))
     }
 }
 

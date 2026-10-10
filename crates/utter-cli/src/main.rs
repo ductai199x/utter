@@ -173,6 +173,18 @@ enum Command {
         /// pipeline does while the user speaks (0: off). The timed request is the one after.
         #[arg(long, default_value_t = 0.0)]
         prefill_fraction: f64,
+        /// Wait this long before each case, as a dictation does while the user speaks, to
+        /// time a request that arrives after the server has sat idle (0: back to back).
+        #[arg(long, default_value_t = 0)]
+        gap_ms: u64,
+        /// During the gap, send a one-token request this often to keep the server warm, as
+        /// the pipeline does while the user speaks (0: none).
+        #[arg(long, default_value_t = 0)]
+        keepalive_ms: u64,
+        /// Hold the GPU's clocks up through each gap and stop at its end, as the pipeline
+        /// does from key down to key up.
+        #[arg(long)]
+        warm_gpu: bool,
     },
     /// Clean up dictated text with the installed cleanup model and its product settings.
     Clean {
@@ -264,8 +276,19 @@ fn main() -> Result<()> {
         }
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
         Command::Clean { text, dictionary, tier } => return clean(&text.join(" "), dictionary, (*tier).into()),
-        Command::LlmBench { gguf, cases, name, server_args, limit, prefill_fraction } => {
-            return llm_bench(gguf, cases, name, server_args, *limit, *prefill_fraction);
+        Command::LlmBench {
+            gguf,
+            cases,
+            name,
+            server_args,
+            limit,
+            prefill_fraction,
+            gap_ms,
+            keepalive_ms,
+            warm_gpu,
+        } => {
+            let pacing = Pacing { gap_ms: *gap_ms, keepalive_ms: *keepalive_ms };
+            return llm_bench(gguf, cases, name, server_args, *limit, *prefill_fraction, pacing, *warm_gpu);
         }
         _ => {}
     }
@@ -355,6 +378,7 @@ fn chat(gguf: &Path, system: &str, message: &str, server_args: &[String]) -> Res
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments, reason = "one per command-line option")]
 fn llm_bench(
     gguf: &Path,
     case_files: &[PathBuf],
@@ -362,6 +386,8 @@ fn llm_bench(
     server_args: &[String],
     limit: usize,
     prefill_fraction: f64,
+    pacing: Pacing,
+    warm_gpu: bool,
 ) -> Result<()> {
     use utter_llm::{ChatParams, LlamaServer, ServerOptions, cleanup};
 
@@ -376,12 +402,16 @@ fn llm_bench(
             "gguf": gguf.display().to_string(),
             "server_args": server_args,
             "prefill_fraction": prefill_fraction,
+            "gap_ms": pacing.gap_ms,
+            "keepalive_ms": pacing.keepalive_ms,
+            "warm_gpu": warm_gpu,
             "llama_cpp": utter_runtime::component("llama-cpp")?.version,
             "prompt": "crates/utter-llm/prompts/cleanup.md",
         }))?,
     )?;
     // Cleanup output is about as long as its input; a cap stops a model that starts
     // answering instead of cleaning from running on.
+    let warmer = warm_gpu.then(utter_runtime::gpu::GpuWarmer::new);
     let params = |input: &str| ChatParams { max_tokens: (input.len() as u32 / 2).max(64), ..ChatParams::default() };
     for warm in ["Um, this is a warm-up.", "The the second warm-up, no, third."] {
         server.chat(&cleanup::messages(warm, &[]), &params(warm))?;
@@ -409,6 +439,24 @@ fn llm_bench(
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default();
+            let gap_end = std::time::Instant::now() + std::time::Duration::from_millis(pacing.gap_ms);
+            if let Some(w) = &warmer {
+                w.start();
+            }
+            loop {
+                let left = gap_end.saturating_duration_since(std::time::Instant::now());
+                if pacing.keepalive_ms == 0 || left.is_zero() {
+                    std::thread::sleep(left);
+                    break;
+                }
+                std::thread::sleep(left.min(std::time::Duration::from_millis(pacing.keepalive_ms)));
+                if std::time::Instant::now() < gap_end {
+                    server.keep_warm(&cleanup::messages("", &dictionary))?;
+                }
+            }
+            if let Some(w) = &warmer {
+                w.stop();
+            }
             if prefill_fraction > 0.0 {
                 let words: Vec<&str> = input.split_whitespace().collect();
                 let keep = ((words.len() as f64) * prefill_fraction).floor() as usize;
@@ -499,9 +547,33 @@ fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, d
         start.elapsed().as_secs_f64(),
         pipeline.microphone().device_name()
     );
-    pipeline.run(|d| {
+    pipeline.run(|event| {
+        use utter_pipeline::Event;
+
+        let d = match event {
+            Event::Listening { hands_free, .. } => {
+                print!("\r\x1b[2K{}", if hands_free { "listening (hands-free; tap Right Ctrl to stop)..." } else { "listening..." });
+                let _ = std::io::stdout().flush();
+                return;
+            }
+            Event::Words { committed, preview } => {
+                // One line, rewritten as words arrive: the newest 110 characters.
+                let line = format!("{committed} {preview}");
+                let line = line.trim();
+                let tail: String = line.chars().rev().take(110).collect::<Vec<_>>().into_iter().rev().collect();
+                print!("\r\x1b[2K> {tail}");
+                let _ = std::io::stdout().flush();
+                return;
+            }
+            Event::Finishing => return,
+            Event::Cancelled => {
+                println!("\r\x1b[2Kcancelled");
+                return;
+            }
+            Event::Done(d) => d,
+        };
         let target = d.target.as_ref().map(|w| w.title.as_str()).unwrap_or("?");
-        println!();
+        print!("\r\x1b[2K");
         println!("  heard:    {}", d.raw);
         if d.text != d.raw {
             println!("  cleaned:  {}", d.text);

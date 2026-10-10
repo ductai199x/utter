@@ -1,0 +1,3 @@
+# Built by Vite and by tauri-build.
+dist/
+src-tauri/gen/

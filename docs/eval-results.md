@@ -6,6 +6,57 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-10: GPU clocks while the user speaks
+
+The pipeline's first end-to-end bench (`utter-cli e2e-bench`, clips replayed in real time
+with 1 s gaps) had cleanup at 140-240 ms on short texts, against 95-124 ms for the same
+requests sent back to back. Measured with `llm-bench --gap-ms` (Gemma 4 E4B, product
+settings, 30 curated cases):
+
+| Idle before the request | p50 | prompt (19 tokens) | per generated token |
+|---|---|---|---|
+| none | 95 ms | 19 ms | 7.3 ms |
+| 0.5 s | 101 ms | 18 ms | 7.6 ms |
+| 1 s | 110 ms | 20 ms | 7.8 ms |
+| 3 s | 229 ms | 107 ms | 12.3 ms |
+
+`nvidia-smi` sampled every 100 ms shows why: under light load the GPU sits in **P3, memory
+clock 5,001 MHz, half of P2's 10,251**. Decoding is bound by memory bandwidth. The speech
+keep-alive passes keep the GPU from P5 but not out of P3.
+
+| Keeping it warm through a 3 s gap | p50 | GPU state, mean power |
+|---|---|---|
+| nothing | 229 ms | P3/P5 |
+| one-token llama-server request every 250 / 500 / 1000 ms | 187 / 171 / 205 ms | mostly P3 |
+| ... every 50 / 100 ms | 142 / 166 ms | P3 two thirds of the time, 114 / 101 W |
+| ... back to back | 89 ms | P2, 262 W |
+| a spin kernel in another process, full / half duty | 249 / 121 ms | P2, 157 W: time-slicing between processes slows the request |
+| **one GPU thread in a `nanosleep` kernel, in Utter's process, stopped at key up** | **86 ms** (p95 143) | **P2, 157 W while the key is down** |
+
+The last is `utter_runtime::gpu::GpuWarmer`: the clocks stay up for about a second after it
+stops, so cleanup runs at full speed with nothing competing. It uses the CUDA driver API
+from the GPU driver (no component). A first version ended each kernel on a `%globaltimer`
+deadline and hung the pipeline twice in the first long clip after a run of short ones; each
+kernel now ends after a fixed count of naps (at most 4 ms). `UTTER_NO_GPU_WARM=1` turns it
+off.
+
+End to end (40 clips per set, 1 s gaps, light tier), key up to text ready:
+
+| | before | with the warmer |
+|---|---|---|
+| AMI p50 / p95 | 55 / 253 ms | **31 / 163 ms** |
+| VoxPopuli p50 / p95 | 74 / 496 ms | **50 / 368 ms** |
+| transcribed (AMI) p50 / p95 | 36 / 99 ms | **26 / 49 ms** |
+| cleanup, the 10 AMI clips that needed it | 141-237 ms | **89-167 ms** |
+
+No hang in the 80 clips. What is left of the tail: two VoxPopuli clips spoken as one 20 s
+segment took 205 and 244 ms to transcribe after key up. The final pass waits behind a
+preview pass of nearly the same 20 s that is already running. Next: cut long segments at
+soft pauses while speaking, or skip the final pass when the last preview already covered
+all the audio.
+
+---
+
 ## 2026-10-09: a 5 GB footprint (tiers)
 
 Tai: the quality setup (about 21 GB of GPU memory, 18 GB to download) is far too heavy; aim for
