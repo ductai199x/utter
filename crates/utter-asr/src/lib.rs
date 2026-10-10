@@ -3,6 +3,7 @@
 //! The model is chosen by measurement (DESIGN.md section 6, docs/eval-results.md): English
 //! runs parakeet-ultra's weights, exported to ONNX, in [`ParakeetTdt`].
 
+pub mod boost;
 mod config;
 pub mod frontend;
 pub mod parakeet;
