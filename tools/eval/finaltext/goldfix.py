@@ -108,8 +108,11 @@ def main(
     spoken_safe: bool = typer.Option(False, help="Only fixes that keep the spoken words (case)."),
     model: str = "gemma4-26b-a4b-qat",
     slots: int = 8,
+    llm_url: str = typer.Option(
+        "", help="An OpenAI-style server to use instead of a local llama-server (e.g. vLLM)."
+    ),
 ) -> None:
-    from eval.finaltext.llm import Server, model_path
+    from eval.finaltext.llm import Remote, Server, model_path
 
     root = eval_dir() / "finaltext"
     path = root / f"passages-{split}.jsonl"
@@ -118,7 +121,8 @@ def main(
         shutil.copy(path, raw)  # the passages as extracted, kept once
     passages = [json.loads(line) for line in raw.read_text(encoding="utf-8").splitlines() if line]
 
-    with Server(model_path(model), slots=slots) as llm:
+    server = Remote(llm_url) if llm_url else Server(model_path(model), slots=slots)
+    with server as llm:
 
         def one(p: dict) -> tuple[dict, Outcome]:
             reply = json.loads(
