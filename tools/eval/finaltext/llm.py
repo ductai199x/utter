@@ -7,11 +7,14 @@ Dev only. The product talks to llama-server from Rust (crates/utter-llm).
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import socket
 import subprocess
+import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from types import TracebackType
@@ -76,14 +79,37 @@ class Chat:
                 # The name is required by the OpenAI API (vLLM checks it); llama-server ignores it.
                 "json_schema": {"name": "reply", "schema": json_schema},
             }
-        req = urllib.request.Request(
-            f"{self.url}/v1/chat/completions",
-            data=json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=600) as r:
-            out = json.load(r)
+        out = json.loads(self._post("/v1/chat/completions", json.dumps(body).encode()))
         return out["choices"][0]["message"]["content"]
+
+    def _post(self, path: str, body: bytes) -> bytes:
+        """POSTs over this thread's kept-alive connection. A connection per request runs Windows
+        out of ephemeral ports at a few hundred requests a second (WinError 10048)."""
+        conns: dict[str, http.client.HTTPConnection] = _THREAD.__dict__.setdefault("conns", {})
+        for attempt in range(2):
+            conn = conns.get(self.url)
+            if conn is None:
+                u = urllib.parse.urlsplit(self.url)
+                conn = conns[self.url] = http.client.HTTPConnection(u.netloc, timeout=600)
+            try:
+                conn.request("POST", path, body, {"Content-Type": "application/json"})
+                resp = conn.getresponse()
+                data = resp.read()
+            except (http.client.HTTPException, ConnectionError):
+                # The server closed an idle connection: reconnect once.
+                conn.close()
+                del conns[self.url]
+                if attempt:
+                    raise
+                continue
+            if resp.status != 200:
+                raise RuntimeError(f"{self.url}{path}: HTTP {resp.status}: {data[:300]!r}")
+            return data
+        raise AssertionError("unreachable")
+
+
+# Per thread: the kept-alive connection to each server.
+_THREAD = threading.local()
 
 
 class Remote(Chat):
