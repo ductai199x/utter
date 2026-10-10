@@ -892,15 +892,14 @@ fn bench(asr: &mut ParakeetTdt, sets: &str, limit: usize, name: &str, pacing: Pa
         let mut timings = Vec::with_capacity(rows.len());
         for (row, audio) in rows.iter().zip(&clips) {
             pacing.wait(asr, &keepalive)?;
-            let out = asr.transcribe(audio)?;
-            let t = out.timings;
+            let (text, t) = transcribe_any_length(asr, audio)?;
             serde_json::to_writer(
                 &mut w,
                 &ResultRow {
                     id: &row.id,
                     lang: &row.lang,
                     reference: &row.text,
-                    hyp: &out.text,
+                    hyp: &text,
                     detected: None,
                     latency_s: t.total_s(),
                     duration_s: row.duration_s,
@@ -920,6 +919,44 @@ fn bench(asr: &mut ParakeetTdt, sets: &str, limit: usize, name: &str, pacing: Pa
     }
     print_stats("all", &all);
     Ok(())
+}
+
+/// Transcribes a clip of any length: one past the encoder's limit (about 41 s) is split at its
+/// quietest 100 ms in the middle fifth, as the live segmenter would cut it at a pause, and the
+/// halves are transcribed in turn. Timings add up.
+fn transcribe_any_length(asr: &mut ParakeetTdt, audio: &[f32]) -> Result<(String, Timings)> {
+    match asr.transcribe(audio) {
+        Ok(out) => Ok((out.text, out.timings)),
+        Err(utter_asr::AsrError::TooLong { .. }) => {
+            let at = quietest_split(audio);
+            let (a, ta) = transcribe_any_length(asr, &audio[..at])?;
+            let (b, tb) = transcribe_any_length(asr, &audio[at..])?;
+            let text = [a.trim(), b.trim()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" ");
+            let t = Timings {
+                frontend_s: ta.frontend_s + tb.frontend_s,
+                encoder_s: ta.encoder_s + tb.encoder_s,
+                decode_s: ta.decode_s + tb.decode_s,
+                encoder_frames: ta.encoder_frames + tb.encoder_frames,
+                joint_calls: ta.joint_calls + tb.joint_calls,
+                decoder_calls: ta.decoder_calls + tb.decoder_calls,
+            };
+            Ok((text, t))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// The start of the quietest 100 ms window between 40% and 60% of the clip.
+fn quietest_split(audio: &[f32]) -> usize {
+    const WINDOW: usize = 1_600;
+    let (lo, hi) = (audio.len() * 2 / 5, audio.len() * 3 / 5);
+    (lo..hi.saturating_sub(WINDOW).max(lo + 1))
+        .step_by(WINDOW / 4)
+        .min_by(|&a, &b| {
+            let energy = |s: usize| audio[s..(s + WINDOW).min(audio.len())].iter().map(|x| x * x).sum::<f32>();
+            energy(a).total_cmp(&energy(b))
+        })
+        .unwrap_or(audio.len() / 2)
 }
 
 fn print_stats(label: &str, timings: &[Timings]) {
