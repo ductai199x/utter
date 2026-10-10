@@ -153,6 +153,9 @@ process, not a polish pass at the end.
 
 ### 4. Vocabulary
 
+Parakeet is never fine-tuned (Tai, 2026-10-10); only the cleanup model is. Recognition improves
+without touching its weights:
+
 1. **Phrase boosting in the recognizer:** port NeMo's boosting tree into our greedy TDT
    decoder. Dictionary words then come out right in the first place.
 2. **Dictionary:** written form plus optional sounds-like, given to the cleanup model too.
