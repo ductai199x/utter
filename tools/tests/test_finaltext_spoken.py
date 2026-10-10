@@ -1,6 +1,7 @@
 import random
 
 from eval.finaltext.spoken import (
+    SCOPES,
     check,
     correction_script,
     disfluent_script,
@@ -47,10 +48,16 @@ class FakeLLM:
         return self.reply
 
 
+def rng_asking_for(scope: str) -> random.Random:
+    """A generator whose first scope choice is `scope`."""
+    seed = next(s for s in range(1000) if random.Random(s).choice(SCOPES) == scope)
+    return random.Random(seed)
+
+
 def test_a_correction_always_ends_on_the_passage_words():
     passage = "Let's meet at 4 on Friday."
     llm = FakeLLM('{"scope": "word", "anchor": "4", "wrong": "3"}')
-    s = correction_script(passage, random.Random(1), llm, seed=0)
+    s = correction_script(passage, rng_asking_for("word"), llm, seed=0)
     assert s is not None
     assert s.text.startswith("Let's meet at 3, ")
     assert s.text.endswith("4 on Friday.")
@@ -59,7 +66,31 @@ def test_a_correction_always_ends_on_the_passage_words():
 
 def test_a_correction_whose_anchor_is_not_in_the_passage_is_rejected():
     llm = FakeLLM('{"scope": "word", "anchor": "five", "wrong": "3"}')
-    assert correction_script("Let's meet at 4.", random.Random(1), llm, seed=0) is None
+    assert correction_script("Let's meet at 4.", rng_asking_for("word"), llm, seed=0) is None
+
+
+def test_a_sentence_correction_replaces_a_whole_sentence():
+    passage = "The build is green. The demo is on Friday."
+    llm = FakeLLM(
+        '{"scope": "sentence", "anchor": "The demo is on Friday.", "wrong": "The demo is cancelled."}'
+    )
+    s = correction_script(passage, rng_asking_for("sentence"), llm, seed=0)
+    assert s is not None
+    assert s.text.startswith("The build is green. The demo is cancelled. ")
+    assert s.text.endswith("The demo is on Friday.")
+    assert s.tags["scope"] == "sentence"
+
+
+def test_a_sentence_correction_on_part_of_a_sentence_is_rejected():
+    llm = FakeLLM('{"scope": "sentence", "anchor": "on Friday.", "wrong": "on Monday."}')
+    assert (
+        correction_script("The demo is on Friday.", rng_asking_for("sentence"), llm, seed=0) is None
+    )
+
+
+def test_the_scope_asked_for_must_be_the_scope_returned():
+    llm = FakeLLM('{"scope": "phrase", "anchor": "on Friday", "wrong": "on Monday"}')
+    assert correction_script("The demo is on Friday.", rng_asking_for("word"), llm, seed=0) is None
 
 
 def test_disfluencies_keep_every_passage_word_in_order():
