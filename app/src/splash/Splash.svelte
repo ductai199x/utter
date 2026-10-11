@@ -3,8 +3,8 @@
   // loading stage (splash.rs); this page lights it, and fades the card out once dictation is
   // ready and the card has been up three seconds.
   import { onMount } from 'svelte';
-  import Logo from '../lib/Logo.svelte';
-  import { Voice } from './voice';
+  import AnimatedMark from '../lib/AnimatedMark.svelte';
+  import { Scene } from './scene';
 
   type StageId = 'speech' | 'cleanup' | 'microphone' | 'ready';
   const STAGES: { id: StageId; label: string; status: string }[] = [
@@ -32,21 +32,13 @@
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   // The card's drawing area: 640 x 400 inside a window with room for its shadow.
-  const voice = new Voice({
-    width: 640,
-    height: 400,
-    wordCenter: { x: 452, y: 168 },
-    waveY: 300,
-    words: ['hello', 'just speak', 'utter', 'clean text', 'say it'],
-    font: "600 64px 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif",
-    reducedMotion: reduced,
-  });
+  const scene = new Scene({ width: 640, height: 400, reducedMotion: reduced });
 
   function onStage(id: StageId) {
     const index = STAGES.findIndex((s) => s.id === id);
     if (index <= current) return;
     current = index;
-    voice.ripple(performance.now());
+    scene.pulse(performance.now());
     if (id === 'ready') {
       // At least three seconds up, and the ready line read, then the fade.
       const wait = Math.max(READY_HOLD_MS, SHOWN_MS - (performance.now() - startedAt));
@@ -76,7 +68,7 @@
   onMount(() => {
     let raf = 0;
     const frame = (now: number) => {
-      if (canvas) voice.draw(canvas, now);
+      if (canvas) scene.draw(canvas, now);
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
@@ -113,14 +105,14 @@
 <div class="window">
   <div class="card" class:leaving role="presentation" onclick={dismiss}>
     <canvas bind:this={canvas} aria-hidden="true"></canvas>
-    <div class="content">
-      <div class="brand">
-        <div class="mark"><Logo size={56} /></div>
-        <div>
-          <div class="name">Utter</div>
-          <div class="version">{version ? `Version ${version}` : ''}</div>
-        </div>
+    <div class="brand">
+      <div class="mark"><AnimatedMark size={48} color="#6b7cff" /></div>
+      <div>
+        <div class="name">Utter</div>
+        <div class="version">{version ? `Version ${version}` : ''}</div>
       </div>
+    </div>
+    <div class="progress">
       <ol class="stages" aria-label="Getting ready">
         {#each STAGES as s, i (s.id)}
           <li class:done={i < current || (s.id === 'ready' && current === i)} class:now={i === current && s.id !== 'ready'}>
@@ -156,7 +148,7 @@
     border-radius: 16px;
     overflow: hidden;
     background:
-      radial-gradient(120% 90% at 78% 40%, #182148 0%, rgba(24, 33, 72, 0) 60%),
+      radial-gradient(70% 60% at 62% 40%, #19224a 0%, rgba(25, 34, 74, 0) 70%),
       linear-gradient(160deg, #11152a 0%, #0b0e1b 100%);
     border: 1px solid rgba(255, 255, 255, 0.07);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
@@ -183,33 +175,30 @@
     width: 640px;
     height: 400px;
   }
-  .content {
-    position: absolute;
-    left: 36px;
-    top: 36px;
-    bottom: 32px;
-    width: 300px;
-    display: flex;
-    flex-direction: column;
-  }
+  /* The scene has the upper card; the name and the progress share the bottom edge. */
   .brand {
+    position: absolute;
+    left: 32px;
+    bottom: 30px;
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
   }
   .mark {
-    filter: drop-shadow(0 0 18px rgba(107, 140, 255, 0.45));
-    animation: breathe 2.6s ease-in-out infinite;
+    display: flex;
+    filter: drop-shadow(0 0 14px rgba(107, 124, 255, 0.45));
   }
-  @keyframes breathe {
-    50% {
-      transform: scale(1.03);
-      filter: drop-shadow(0 0 24px rgba(107, 140, 255, 0.6));
-    }
+  .progress {
+    position: absolute;
+    right: 36px;
+    bottom: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
   }
   .name {
-    font-size: 28px;
-    line-height: 34px;
+    font-size: 24px;
+    line-height: 30px;
     font-weight: 600;
     letter-spacing: -0.01em;
   }
@@ -218,13 +207,12 @@
     line-height: 16px;
     color: rgba(238, 241, 255, 0.5);
   }
-  /* Under the title: the left column reads top-down; the wave has the bottom of the card. */
   .stages {
     display: flex;
     gap: 14px;
     white-space: nowrap;
     list-style: none;
-    margin: 32px 0 10px;
+    margin: 0 0 8px;
     padding: 0;
     font-size: 12px;
     line-height: 16px;
@@ -272,7 +260,6 @@
     color: rgba(238, 241, 255, 0.72);
   }
   @media (prefers-reduced-motion: reduce) {
-    .mark,
     .stages li.now .dot {
       animation: none;
     }

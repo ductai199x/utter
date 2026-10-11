@@ -1,23 +1,27 @@
 # The splash
 
 What shows while Utter gets ready after a person starts it: the models load for 10 to 20
-seconds, and without it nothing on screen says anything is happening. Status: **spec, not
-built**.
+seconds, and without it nothing on screen says anything is happening. Status: **built** (v2,
+app/src/splash/scene.ts).
 
 The requirements come from the splash Tai shaped in the chess coaching companion
 (D:\chess-coaching-companion, desktop/src/routes/splash): the same window behaviour, timing and
 care. The picture is Utter's own.
 
-## The idea: voice becoming text
+## The idea: the mark, told at the size of the card
 
-Utter turns speech into clean text, so the splash shows exactly that. A field of fine points of
-light moves as a voice does: a living waveform across the card, louder and quieter in phrases.
-Every few seconds a phrase gathers: the points stream out of the wave and settle into a word,
-crisp and still for a moment, like text arriving where you type. Then the word lets go, its
-points flow back into the wave, and the next phrase begins.
+Utter's mark is a voice that lays itself down into lines of text (app/src/lib/mark.ts). The
+splash tells that story across the whole card. Five fine ribbons of light come in from the left
+edge the way a voice does, louder and quieter in phrases, crossing and drifting like silk. As
+they reach the middle of the card they settle and flatten into the faint ruled lines of a page.
+When a phrase arrives at the page, a glowing write-head writes it out on the line as words
+(rounded strokes, like the mark's lines, never real letters); in a pause between phrases the
+head waits. The ribbon feeding the line being written is a touch brighter. When the page is
+full it rests, fades, and the next page begins.
 
-The words are Utter's own vocabulary, chosen to read well at a glance: "utter", "hello",
-"clean text", "just speak". Never more than two words, set in the UI font, weight 600.
+Calm is the rule: slow waves (wavelengths of 120 to 170 px, a phrase travelling at 120 px/s),
+one palette (the accent's blues and violets, with light in it), additive light on a deep
+near-black blue.
 
 ## Window
 
@@ -33,18 +37,19 @@ The words are Utter's own vocabulary, chosen to read well at a glance: "utter", 
 
 ## What it shows
 
-- The Utter mark, 72 px, top left of the card's content column, with a soft accent glow that
-  breathes (scale 1.0 to 1.03 over 2.6 s).
-- "Utter" beside it, 28 px semibold, and the version under it, small and muted.
-- The progress: the stages of getting ready, as a short row of words under the title, each
+- Bottom left: the animated mark (lib/AnimatedMark.svelte), 48 px with a soft accent glow,
+  drawing itself in as the card appears and then living as it does everywhere. "Utter" beside
+  it, 24 px semibold, and the version under it, small and muted.
+- Bottom right: the progress, the stages of getting ready as a short row of words, each
   lighting up as it finishes:
   `Speech · Cleanup · Microphone · Ready`
-  The one loading pulses softly; finished ones are full brightness with a small check; the
-  others are dim. Each finish sends a gentle ripple through the waveform.
-- One status line under the row: "Loading the speech model...", then the next stage, then
+  The one loading pulses softly; finished ones are full brightness; the others are dim. Each
+  finish sends a pulse of light along the ribbons into the page, and the ruled lines brighten
+  as it arrives.
+- One status line under the row, right-aligned: "Loading the speech model...", then the next stage, then
   "Ready. Hold Right Ctrl to dictate." It never shows a raw error.
-- The animation (the waveform and the words of light) fills the card behind the text, its
-  center of mass on the right so the text column on the left stays readable.
+- The scene has the upper card; the name and the progress share the bottom edge, so nothing
+  is drawn behind text.
 
 ## Timing
 
@@ -74,10 +79,11 @@ The words are Utter's own vocabulary, chosen to read well at a glance: "utter", 
 
 - The canvas runs at the display's refresh rate, its resolution capped at 2x (the models load
   at the same time, on the same machine).
-- Each frame is drawn to an off-screen buffer and put on the card in one go.
-- About 2,400 points. Forming a word takes 1.6 s (eased), holding it 1.4 s, releasing it 0.9 s.
-- With "reduce motion" set: the waveform is still, no words form, the progress row and status
-  line work as above.
+- Five ribbons, each a core, a soft glow and two faint strands: about 30 strokes a frame.
+- The write-head moves at up to 120 px/s, so a page takes 12 to 15 s; a full page rests 1.8 s
+  and fades over 1.2 s.
+- With "reduce motion" set: the ribbons are still, the page is written, the mark is drawn;
+  the progress row and status line work as above.
 
 ## Review
 
