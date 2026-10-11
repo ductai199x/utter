@@ -7,13 +7,13 @@ How the development machine is laid out. Tai's choice (2026-10-09): downloads go
 | What | Where | Notes |
 |---|---|---|
 | Models under evaluation (Python tools) | `%USERPROFILE%\.cache\huggingface\hub` | The standard Hugging Face cache, shared with other projects. Never committed. |
-| Utter's runtime components (incl. shipped models) | `%USERPROFILE%\.cache\utter\runtime\<id>-<version>\` | Installed by `utter-cli setup` from `crates/utter-runtime/components.json`. |
-| Eval clips and manifests | `%USERPROFILE%\.cache\utter\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl`. Override the root with `UTTER_DATA_DIR`. |
-| Eval results | `%USERPROFILE%\.cache\utter\eval\results\` | One JSONL per model and set, re-scored by the report commands. |
-| Local model exports | `%USERPROFILE%\.cache\utter\models\<name>\` | Output of `tools/export/export_parakeet.py`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
-| Settings | `%USERPROFILE%\.cache\utter\settings.toml` | The dictionary, list formatting, microphone and cleanup model. The Home window edits it; a hand edit applies on the next dictation too. Written with every key commented when missing. |
-| Logs | `%USERPROFILE%\.cache\utter\logs\` | `llama-server.log` |
-| Dictation log | `%USERPROFILE%\.cache\utter\dictations\` | One `<id>.json` per live dictation (every recognizer pass, Bar state, cleanup input and output, timings) and `<id>.wav`. Never leaves the machine. |
+| Utter's runtime components (incl. shipped models) | `%LOCALAPPDATA%\Utter_dev\runtime\<id>-<version>\` | Installed by `utter-cli setup` from `crates/utter-runtime/components.json`. |
+| Eval clips and manifests | `%LOCALAPPDATA%\Utter_dev\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl`. Override the root with `UTTER_DATA_DIR`. |
+| Eval results | `%LOCALAPPDATA%\Utter_dev\eval\results\` | One JSONL per model and set, re-scored by the report commands. |
+| Local model exports | `%LOCALAPPDATA%\Utter_dev\models\<name>\` | Output of `tools/export/export_parakeet.py`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
+| Settings | `%LOCALAPPDATA%\Utter_dev\settings.toml` | The dictionary, list formatting, microphone and cleanup model. The Home window edits it; a hand edit applies on the next dictation too. Written with every key commented when missing. |
+| Logs | `%LOCALAPPDATA%\Utter_dev\logs\` | `llama-server.log` |
+| Dictation log | `%LOCALAPPDATA%\Utter_dev\dictations\` | One `<id>.json` per live dictation (every recognizer pass, Bar state, cleanup input and output, timings) and `<id>.wav`. Never leaves the machine. |
 
 The Hugging Face account is `ductai199x`. Its terms were accepted for the gated repos
 `speechcolab/gigaspeech2`, `linhtran92/viet_bud500` and `CohereLabs/cohere-transcribe-03-2026`.
@@ -36,7 +36,7 @@ on C: (D: is nearly full), selected per command:
 
 ```
 cd tools/tts/kokoro
-UV_PROJECT_ENVIRONMENT=%USERPROFILE%/.cache/utter/envs/tts-kokoro uv run python synth.py ...
+UV_PROJECT_ENVIRONMENT=%LOCALAPPDATA%/Utter_dev/envs/tts-kokoro uv run python synth.py ...
 ```
 
 The final-text eval (docs/plan-final-text.md) runs in order: `eval.finaltext.sources`
@@ -61,13 +61,13 @@ version, a publisher's URL and that publisher's SHA-256:
 | gemma4-26b-a4b-qat d1c082be (14.4 GB) | Hugging Face `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | The cleanup model, quality tier: optional, `utter-cli setup gemma4-26b-a4b-qat` |
 
 `utter-cli setup` downloads, verifies and installs them, and the speech model (2.6 GB, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx`), into
-`%USERPROFILE%\.cache\utter\runtime\` (about 8.2 GB for the default tier, most of it the two models); `utter-cli doctor` lists them. The same
+`%LOCALAPPDATA%\Utter_dev\runtime\` (about 8.2 GB for the default tier, most of it the two models); `utter-cli doctor` lists them. The same
 path serves development and release; nothing is loaded from `tools/.venv`, LM Studio or any
 other application. Checked by running with a PATH holding only Windows' own folders.
 
 llama-server runs as Utter's child process and is tied to it with a Windows job object: if
 Utter crashes or is killed, Windows ends the server too (checked by force-killing the CLI
-mid-request). Its log is `%USERPROFILE%\.cache\utter\logs\llama-server.log`.
+mid-request). Its log is `%LOCALAPPDATA%\Utter_dev\logs\llama-server.log`.
 
 `UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build. It is
 also how the recognizer runs on Linux before Linux components exist (FLAME, 2026-10-10;

@@ -167,7 +167,7 @@ without touching its weights:
 
 ### 5. Logging
 
-Every dictation writes one record to `%USERPROFILE%\.cache\utter\dictations\`:
+Every dictation writes one record to `%LOCALAPPDATA%\Utter_dev\dictations\`:
 - the audio (setting, on by default in development);
 - every recognizer pass;
 - every Bar state with its time;

@@ -1,7 +1,7 @@
 # Eval results
 
 Every number here was measured on the development machine (RTX 3090 Ti, Windows 11) by
-`tools/eval`. Raw outputs are under `%USERPROFILE%\.cache\utter\eval\results\` (see
+`tools/eval`. Raw outputs are under `%LOCALAPPDATA%\Utter_dev\eval\results\` (see
 `docs/local-setup.md`). Newest first.
 
 ---

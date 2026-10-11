@@ -11,7 +11,7 @@ Triton ships for Linux only.
 
 Output: <out>/adapter (the LoRA) and <out>/merged (full model, for convert_hf_to_gguf.py).
 
-Run: UV_PROJECT_ENVIRONMENT=%USERPROFILE%/.cache/utter/envs/train uv run python train_lora.py DATA OUT
+Run: UV_PROJECT_ENVIRONMENT=%LOCALAPPDATA%/Utter_dev/envs/train uv run python train_lora.py DATA OUT
 On N GPUs (Linux, e.g. a GPU cluster): uv run torchrun --nproc-per-node N train_lora.py DATA OUT --batch B
 (the effective batch is N x B x grad_accum).
 """

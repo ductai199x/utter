@@ -6,7 +6,7 @@ bf16, more than the local GPU holds alongside anything else.
 The base model is the one the run recorded (train_args.json beside the adapter), so an adapter
 is never merged into a model it was not trained on.
 
-Run: UV_PROJECT_ENVIRONMENT=%USERPROFILE%/.cache/utter/envs/train uv run python merge_adapter.py ADAPTER OUT
+Run: UV_PROJECT_ENVIRONMENT=%LOCALAPPDATA%/Utter_dev/envs/train uv run python merge_adapter.py ADAPTER OUT
 """
 
 from __future__ import annotations
