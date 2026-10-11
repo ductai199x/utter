@@ -28,6 +28,10 @@ pub enum Tier {
     Light,
     /// Gemma 4 26B-A4B, prompted: about 15 GB of GPU memory. Optional, for GPUs with room.
     Quality,
+    /// Gemma 4 E2B fine-tuned on the light tier's data with its recipe: about half of E4B's GPU
+    /// memory, for an extra light Utter of about 2.5 GB in all (Tai, 2026-10-11) with the speech
+    /// model on the CPU.
+    ExtraLight,
 }
 
 impl Tier {
@@ -36,6 +40,7 @@ impl Tier {
         match self {
             Tier::Light => "utter-cleanup-e4b",
             Tier::Quality => "gemma4-26b-a4b-qat",
+            Tier::ExtraLight => "utter-cleanup-e2b",
         }
     }
 
@@ -43,16 +48,23 @@ impl Tier {
         match self {
             Tier::Light => "utter-cleanup-e4b-ft5.q4_0.gguf",
             Tier::Quality => "gemma-4-26B_q4_0-it.gguf",
+            Tier::ExtraLight => "utter-cleanup-e2b.q4_0.gguf",
         }
     }
 
-    /// The system prompt this tier's model expects: the fine-tuned model was trained with
+    /// The system prompt this tier's model expects: the fine-tuned models were trained with
     /// [`FINE_TUNED_PROMPT`] and must get exactly it.
     pub fn system_prompt(self) -> &'static str {
         match self {
-            Tier::Light => FINE_TUNED_PROMPT,
+            Tier::Light | Tier::ExtraLight => FINE_TUNED_PROMPT,
             Tier::Quality => SYSTEM_PROMPT,
         }
+    }
+
+    /// Whether this tier's model is published (in components.json): a tier is offered only
+    /// once it is.
+    pub fn available(self) -> bool {
+        utter_runtime::component(self.component()).is_ok()
     }
 }
 

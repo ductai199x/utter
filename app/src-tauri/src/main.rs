@@ -161,6 +161,14 @@ impl Bar {
                     tracing::warn!("{what} not applied: {e}");
                 }
                 let status = if error.is_some() { "error" } else { "ok" };
+                // A model switch setup downloaded for: setup closes once it took, or says why not.
+                if what == "model" && self.window.app_handle().get_webview_window("setup").is_some() {
+                    let app = self.window.app_handle();
+                    match &error {
+                        None => setup::ready(app),
+                        Some(e) => setup::failed(app, problem::model_switch(e)),
+                    }
+                }
                 let _ = self.window.emit_to("home", "home-applied", Applied { what, status, error });
             }
             Event::ModelLoading => {
@@ -246,10 +254,27 @@ struct Core {
 }
 
 /// Starts dictation once (at launch, or when first run has installed everything).
-pub fn start_pipeline(app: &AppHandle) {
+/// Starts dictation once (at launch, or when setup has installed everything). Returns whether
+/// this call started it (false: it was running or starting already).
+pub fn start_pipeline(app: &AppHandle) -> bool {
     let core = app.state::<Core>();
-    if !core.started.swap(true, Ordering::Relaxed) {
+    let start = !core.started.swap(true, Ordering::Relaxed);
+    if start {
         run_pipeline(app.clone(), core.bar.clone(), core.link.clone());
+    }
+    start
+}
+
+/// Sends the settings file to the running pipeline again (after setup downloaded what they
+/// need, which the watcher held them back for).
+pub fn reapply_settings(app: &AppHandle) {
+    match Settings::load_or_create(&Settings::path()) {
+        Ok(s) => {
+            if let Some(tx) = app.state::<Core>().link.0.lock().expect("pipeline link").as_ref() {
+                let _ = tx.send(s);
+            }
+        }
+        Err(e) => tracing::warn!("settings: {e}"),
     }
 }
 
@@ -342,9 +367,12 @@ fn main() {
                     api.prevent_close();
                     let _ = window.hide();
                 }
-                // Nothing works without the models: closing first run quits (downloads resume
-                // on the next start). Finishing it destroys the window instead.
-                "setup" => window.app_handle().exit(0),
+                // Before dictation runs nothing works without the models: closing setup quits
+                // (downloads resume on the next start). Once it runs (a model change from
+                // Home), closing only closes. Finishing destroys the window instead.
+                "setup" if !window.app_handle().state::<Core>().started.load(Ordering::Relaxed) => {
+                    window.app_handle().exit(0);
+                }
                 _ => {}
             }
         })
@@ -375,7 +403,9 @@ fn main() {
                 tracing::info!("removed superseded components: {:.1} GB", freed as f64 / 1e9);
             }
             match setup::mode_for(&setup::missing()) {
-                None => start_pipeline(app.handle()),
+                None => {
+                    start_pipeline(app.handle());
+                }
                 Some(mode) => {
                     set_tray_status(app.handle(), "Utter: setting up");
                     setup::open(app.handle(), mode)?;

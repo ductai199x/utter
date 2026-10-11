@@ -15,6 +15,7 @@
     validTerm,
     type Applied,
     type HomeState,
+    type Model,
     type Settings,
   } from './core';
 
@@ -44,9 +45,22 @@
 
   const terms = $derived(settings?.dictionary ?? []);
   // Why the quality model cannot be chosen, if it cannot.
-  const qualityBlocked = $derived(
-    !home ? '' : !home.qualityFits ? 'needs a graphics card with 20 GB of memory.' : !home.qualityInstalled ? 'not installed.' : '',
+  const qualityBlocked = $derived(home && !home.qualityFits ? 'needs a graphics card with 20 GB of memory.' : '');
+  // The models offered, lightest first; extra light once its model is published.
+  const MODELS = $derived(
+    (
+      [
+        ['extra-light', 'Extra light', 'Smallest: about 2.5 GB of GPU memory, for 4 GB cards. Speech runs on the processor.'],
+        ['light', 'Light', 'Fast and accurate: about 6 GB of GPU memory.'],
+        ['quality', 'Quality', 'Most careful, and slower: about 18 GB of GPU memory.'],
+      ] as const
+    ).filter(([id]) => id !== 'extra-light' || home?.extraLightAvailable),
   );
+  /** "Downloads 3.9 GB" when choosing `model` needs a download first. */
+  function downloadNote(model: Model): string | undefined {
+    const bytes = home?.downloadBytes[model] ?? 0;
+    return bytes > 0 ? `Downloads ${(bytes / 1e9).toFixed(1)} GB` : undefined;
+  }
   const filter = $derived(draft.includes(',') || draft.includes('\n') ? '' : draft.trim().toLowerCase());
   const shown = $derived(
     terms.map((t, i) => ({ t, i })).filter(({ t }) => !filter || t.toLowerCase().includes(filter)),
@@ -423,11 +437,7 @@
           <div class="row">
             <div class="label">
               <span class="label-text" id="model-label">Model</span>
-              <span class="desc">
-                {settings.model === 'light'
-                  ? 'Fastest. Runs on most GPUs (about 6 GB).'
-                  : 'Slower and larger (about 18 GB of GPU memory).'}
-              </span>
+              <span class="desc">{MODELS.find(([id]) => id === settings?.model)?.[2] ?? ''}</span>
               {#if applied.model?.status === 'loading'}
                 <span class="row-status"><span class="spinner" aria-hidden="true"></span>Loading...</span>
               {:else if applied.model?.status === 'error'}
@@ -435,18 +445,16 @@
               {/if}
             </div>
             <div class="segmented" role="radiogroup" aria-labelledby="model-label">
-              <button
-                role="radio"
-                aria-checked={settings.model === 'light'}
-                onclick={() => settings && save({ ...settings, model: 'light' })}>Light</button
-              >
-              <button
-                role="radio"
-                aria-checked={settings.model === 'quality'}
-                disabled={!!qualityBlocked}
-                title={qualityBlocked || undefined}
-                onclick={() => settings && save({ ...settings, model: 'quality' })}>Quality</button
-              >
+              {#each MODELS as [id, label] (id)}
+                {@const blocked = id === 'quality' ? qualityBlocked : ''}
+                <button
+                  role="radio"
+                  aria-checked={settings.model === id}
+                  disabled={!!blocked}
+                  title={blocked ? `Quality ${blocked}` : downloadNote(id)}
+                  onclick={() => settings && save({ ...settings, model: id })}>{label}</button
+                >
+              {/each}
             </div>
           </div>
           {#if qualityBlocked && settings.model !== 'quality'}<p class="hint">Quality: {qualityBlocked}</p>{/if}

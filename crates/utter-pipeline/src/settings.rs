@@ -29,7 +29,8 @@ start_at_login = true
 # The microphone: part of its name, or \"\" for the system default.
 microphone = \"\"
 
-# The cleanup model: \"light\" (fast, about 6 GB of GPU memory) or \"quality\" (about 18 GB).
+# The models: \"light\" (about 6 GB of GPU memory), \"extra-light\" (about 2.5 GB, for smaller
+# GPUs) or \"quality\" (about 18 GB).
 model = \"light\"
 ";
 
@@ -48,11 +49,13 @@ pub struct Settings {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum Model {
     #[default]
     Light,
     Quality,
+    /// About 2.5 GB of GPU memory in all: the E2B cleanup model, speech on the CPU.
+    ExtraLight,
 }
 
 impl From<Model> for Tier {
@@ -60,6 +63,7 @@ impl From<Model> for Tier {
         match m {
             Model::Light => Tier::Light,
             Model::Quality => Tier::Quality,
+            Model::ExtraLight => Tier::ExtraLight,
         }
     }
 }
@@ -121,7 +125,12 @@ impl Settings {
         set(&mut doc, "lists", self.lists.into());
         set(&mut doc, "start_at_login", self.start_at_login.into());
         set(&mut doc, "microphone", self.microphone.as_str().into());
-        set(&mut doc, "model", (if self.model == Model::Quality { "quality" } else { "light" }).into());
+        let model = match self.model {
+            Model::Light => "light",
+            Model::Quality => "quality",
+            Model::ExtraLight => "extra-light",
+        };
+        set(&mut doc, "model", model.into());
         // Write then rename, so a crash never leaves half a file.
         let tmp = path.with_extension("toml.tmp");
         std::fs::write(&tmp, doc.to_string()).map_err(|e| format!("{}: {e}", tmp.display()))?;

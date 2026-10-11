@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use utter_asr::boost::BoostConfig;
 use utter_asr::vad::{FRAME, Segmenter, SegmenterConfig, SileroVad};
-use utter_asr::{ParakeetOptions, ParakeetTdt};
+use utter_asr::{ParakeetTdt, SpeechModel};
 use utter_audio::{MicConfig, Microphone};
 use utter_llm::cleanup::{self, Tier};
 use utter_llm::{ChatParams, LlamaServer};
@@ -87,8 +87,49 @@ impl Default for PipelineConfig {
     }
 }
 
-/// A cleanup model started for a model change: the cleaner, or why it could not start.
-type ModelLoad = Result<Option<Cleaner>, String>;
+/// The speech worker's two ends: where jobs go, where results come back.
+type Speech = (Sender<Job>, Receiver<Done>);
+
+/// What a model change started: the cleaner, and a new speech worker when the tier runs the
+/// speech model elsewhere; or why it could not start.
+type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
+
+/// Where a tier runs the speech model: on the GPU, except where the extra light tier's 2.5 GB
+/// budget has no room for it.
+pub fn speech_for(tier: Tier) -> SpeechModel {
+    if tier == Tier::ExtraLight { SpeechModel::Cpu } else { SpeechModel::Gpu }
+}
+
+/// The runtime components a tier needs (crates/utter-runtime/components.json): onnxruntime,
+/// the CUDA runtime llama-server and the GPU speech model use, voice detection, llama-server,
+/// cuDNN when the speech model runs on the GPU, then the tier's two models.
+pub fn components_for(tier: Tier) -> Vec<&'static str> {
+    let speech = speech_for(tier);
+    let mut ids = vec!["onnxruntime-gpu", "cuda-runtime", "silero-vad", "llama-cpp"];
+    if speech == SpeechModel::Gpu {
+        ids.push("cudnn");
+    }
+    ids.extend([speech.component(), tier.component()]);
+    ids
+}
+
+/// Loads and warms the speech model, boosting `dictionary`, on its own worker thread.
+fn start_speech(model: SpeechModel, dictionary: &[String]) -> Result<Speech, PipelineError> {
+    let mut asr = ParakeetTdt::load(&model.installed_dir()?, model.options())?;
+    if !dictionary.is_empty() {
+        asr.set_phrases(dictionary, BoostConfig::default());
+    }
+    for _ in 0..3 {
+        asr.transcribe(&vec![0.0f32; 16_000])?;
+    }
+    let (job_tx, job_rx) = mpsc::channel();
+    let (done_tx, done_rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("utter-speech".into())
+        .spawn(move || speech_worker(asr, job_rx, done_tx))
+        .map_err(|_| PipelineError::WorkerGone)?;
+    Ok((job_tx, done_rx))
+}
 
 /// How often the idle pipeline looks for new settings.
 const SETTINGS_POLL: Duration = Duration::from_millis(200);
@@ -355,21 +396,7 @@ impl Pipeline {
     /// Loads everything up front (models, server, microphone) and warms it, so the first
     /// dictation is as fast as the rest.
     pub fn start(cfg: PipelineConfig) -> Result<Self, PipelineError> {
-        let model_dir = utter_asr::installed_model_dir()?;
-        let mut asr = ParakeetTdt::load(&model_dir, ParakeetOptions::default())?;
-        if !cfg.dictionary.is_empty() {
-            asr.set_phrases(&cfg.dictionary, BoostConfig::default());
-        }
-        for _ in 0..3 {
-            asr.transcribe(&vec![0.0f32; 16_000])?;
-        }
-        let (job_tx, job_rx) = mpsc::channel();
-        let (done_tx, done_rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("utter-speech".into())
-            .spawn(move || speech_worker(asr, job_rx, done_tx))
-            .map_err(|_| PipelineError::WorkerGone)?;
-
+        let (job_tx, done_rx) = start_speech(speech_for(cfg.tier), &cfg.dictionary)?;
         let cleaner = start_cleaner(&cfg)?;
         let vad = SileroVad::load_installed()?;
         // A saved microphone that is not connected is no reason not to start: the system
@@ -423,8 +450,15 @@ impl Pipeline {
             match rx.try_recv() {
                 Ok(result) => {
                     let error = match result {
-                        Ok(cleaner) => {
+                        Ok((cleaner, speech)) => {
                             self.engine.cleaner = cleaner;
+                            if let Some((jobs, done)) = speech {
+                                // The old worker ends when its job channel closes. The
+                                // dictionary may have changed while the new one loaded.
+                                let _ = jobs.send(Job::Phrases(self.engine.cfg.dictionary.clone()));
+                                self.engine.jobs = jobs;
+                                self.engine.done = done;
+                            }
                             self.engine.cfg.tier = wanted.model.into();
                             None
                         }
@@ -479,11 +513,16 @@ impl Pipeline {
             let mut next = cfg.clone();
             next.tier = tier;
             next.prompt = None;
+            let new_speech = (speech_for(tier) != speech_for(cfg.tier)).then_some(speech_for(tier));
             let (tx, rx) = mpsc::channel();
             let spawned = std::thread::Builder::new()
                 .name("utter-model-load".into())
                 .spawn(move || {
-                    let _ = tx.send(start_cleaner(&next).map_err(|e| e.to_string()));
+                    let load = || -> Result<_, PipelineError> {
+                        let speech = new_speech.map(|m| start_speech(m, &next.dictionary)).transpose()?;
+                        Ok((start_cleaner(&next)?, speech))
+                    };
+                    let _ = tx.send(load().map_err(|e| e.to_string()));
                 })
                 .is_ok();
             if spawned {
@@ -521,7 +560,10 @@ impl Engine {
     fn log_config(&self) -> serde_json::Value {
         let version = |id: &str| utter_runtime::component(id).map(|c| c.version.clone()).ok();
         serde_json::json!({
-            "speech_model": { "id": utter_asr::MODEL_COMPONENT, "version": version(utter_asr::MODEL_COMPONENT) },
+            "speech_model": {
+                "id": speech_for(self.cfg.tier).component(),
+                "version": version(speech_for(self.cfg.tier).component())
+            },
             "cleanup_model": if self.cfg.no_cleanup {
                 serde_json::Value::Null
             } else {
