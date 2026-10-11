@@ -6,6 +6,76 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-11: ready to send, and ft5
+
+**The headline metric is now "ready to send"** (Tai, 2026-10-10): the share of dictations a
+careful writer would send exactly as typed. "No edit needed" (exact match) counts an optional
+comma as a miss, and so says little about whether the output is good. For each non-exact
+output, Gemma 4 26B-A4B (tools/eval/finaltext/judge.py) lists every difference from the
+intended text, then grades it:
+- **acceptable:** only equally valid choices differ, or the output fixes the answer key's own
+  typo;
+- **needs an edit:** with a cause.
+
+The rubric was calibrated on Tai's review of 20 verdicts (he found it a bit harsh): punctuation
+is the writer's choice unless it garbles or changes the meaning. **Goal: 90%** (Tai, for this
+push).
+
+**The realistic eval set** (en-finaltext-kokoro-real, 950 dictations):
+- what people dictate: 583 everyday messages, emails, notes, AI prompts and updates
+  (messages.py), plus 367 short real forum and chat posts from the eval split;
+- each spoken one way: plain, fillers, a self-correction, a command, a later edit, spoken
+  punctuation or broken grammar;
+- also spoken by Chatterbox voices no training data uses.
+
+The physics abstracts and IRC nicknames of the main set make it a stress test, not the target.
+
+**ft5:**
+- ft4's data plus 10,476 more grammar renditions, weighted to the types ft4 missed (articles,
+  tense, noun number, prepositions, pronouns);
+- plus 12,478 everyday passages, one rendition each: 89,499 pairs;
+- one epoch on FLAME's 2 A6000s (the cluster had no 4 free), 3 hours.
+
+Ready to send:
+
+| realistic set | ft4 | **ft5** |
+|---|---|---|
+| all (950), Kokoro | 83.8% | **88.8%** |
+| everyday half (583) | 88.7% | **96.2%** |
+| forum and chat half (367) | 75.7% | 76.0% |
+| all, unseen Chatterbox voices | 74.7% | **80.7%** |
+
+| by kind (Kokoro) | ft4 | ft5 |
+|---|---|---|
+| self-correction | 87.3% | 94.1% |
+| spoken punctuation | 86.0% | 93.4% |
+| far-back edit | 87.9% | 93.0% |
+| command | 85.9% | 91.7% |
+| plain | 89.3% | 90.0% |
+| fillers | 79.1% | 79.7% |
+| broken grammar | 67.0% | 79.0% |
+
+Strict scores on every earlier set, each cell no edit needed / characters to fix:
+
+| set | ft4 | ft5 |
+|---|---|---|
+| main | 18.5 / 3.6 | 18.8 / 3.5 |
+| main, Chatterbox | 16.3 / 4.9 | 16.5 / 4.8 |
+| restate | 14.5 / 2.6 | 15.9 / 2.4 |
+| grammar | 11.8 / 4.1 | 14.5 / 3.5 |
+| lists | 45.9 / 3.8 | 47.4 / 3.6 |
+| far-back edits | 39.1 / 4.3 | 40.9 / 3.5 |
+
+ft5 regressed nowhere and is the light tier (DESIGN.md decisions).
+
+What is left:
+- Forum and chat posts stay at 76%: names, nicknames and product names Parakeet mishears, which
+  only the dictionary or context can fix.
+- A leading filler with a comma ("Uh, so...") survives in both models.
+- "Me and him went" is not fixed.
+
+---
+
 ## 2026-10-10: ft4, grammar, lists and far-back edits
 
 **Training data** (docs/plan-use-cases.md): 66,981 pairs, drawn from these kinds:
