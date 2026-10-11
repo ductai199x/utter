@@ -74,7 +74,7 @@ pub struct PipelineConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            tier: Tier::Light,
+            tier: Tier::Quality,
             dictionary: Vec::new(),
             lists: true,
             mic: MicConfig::default(),
@@ -94,10 +94,10 @@ type Speech = (Sender<Job>, Receiver<Done>);
 /// speech model elsewhere; or why it could not start.
 type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
 
-/// Where a tier runs the speech model: on the GPU, except where the extra light tier's 2.5 GB
+/// Where a tier runs the speech model: on the GPU, except where the light tier's 2.5 GB
 /// budget has no room for it.
 pub fn speech_for(tier: Tier) -> SpeechModel {
-    if tier == Tier::ExtraLight { SpeechModel::Cpu } else { SpeechModel::Gpu }
+    if tier == Tier::Light { SpeechModel::Cpu } else { SpeechModel::Gpu }
 }
 
 /// The runtime components a tier needs (crates/utter-runtime/components.json): onnxruntime,

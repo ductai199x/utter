@@ -29,9 +29,9 @@ start_at_login = true
 # The microphone: part of its name, or \"\" for the system default.
 microphone = \"\"
 
-# The models: \"light\" (about 6 GB of GPU memory), \"extra-light\" (about 2.5 GB, for smaller
-# GPUs) or \"quality\" (about 18 GB).
-model = \"light\"
+# The model: \"quality\" (the bigger one, about 6 GB of GPU memory) or \"light\" (the smaller
+# one, about 2.5 GB, for graphics cards with 4 GB).
+model = \"quality\"
 ";
 
 /// The most dictionary entries (docs/ux/home.md).
@@ -51,19 +51,20 @@ pub struct Settings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Model {
+    /// The bigger model: about 6 GB of GPU memory in all.
     #[default]
-    Light,
     Quality,
-    /// About 2.5 GB of GPU memory in all: the E2B cleanup model, speech on the CPU.
-    ExtraLight,
+    /// The smaller model: about 2.5 GB of GPU memory in all, speech on the CPU. "extra-light"
+    /// was its name for an afternoon.
+    #[serde(alias = "extra-light")]
+    Light,
 }
 
 impl From<Model> for Tier {
     fn from(m: Model) -> Self {
         match m {
-            Model::Light => Tier::Light,
             Model::Quality => Tier::Quality,
-            Model::ExtraLight => Tier::ExtraLight,
+            Model::Light => Tier::Light,
         }
     }
 }
@@ -75,7 +76,7 @@ impl Default for Settings {
             lists: true,
             start_at_login: true,
             microphone: String::new(),
-            model: Model::Light,
+            model: Model::Quality,
         }
     }
 }
@@ -126,9 +127,8 @@ impl Settings {
         set(&mut doc, "start_at_login", self.start_at_login.into());
         set(&mut doc, "microphone", self.microphone.as_str().into());
         let model = match self.model {
-            Model::Light => "light",
             Model::Quality => "quality",
-            Model::ExtraLight => "extra-light",
+            Model::Light => "light",
         };
         set(&mut doc, "model", model.into());
         // Write then rename, so a crash never leaves half a file.
@@ -217,7 +217,7 @@ mod tests {
             lists: false,
             start_at_login: false,
             microphone: "USB".into(),
-            model: Model::Quality,
+            model: Model::Light,
         };
         s.save(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();

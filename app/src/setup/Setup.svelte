@@ -7,15 +7,15 @@
   import { cubicOut } from 'svelte/easing';
   import { fade, fly } from 'svelte/transition';
   import * as core from './core';
-  import type { Checks, Problem, Progress } from './core';
+  import type { Checks, ModelCard, ModelId, Problem, Progress } from './core';
   import Logo from '../lib/Logo.svelte';
   import { Waveform } from '../lib/waveform';
 
-  type View = 'check' | 'mic' | 'download' | 'try' | 'problem' | 'done';
+  type View = 'check' | 'model' | 'mic' | 'download' | 'try' | 'problem' | 'done';
   const SENTENCE = "Hi team, the meeting moved to three, no, four o'clock. Bring the slides.";
 
   const mode = core.mode();
-  const flow: View[] = mode === 'first' ? ['check', 'mic', 'download', 'try'] : ['check', 'download'];
+  const flow: View[] = mode === 'first' ? ['check', 'model', 'mic', 'download', 'try'] : ['check', 'download'];
   let step = $state(0);
   // The problem and done screens stand outside the steps.
   let special = $state<'problem' | 'done' | null>(mode === 'problem' ? 'problem' : null);
@@ -82,6 +82,48 @@
   async function runChecks() {
     checks = null;
     checks = await core.check();
+  }
+
+  // Choose your model: the recommended card is selected when the step opens.
+  let cards = $state<ModelCard[]>([]);
+  let picked = $state<ModelId>('quality');
+  let modelError = $state('');
+  let choosing = $state(false);
+  const MODEL_TEXT: Record<ModelId, { name: string; line: string }> = {
+    quality: { name: 'Quality', line: 'The bigger model. Most accurate; best for most cards.' },
+    light: { name: 'Light', line: 'The smaller model. Runs on 4 GB graphics cards.' },
+  };
+
+  async function loadModels() {
+    cards = await core.models();
+    picked = (cards.find((c) => c.recommended) ?? cards.find((c) => c.selected) ?? cards[0])?.id ?? 'quality';
+  }
+
+  /** Saves the choice, then checks the disk again for what it downloads. */
+  async function confirmModel() {
+    choosing = true;
+    modelError = '';
+    try {
+      await core.choose(picked);
+      checks = await core.check();
+      const disk = checks.checks.find((c) => c.id === 'disk');
+      if (disk && !disk.ok) modelError = disk.fix ?? 'Not enough disk space for this model.';
+      else void next();
+    } finally {
+      choosing = false;
+    }
+  }
+
+  function cardKey(e: KeyboardEvent) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const usable = cards.filter((c) => c.fits);
+    const i = usable.findIndex((c) => c.id === picked);
+    const nextCard = usable[(i + (e.key === 'ArrowRight' ? 1 : usable.length - 1)) % usable.length];
+    if (nextCard) {
+      picked = nextCard.id;
+      void tick().then(() => document.getElementById(`card-${nextCard.id}`)?.focus());
+    }
   }
 
   async function openMic() {
@@ -186,6 +228,8 @@
 
   const failed = $derived(progress?.stage === 'error');
   const gb = (b: number) => (b / 1e9).toFixed(1);
+  // GPU needs read as the round figures they are: 2.5, 6, 18.
+  const gpuGb = (b: number) => String(Math.round((b / 1e9) * 10) / 10);
   const pct = $derived(progress && progress.total > 0 ? Math.min(100, (progress.done / progress.total) * 100) : 0);
   const stageLine = $derived.by(() => {
     if (!progress) return '';
@@ -222,7 +266,10 @@
   onMount(() => {
     if (mode === 'problem') void core.lastProblem().then((p) => (problem = p));
     else void runChecks();
-    if (mode === 'first') void core.microphones().then((m) => (mics = m));
+    if (mode === 'first') {
+      void core.microphones().then((m) => (mics = m));
+      void loadModels();
+    }
     const offs = [core.onLevel((l) => wave.push(l)), core.onProgress(onProgress)];
     raf = requestAnimationFrame(frame);
     focusMain();
@@ -283,6 +330,44 @@
               Utter needs an NVIDIA graphics card with 8 GB of memory or more. Support for other cards is planned.
             </p>
           {/if}
+        {:else if view === 'model'}
+          <h1>Choose your model</h1>
+          <p class="lede">Bigger models write more carefully. You can change this later in Settings.</p>
+          <div class="cards" role="radiogroup" aria-label="Model">
+            {#each cards as c (c.id)}
+              <button
+                id="card-{c.id}"
+                class="card"
+                class:picked={picked === c.id}
+                role="radio"
+                aria-checked={picked === c.id}
+                disabled={!c.fits}
+                tabindex={picked === c.id ? 0 : -1}
+                onclick={() => (picked = c.id)}
+                onkeydown={cardKey}
+              >
+                <span class="card-head">
+                  <span class="card-name">{MODEL_TEXT[c.id].name}</span>
+                  {#if picked === c.id}
+                    <span class="card-check" aria-hidden="true"
+                      ><svg viewBox="0 0 16 16"><path d="M4 8.5l2.5 2.5 5.5-6" /></svg></span
+                    >
+                  {/if}
+                </span>
+                {#if c.recommended}<span class="pill">Recommended</span>{/if}
+                <span class="card-line">{MODEL_TEXT[c.id].line}</span>
+                <span class="card-facts">
+                  {#if c.fits}
+                    <span>{gpuGb(c.gpuBytes)} GB GPU memory</span>
+                    <span>{c.downloadBytes > 0 ? `${gb(c.downloadBytes)} GB download` : 'Installed'}</span>
+                  {:else}
+                    <span class="card-why">Needs a {Math.ceil(c.cardBytes / 2 ** 30)} GB graphics card</span>
+                  {/if}
+                </span>
+              </button>
+            {/each}
+          </div>
+          <p class="error" aria-live="polite">{modelError}</p>
         {:else if view === 'mic'}
           <h1>Your microphone</h1>
           <p class="lede">Say something. The bars should move.</p>
@@ -372,6 +457,11 @@
       {:else}
         <button class="primary" bind:this={primary} disabled={!checks} onclick={next}>Continue</button>
       {/if}
+    {:else if view === 'model'}
+      <button class="text" onclick={() => go(step - 1)}>Back</button>
+      <button class="primary" bind:this={primary} disabled={choosing || cards.length === 0} onclick={confirmModel}>
+        Continue
+      </button>
     {:else if view === 'mic'}
       <button class="text" onclick={() => go(step - 1)}>Back</button>
       <button class="primary" bind:this={primary} onclick={next}>Continue</button>
@@ -666,6 +756,105 @@
     justify-content: flex-end;
     gap: 8px;
     min-height: 36px;
+  }
+
+  /* Choose your model: one card per tier, the picked one outlined in the accent. */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    height: auto;
+    min-height: 168px;
+    padding: 14px 14px 12px;
+    text-align: left;
+    border: 1px solid var(--home-border);
+    border-radius: 10px;
+    background: var(--home-surface);
+    transition:
+      border-color var(--dur-resize) var(--ease-out),
+      box-shadow var(--dur-resize) var(--ease-out),
+      transform 120ms var(--ease-out);
+  }
+  .card:hover:not(:disabled) {
+    background: var(--home-surface);
+    border-color: color-mix(in srgb, var(--home-accent) 45%, var(--home-border));
+  }
+  .card.picked {
+    border-color: var(--home-accent);
+    box-shadow: 0 0 0 1px var(--home-accent);
+  }
+  .card:disabled {
+    opacity: 0.5;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+  .card-name {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .card-check {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--home-accent);
+    color: var(--home-accent-text);
+  }
+  .card-check svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* On the card's top edge, so every card's text starts at the same height. */
+  .pill {
+    position: absolute;
+    top: -9px;
+    left: 12px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: var(--home-accent);
+    color: var(--home-accent-text);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .card-line {
+    color: var(--home-muted);
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .card-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: auto;
+    padding-top: 8px;
+    width: 100%;
+    border-top: 1px solid var(--home-border);
+    font-size: 12px;
+    line-height: 17px;
+    color: var(--home-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .card-why {
+    color: var(--home-error);
   }
 
   /* Outside the steps (problem, done) the dots keep their space but do not show. */

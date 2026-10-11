@@ -296,12 +296,6 @@ fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
             home::apply_autostart(&settings);
             let mut cfg = PipelineConfig::default();
             settings.apply(&mut cfg);
-            // The quality model is optional: chosen but not installed, the light one serves.
-            let quality = utter_llm::cleanup::Tier::Quality;
-            if cfg.tier == quality && !utter_runtime::component(quality.component()).is_ok_and(|c| c.is_intact()) {
-                tracing::warn!("the quality model is not installed; using the light one");
-                cfg.tier = utter_llm::cleanup::Tier::Light;
-            }
             let tier = cfg.tier;
             let mut pipeline = match Pipeline::start(cfg) {
                 Ok(p) => p,
@@ -361,6 +355,8 @@ fn main() {
             setup::setup_problem,
             setup::setup_retry,
             setup::setup_repair,
+            setup::setup_models,
+            setup::setup_choose,
         ])
         .on_window_event(|window, event| {
             let tauri::WindowEvent::CloseRequested { api, .. } = event else { return };

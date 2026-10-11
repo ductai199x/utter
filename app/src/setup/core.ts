@@ -209,6 +209,33 @@ function mockStart() {
   } else emit({ done: 0, total: 0, stage: 'ready', label: '' });
 }
 
+export type ModelId = 'quality' | 'light';
+
+export interface ModelCard {
+  id: ModelId;
+  gpuBytes: number;
+  cardBytes: number;
+  downloadBytes: number;
+  fits: boolean;
+  recommended: boolean;
+  selected: boolean;
+}
+
+// ?gpu=6 plays a 6 GB card (Quality does not fit, Light is recommended).
+const mockGpuGb = Number(params.get('gpu') ?? 24);
+
+export function models(): Promise<ModelCard[]> {
+  if (inTauri) return invoke<ModelCard[]>('setup_models');
+  const quality = mockGpuGb >= 7.5;
+  return Promise.resolve([
+    { id: 'quality', gpuBytes: 6e9, cardBytes: 7.5e9, downloadBytes: 7.84e9, fits: quality, recommended: quality, selected: true },
+    { id: 'light', gpuBytes: 2.5e9, cardBytes: 3.5e9, downloadBytes: 3.9e9, fits: mockGpuGb >= 3.5, recommended: !quality, selected: false },
+  ]);
+}
+
+export const choose = (model: ModelId): Promise<void> =>
+  inTauri ? invoke('setup_choose', { model }) : Promise.resolve();
+
 export const lastProblem = (): Promise<Problem | null> =>
   inTauri ? invoke<Problem | null>('setup_problem') : Promise.resolve(mockProblem());
 
