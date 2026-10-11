@@ -205,7 +205,7 @@ def score_cmd(
             )
         fixed = {p["id"]: p["text"] for p in _rows(fixed_path)}
         # List and everyday passages (lists.py, messages.py) live in their own files.
-        for stem in ("passages-lists-eval", "passages-messages-eval"):
+        for stem in ("passages-lists-eval", "passages-messages-eval", "passages-directed-eval"):
             if (root / f"{stem}.jsonl").exists():
                 fixed |= {p["id"]: p["text"] for p in _rows(root / f"{stem}.jsonl")}
         before = len(rows)

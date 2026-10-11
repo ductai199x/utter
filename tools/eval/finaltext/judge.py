@@ -83,7 +83,12 @@ def _rows(path: Path) -> list[dict]:
 def _golds() -> dict[str, str]:
     root = eval_dir() / "finaltext"
     golds = {}
-    for stem in ("passages-eval", "passages-lists-eval", "passages-messages-eval"):
+    for stem in (
+        "passages-eval",
+        "passages-lists-eval",
+        "passages-messages-eval",
+        "passages-directed-eval",
+    ):
         path = root / f"{stem}.jsonl"
         if path.exists():
             golds |= {p["id"]: p["text"] for p in _rows(path)}
