@@ -132,6 +132,8 @@ def spoken_digits(text: str) -> str:
     number dropped)."""
     # Thousands separators join one number ("1,000"), not two.
     text = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)
+    # A time on the hour is said without its zeros ("9:00 AM" -> "nine a m").
+    text = re.sub(r"(?<=\d):00\b", "", text)
     # Regnal and sequel numerals are said as numbers ("Theodosius II" -> "the second").
     text = _ROMAN.sub(lambda m: str(_ROMAN_VALUES[m.group()]), text)
     toks = _TOKEN.findall(text.lower())
