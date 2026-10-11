@@ -117,10 +117,25 @@ pub fn reason(text: &str, dictionary: &[String]) -> Option<&'static str> {
     None
 }
 
+/// The dictionary terms cleanup should see for this transcript: those heard as spoken, or as
+/// something close. A user's whole dictionary in every request would cost prefill time and
+/// invite the model to write terms nobody said.
+pub fn relevant_terms(text: &str, dictionary: &[String]) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let words: Vec<&str> =
+        lower.split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '-')).filter(|w| !w.is_empty()).collect();
+    dictionary.iter().filter(|t| heard(t, &words, true)).cloned().collect()
+}
+
 /// Whether a dictionary term, or something within a small edit distance of it, appears in the
 /// transcript as one to three consecutive words joined ("super base" -> "superbase" is close
 /// to "supabase"). Already spelled exactly as in the dictionary, it needs no model.
 fn sounds_present(term: &str, words: &[&str]) -> bool {
+    heard(term, words, false)
+}
+
+/// `exact`: whether a term heard letter for letter (case aside) counts.
+fn heard(term: &str, words: &[&str], exact: bool) -> bool {
     let letters =
         |s: &str| -> String { s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect() };
     let target = letters(term);
@@ -137,6 +152,9 @@ fn sounds_present(term: &str, words: &[&str]) -> bool {
             // Exact (case-insensitive) is fine unless the dictionary's case differs; close but
             // not equal needs the model.
             if d == 0 {
+                if exact {
+                    return true;
+                }
                 continue;
             }
             if (d as f32) / (target.chars().count().max(joined.chars().count()) as f32) <= 0.34 {
@@ -242,7 +260,17 @@ const NUMBER_WORDS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::reason;
+    use super::{reason, relevant_terms};
+
+    #[test]
+    fn cleanup_sees_only_the_terms_heard() {
+        let dictionary: Vec<String> = ["Supabase", "Kubernetes", "Nguyen", "UMAP"].map(String::from).to_vec();
+        assert_eq!(
+            relevant_terms("we moved the auth to super base and kubernetes", &dictionary),
+            ["Supabase", "Kubernetes"]
+        );
+        assert!(relevant_terms("lunch at noon?", &dictionary).is_empty());
+    }
 
     #[test]
     fn clean_text_skips_the_model() {

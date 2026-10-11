@@ -17,6 +17,7 @@ import json
 import random
 import re
 from collections import Counter
+from itertools import pairwise
 from pathlib import Path
 
 import typer
@@ -44,6 +45,11 @@ def dictionary(
     size: int = 300,
     seed: int = 0,
     out: Path | None = None,
+    names: bool = typer.Option(
+        False,
+        help="Also proper names (Safeway, Smithson): capitalized mid-sentence and never written "
+        "in lower case in the set.",
+    ),
 ) -> None:
     """Writes `size` distinct terms from the set's golds, one per line, as a user's dictionary
     would hold them: words (MySQL, TF32, Kerr-Newman), not paths or sizes ("/usr/share",
@@ -54,7 +60,22 @@ def dictionary(
     def wanted(term: str) -> bool:
         return bool(_WORD.fullmatch(term)) and lower[term.lower()] < 3
 
-    terms = sorted({s.text for g in golds for s in spans(g) if s.kind == "term" and wanted(s.text)})
+    found = {s.text for g in golds for s in spans(g) if s.kind == "term" and wanted(s.text)}
+    if names:
+        for g in golds:
+            words = g.split()
+            for prev, raw in pairwise(words):
+                tok = raw.strip(_EDGE)
+                if (
+                    not prev.endswith((".", "!", "?", ":"))
+                    and tok[:1].isupper()
+                    and tok[1:].islower()
+                    and len(tok) > 2
+                    and _WORD.fullmatch(tok)
+                    and lower[tok.lower()] == 0
+                ):
+                    found.add(tok)
+    terms = sorted(found)
     picked = sorted(random.Random(seed).sample(terms, min(size, len(terms))))
     out = out or eval_dir() / "boost" / f"{eval_set}-terms{len(picked)}-s{seed}.txt"
     out.parent.mkdir(parents=True, exist_ok=True)

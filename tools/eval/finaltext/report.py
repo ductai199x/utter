@@ -73,8 +73,20 @@ def cleanup(
         help="Clean only inputs this run has no output for (new or changed clips) and keep the "
         "rest. Latency then covers only the new ones.",
     ),
+    dictionary: Path | None = typer.Option(
+        None,
+        help="A user's dictionary, one term per line: each request carries the terms heard in "
+        "it, as the product does (gate::relevant_terms).",
+    ),
 ) -> None:
+    from eval.finaltext.dictionary import relevant_terms
     from eval.finaltext.llm import model_path
+
+    terms = (
+        [t.strip() for t in dictionary.read_text(encoding="utf-8").splitlines() if t.strip()]
+        if dictionary
+        else []
+    )
 
     hyps = [
         json.loads(line)
@@ -97,7 +109,10 @@ def cleanup(
     case_file = cases / (f"{eval_set}-new.jsonl" if kept else out_file.name)
     with case_file.open("w", encoding="utf-8") as fh:
         for h in todo:
-            fh.write(json.dumps({"id": h["id"], "input": h["hyp"]}, ensure_ascii=False) + "\n")
+            case = {"id": h["id"], "input": h["hyp"]}
+            if heard := relevant_terms(h["hyp"], terms):
+                case["dictionary"] = heard
+            fh.write(json.dumps(case, ensure_ascii=False) + "\n")
     if not todo:
         return
     cmd = [
