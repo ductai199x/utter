@@ -95,6 +95,9 @@ def main(
     model: str = "gemma4-26b-a4b-qat",
     slots: int = 8,
     llm_url: str = typer.Option("", help="An OpenAI-style server instead of a local llama-server."),
+    grader: str = typer.Option(
+        "", help="A name for the grader when it is not the local 26B GGUF (kept apart in results)."
+    ),
 ) -> None:
     from eval.finaltext.llm import Remote, Server, model_path
 
@@ -107,7 +110,8 @@ def main(
         if gold is not None and o["id"] in manifest:
             cases.append({"id": o["id"], "heard": o["input"], "gold": gold, "typed": o["output"]})
 
-    out_path = eval_dir() / "results" / "finaltext" / f"judge-{eval_set}--{cleanup}.jsonl"
+    suffix = f"--{grader}" if grader else ""
+    out_path = eval_dir() / "results" / "finaltext" / f"judge-{eval_set}--{cleanup}{suffix}.jsonl"
     done = {r["id"]: r for r in _rows(out_path)} if out_path.exists() else {}
     todo = [c for c in cases if c["id"] not in done and not _same(c["typed"], c["gold"])]
     print(
