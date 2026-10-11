@@ -20,7 +20,7 @@ pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
 /// [`SERVER_ARGS`], each with its own system prompt ([`Tier::system_prompt`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tier {
-    /// Gemma 4 E4B fine-tuned for cleanup (ft4, huggingface.co/ductai199x/utter-cleanup-e4b):
+    /// Gemma 4 E4B fine-tuned for cleanup (ft5, huggingface.co/ductai199x/utter-cleanup-e4b):
     /// about 3.3 GB of GPU memory (its per-layer embeddings stay in system RAM), and better than
     /// the prompted 26B on every final-text eval (2026-10-10). The default: with the speech model,
     /// Utter takes about 5.6 GB of GPU memory in all (2026-10-09).
@@ -41,7 +41,7 @@ impl Tier {
 
     pub fn model_file(self) -> &'static str {
         match self {
-            Tier::Light => "utter-cleanup-e4b-ft4.q4_0.gguf",
+            Tier::Light => "utter-cleanup-e4b-ft5.q4_0.gguf",
             Tier::Quality => "gemma-4-26B_q4_0-it.gguf",
         }
     }
