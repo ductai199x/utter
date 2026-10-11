@@ -8,6 +8,7 @@ export type Model = 'light' | 'quality';
 export interface Settings {
   dictionary: string[];
   lists: boolean;
+  start_at_login: boolean;
   microphone: string;
   model: Model;
 }
@@ -33,7 +34,13 @@ const inTauri = '__TAURI_INTERNALS__' in window;
 // In a plain browser (`npm run dev`, then home.html), a stand-in core keeps the page
 // reviewable without the app: settings live in memory, a model switch takes two seconds.
 const mock: HomeState = {
-  settings: { dictionary: ['Supabase', 'Kubernetes', 'Nguyen'], lists: true, microphone: '', model: 'light' },
+  settings: {
+    dictionary: ['Supabase', 'Kubernetes', 'Nguyen'],
+    lists: true,
+    start_at_login: true,
+    microphone: '',
+    model: 'light',
+  },
   error: null,
   microphones: ['Microphone (Shure MV7)', 'Headset (Jabra Evolve2 65)'],
   qualityInstalled: true,
