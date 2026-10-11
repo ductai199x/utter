@@ -6,6 +6,7 @@
   import { fade, fly } from 'svelte/transition';
   import * as core from './core';
   import type { Checks, Progress } from './core';
+  import Logo from '../lib/Logo.svelte';
   import { Waveform } from '../lib/waveform';
 
   const STEPS = 4;
@@ -179,18 +180,7 @@
     {#key step}
       <section in:slide out:leave>
         {#if step === 0}
-          <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
-            <rect width="40" height="40" rx="10" />
-            <g>
-              <rect x="9" y="17" width="3" height="6" rx="1.5" /><rect x="14.5" y="13" width="3" height="14" rx="1.5" /><rect
-                x="20"
-                y="9"
-                width="3"
-                height="22"
-                rx="1.5"
-              /><rect x="25.5" y="14" width="3" height="12" rx="1.5" /><rect x="31" y="18" width="3" height="4" rx="1.5" />
-            </g>
-          </svg>
+          <div class="logo"><Logo size={36} /></div>
           <h1>Welcome to Utter</h1>
           <p class="lede">
             Hold a key, speak, and clean text appears where you type. Everything runs on this computer; nothing you
@@ -454,16 +444,7 @@
     overflow: hidden;
   }
   .logo {
-    display: block;
-    width: 36px;
-    height: 36px;
     margin-bottom: 16px;
-  }
-  .logo > rect {
-    fill: var(--home-accent);
-  }
-  .logo g {
-    fill: var(--home-accent-text);
   }
   .note {
     flex: 1;

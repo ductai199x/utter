@@ -4,6 +4,7 @@
   import { onMount, tick } from 'svelte';
   import { cubicIn, cubicOut } from 'svelte/easing';
   import { fly, slide } from 'svelte/transition';
+  import Logo from '../lib/Logo.svelte';
   import {
     MAX_TERMS,
     homeState,
@@ -242,15 +243,7 @@
 <div class="frame">
   <nav class="sidebar" aria-label="Pages">
     <div class="brand">
-      <svg viewBox="0 0 24 24" aria-hidden="true"
-        ><rect x="4" y="9.5" width="2" height="5" rx="1" /><rect x="8" y="6" width="2" height="12" rx="1" /><rect
-          x="12"
-          y="3.5"
-          width="2"
-          height="17"
-          rx="1"
-        /><rect x="16" y="7.5" width="2" height="9" rx="1" /><rect x="20" y="10.5" width="2" height="3" rx="1" /></svg
-      >
+      <Logo size={22} />
       Utter
     </div>
     <ul>
@@ -293,16 +286,19 @@
         <h1>Dictionary</h1>
         <p class="lede">Words Utter should spell your way: names, products, terms.</p>
 
-        <input
-          class="add"
-          bind:this={addInput}
-          bind:value={draft}
-          placeholder="Add a word or name"
-          aria-label="Add a word or name"
-          disabled={!settings}
-          onkeydown={(e) => e.key === 'Enter' && submitDraft()}
-          onpaste={onPaste}
-        />
+        <div class="add-row">
+          <input
+            class="add"
+            bind:this={addInput}
+            bind:value={draft}
+            placeholder="Add a word or name"
+            aria-label="Add a word or name"
+            disabled={!settings}
+            onkeydown={(e) => e.key === 'Enter' && submitDraft()}
+            onpaste={onPaste}
+          />
+          <button class="primary" disabled={!settings || !draft.trim()} onclick={submitDraft}>Add</button>
+        </div>
         <p class="message" aria-live="polite">
           {#if message}
             {message}
@@ -492,11 +488,6 @@
     font-size: 15px;
     padding: 4px 12px 20px;
   }
-  .brand svg {
-    width: 20px;
-    height: 20px;
-    fill: currentColor;
-  }
   .sidebar ul {
     list-style: none;
     margin: 0;
@@ -568,21 +559,30 @@
     margin: 28px 0 4px;
   }
 
+  .add-row {
+    display: flex;
+    gap: 8px;
+  }
   .add {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
+  }
+  .add-row button {
+    min-width: 72px;
   }
   .message {
     min-height: 20px;
-    margin: 8px 0 12px;
+    margin: 6px 0 10px;
     color: var(--home-muted);
   }
 
+  /* Text in the field, the count and the rows share one left edge (12 px in). */
   .list-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
     color: var(--home-muted);
-    padding-bottom: 6px;
+    padding: 0 12px 6px;
     border-bottom: 1px solid var(--home-border);
   }
   .empty {
@@ -598,7 +598,12 @@
     display: flex;
     align-items: center;
     height: 36px;
+    padding-right: 4px;
     border-bottom: 1px solid var(--home-border);
+    transition: background-color 120ms var(--ease-out);
+  }
+  .terms li:hover {
+    background: var(--home-hover);
   }
   .terms li.flash {
     animation: flash var(--dur-flash) var(--ease-out);
@@ -610,16 +615,23 @@
     text-align: left;
     cursor: default;
     flex: 1;
-    padding: 0 8px;
+    padding: 0 12px;
     line-height: 36px;
-    border-radius: 4px;
+    border-radius: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* The row carries the hover; the term itself stays flat. */
+  .term:hover:not(:disabled) {
+    background: none;
+  }
+  /* Editing keeps the text where it was: 12 px in, less the field's border. */
   .edit {
     flex: 1;
     height: 30px;
+    margin-left: 1px;
+    padding: 0 10px;
   }
   .remove {
     width: 28px;
