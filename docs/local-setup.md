@@ -55,7 +55,8 @@ version, a publisher's URL and that publisher's SHA-256:
 | cudnn 9.27 | NVIDIA's PyPI package | onnxruntime's convolutions |
 | llama-cpp b11535 (llama-server) | ggml-org's GitHub release | The language model, as Utter's child process |
 | parakeet-ultra-onnx-fp16 3f7de939 (1.4 GB) | Hugging Face `ductai199x/utter-parakeet-ultra-onnx`, `fp16/` | The speech model (half-precision encoder) |
-| gemma4-e4b-qat 4b4a2c1d (5.2 GB) | Hugging Face `google/gemma-4-E4B-it-qat-q4_0-gguf` | The cleanup model, light tier (default) |
+| utter-cleanup-e4b aa697b58 (5.2 GB) | Hugging Face `ductai199x/utter-cleanup-e4b` | The cleanup model, light tier (default): Gemma 4 E4B fine-tuned (ft4) |
+| gemma4-e4b-qat 4b4a2c1d (5.2 GB) | Hugging Face `google/gemma-4-E4B-it-qat-q4_0-gguf` | The prompted E4B, kept for evals: optional |
 | gemma4-26b-a4b-qat d1c082be (14.4 GB) | Hugging Face `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | The cleanup model, quality tier: optional, `utter-cli setup gemma4-26b-a4b-qat` |
 
 `utter-cli setup` downloads, verifies and installs them, and the speech model (2.6 GB, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx`), into
@@ -67,7 +68,19 @@ llama-server runs as Utter's child process and is tied to it with a Windows job 
 Utter crashes or is killed, Windows ends the server too (checked by force-killing the CLI
 mid-request). Its log is `C:\Users\Tai\.cache\utter\logs\llama-server.log`.
 
-`UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build.
+`UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build. It is
+also how the recognizer runs on Linux before Linux components exist (FLAME, 2026-10-10;
+transcripts identical to Windows on 100 of 100 clips):
+- build: `cargo build --release -p utter-cli`. The microphone crate needs ALSA headers:
+  without root, unpack `libasound2-dev` (`curl` the .deb matching the installed libasound2
+  from archive.ubuntu.com, `dpkg -x`) into `~/sysroot`, link `libasound.so` to the system's
+  `libasound.so.2`, and build with `PKG_CONFIG_SYSROOT_DIR=~/sysroot`
+  `PKG_CONFIG_PATH=~/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig`;
+- onnxruntime and CUDA: a venv with `onnxruntime-gpu==1.31.0` and the `nvidia-*-cu12` libraries;
+  `UTTER_ORT_DYLIB=<venv>/.../onnxruntime/capi/libonnxruntime.so.1.31.0`,
+  `LD_LIBRARY_PATH` = the `nvidia/*/lib` folders;
+- models: copy the installed `parakeet-ultra-onnx-fp16-*` and `silero-vad-*` folders into
+  `$UTTER_DATA_DIR/runtime/`.
 
 ## Commands
 
