@@ -178,6 +178,54 @@ impl Kernel {
     }
 }
 
+/// GPU 0 as the driver reports it: what first run checks before downloading anything.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GpuInfo {
+    pub name: String,
+    pub memory_bytes: u64,
+    /// The newest CUDA version the driver supports, as major * 1000 + minor * 10 (13040: 13.4).
+    pub driver_cuda: i32,
+}
+
+/// The oldest driver CUDA version the components run on: they are built against CUDA 13, and
+/// any 13.x driver runs 13.x runtimes (minor version compatibility).
+pub const MIN_DRIVER_CUDA: i32 = 13_000;
+
+/// Asks the GPU driver about GPU 0; an error says why there is no usable NVIDIA GPU.
+pub fn probe() -> Result<GpuInfo, String> {
+    // SAFETY: the GPU driver's own library, documented entry points with their documented
+    // signatures (cuda.h); buffers are sized as passed.
+    unsafe {
+        let lib = libloading::Library::new(DRIVER).map_err(|_| "no NVIDIA GPU driver found".to_owned())?;
+        macro_rules! sym {
+            ($name:literal, $ty:ty) => {
+                *lib.get::<$ty>($name).map_err(|e| format!("{}: {e}", String::from_utf8_lossy($name)))?
+            };
+        }
+        let init = sym!(b"cuInit\0", unsafe extern "system" fn(u32) -> CuResult);
+        let version = sym!(b"cuDriverGetVersion\0", unsafe extern "system" fn(*mut i32) -> CuResult);
+        let device_get = sym!(b"cuDeviceGet\0", unsafe extern "system" fn(*mut CuDevice, i32) -> CuResult);
+        let get_name =
+            sym!(b"cuDeviceGetName\0", unsafe extern "system" fn(*mut std::ffi::c_char, i32, CuDevice) -> CuResult);
+        let total_mem = sym!(b"cuDeviceTotalMem_v2\0", unsafe extern "system" fn(*mut usize, CuDevice) -> CuResult);
+        let check = |what: &str, r: CuResult| if r == 0 { Ok(()) } else { Err(format!("{what} failed ({r})")) };
+        check("cuInit (is an NVIDIA GPU installed?)", init(0))?;
+        let mut driver_cuda = 0;
+        check("cuDriverGetVersion", version(&mut driver_cuda))?;
+        let mut device = 0;
+        check("cuDeviceGet", device_get(&mut device, 0))?;
+        let mut name = [0 as std::ffi::c_char; 256];
+        check("cuDeviceGetName", get_name(name.as_mut_ptr(), name.len() as i32, device))?;
+        let mut memory = 0usize;
+        check("cuDeviceTotalMem", total_mem(&mut memory, device))?;
+        Ok(GpuInfo {
+            name: CStr::from_ptr(name.as_ptr()).to_string_lossy().into_owned(),
+            memory_bytes: memory as u64,
+            driver_cuda,
+        })
+    }
+}
+
 /// Holds the GPU's clocks up between `start` and `stop`. Cheap to call either repeatedly.
 pub struct GpuWarmer {
     on: Arc<AtomicBool>,

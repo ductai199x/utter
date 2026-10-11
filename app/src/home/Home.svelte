@@ -471,17 +471,6 @@
 </div>
 
 <style>
-  :global(html, body) {
-    margin: 0;
-    height: 100%;
-    background: var(--home-bg);
-    color: var(--home-text);
-    font: 14px/20px var(--font-ui);
-    -webkit-font-smoothing: antialiased;
-  }
-  :global(#app) {
-    height: 100%;
-  }
   .frame {
     display: flex;
     height: 100%;
@@ -579,26 +568,6 @@
     margin: 28px 0 4px;
   }
 
-  input,
-  select,
-  button {
-    font: inherit;
-    color: inherit;
-  }
-  :focus-visible {
-    outline: none;
-    box-shadow: var(--home-focus);
-  }
-  .add,
-  .edit,
-  select {
-    box-sizing: border-box;
-    height: 36px;
-    padding: 0 12px;
-    border: 1px solid var(--home-border);
-    border-radius: 6px;
-    background: var(--home-surface);
-  }
   .add {
     width: 100%;
   }
@@ -606,29 +575,6 @@
     min-height: 20px;
     margin: 8px 0 12px;
     color: var(--home-muted);
-  }
-  button {
-    height: 32px;
-    padding: 0 14px;
-    border: 1px solid var(--home-border);
-    border-radius: 6px;
-    background: var(--home-surface);
-    cursor: pointer;
-  }
-  button:hover:not(:disabled) {
-    background: var(--home-hover);
-  }
-  button:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-  button.link {
-    height: auto;
-    padding: 0 2px;
-    border: none;
-    background: none;
-    color: var(--home-accent);
-    font-weight: 600;
   }
 
   .list-head {

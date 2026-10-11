@@ -2,6 +2,7 @@
 //! with one module per OS behind the same functions. Windows comes first; the other
 //! platforms say what they lack rather than pretend.
 
+pub mod disk;
 pub mod focus;
 pub mod hotkey;
 pub mod insert;

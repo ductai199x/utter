@@ -17,6 +17,7 @@ use utter_pipeline::{Event, Pipeline, PipelineConfig, Settings};
 use utter_platform::overlay;
 
 mod home;
+mod setup;
 
 /// The Bar window's size in logical pixels (tauri.conf.json): room for the largest pill plus
 /// its shadow.
@@ -236,6 +237,21 @@ fn level_feed(bar: Bar) {
         .expect("spawn the level feed");
 }
 
+/// What starting dictation needs, kept until first run has installed the components.
+struct Core {
+    bar: Bar,
+    link: home::PipelineLink,
+    started: AtomicBool,
+}
+
+/// Starts dictation once (at launch, or when first run has installed everything).
+pub fn start_pipeline(app: &AppHandle) {
+    let core = app.state::<Core>();
+    if !core.started.swap(true, Ordering::Relaxed) {
+        run_pipeline(app.clone(), core.bar.clone(), core.link.clone());
+    }
+}
+
 /// Loads the pipeline and runs dictations for as long as the app lives.
 fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
     std::thread::Builder::new()
@@ -263,6 +279,7 @@ fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
             };
             tracing::info!("ready in {:.1} s", start.elapsed().as_secs_f64());
             set_tray_status(&app, "Utter: hold Right Ctrl to dictate");
+            setup::ready(&app);
             *bar.meter.lock().expect("meter lock") = Some(pipeline.microphone().level_meter());
             level_feed(bar.clone());
             *link.0.lock().expect("pipeline link") = Some(pipeline.settings_sender());
@@ -285,14 +302,31 @@ fn main() {
     tauri::Builder::default()
         // Launching Utter again while it runs opens the Home window.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| home::show(app)))
-        .invoke_handler(tauri::generate_handler![home::home_state, home::save_settings, home::open_path])
+        .manage(setup::MicCheck::default())
+        .manage(setup::Downloading::default())
+        .invoke_handler(tauri::generate_handler![
+            home::home_state,
+            home::save_settings,
+            home::open_path,
+            setup::setup_check,
+            setup::setup_microphones,
+            setup::setup_mic_start,
+            setup::setup_mic_stop,
+            setup::setup_download,
+            setup::setup_finish,
+        ])
         .on_window_event(|window, event| {
-            // Closing Home hides it; Utter keeps running in the tray.
-            if window.label() == "home"
-                && let tauri::WindowEvent::CloseRequested { api, .. } = event
-            {
-                api.prevent_close();
-                let _ = window.hide();
+            let tauri::WindowEvent::CloseRequested { api, .. } = event else { return };
+            match window.label() {
+                // Closing Home hides it; Utter keeps running in the tray.
+                "home" => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // Nothing works without the models: closing first run quits (downloads resume
+                // on the next start). Finishing it destroys the window instead.
+                "setup" => window.app_handle().exit(0),
+                _ => {}
             }
         })
         .setup(|app| {
@@ -314,7 +348,18 @@ fn main() {
             let window = app.get_webview_window("bar").expect("the bar window (tauri.conf.json)");
             let link = home::PipelineLink::default();
             home::watch(app.handle().clone(), link.clone());
-            run_pipeline(app.handle().clone(), Bar::new(window), link);
+            app.manage(Core { bar: Bar::new(window), link, started: AtomicBool::new(false) });
+            if setup::missing().is_empty() {
+                start_pipeline(app.handle());
+            } else {
+                set_tray_status(app.handle(), "Utter: setting up");
+                tauri::WebviewWindowBuilder::new(app, "setup", tauri::WebviewUrl::App("setup.html".into()))
+                    .title("Utter")
+                    .inner_size(640.0, 520.0)
+                    .resizable(false)
+                    .center()
+                    .build()?;
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

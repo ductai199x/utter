@@ -4,6 +4,7 @@
   // states and shows/hides the native window; this page only draws.
   import { on } from './events';
   import { onMount } from 'svelte';
+  import { Waveform } from '../lib/waveform';
 
   type BarState = 'hidden' | 'listening' | 'finishing' | 'done' | 'cancelled' | 'error' | 'exit';
 
@@ -65,25 +66,8 @@
   );
   const pillHeight = $derived(showWords ? BASE_H + (Math.min(lines, MAX_LINES) - 1) * LINE_H : BASE_H);
 
-  // Waveform: levels arrive at about 60 Hz; each bar shows the peak of its slice of the last
-  // 600 ms, newest on the right, with a fast attack and a gentle release.
-  const HISTORY = 36; // 600 ms at 60 Hz
-  const levels = new Float32Array(HISTORY);
-  let head = 0;
-  const heights = new Float32Array(BARS).fill(BAR_MIN);
-  const ATTACK_MS = 30;
-  const RELEASE_MS = 140;
-
-  function pushLevel(rms: number) {
-    levels[head] = rms;
-    head = (head + 1) % HISTORY;
-  }
-
-  /** RMS (0..1) to a 0..1 bar height: speech sits around 0.02-0.2 RMS, so a log scale. */
-  function shape(rms: number): number {
-    const db = 20 * Math.log10(Math.max(rms, 1e-5));
-    return Math.min(1, Math.max(0, (db + 55) / 40));
-  }
+  // Waveform (lib/waveform.ts): the last 600 ms of levels (36 at 60 Hz).
+  const wave = new Waveform({ bars: BARS, barW: BAR_W, gap: BAR_GAP, min: BAR_MIN, max: BAR_MAX }, 36);
 
   let last = performance.now();
   let raf = 0;
@@ -98,37 +82,7 @@
     }
     const dt = Math.min(50, now - last);
     last = now;
-    const cv = canvas;
-    const ctx = cv?.getContext('2d');
-    if (cv && ctx) {
-      const dpr = window.devicePixelRatio || 1;
-      const w = WAVE_W, h = BAR_MAX;
-      if (cv.width !== Math.round(w * dpr)) {
-        cv.width = Math.round(w * dpr);
-        cv.height = Math.round(h * dpr);
-      }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = waveColor;
-      const per = HISTORY / BARS;
-      const live = barState === 'listening';
-      for (let i = 0; i < BARS; i++) {
-        let peak = 0;
-        for (let k = 0; k < per; k++) {
-          const idx = (head + Math.floor(i * per) + k) % HISTORY;
-          peak = Math.max(peak, levels[idx] ?? 0);
-        }
-        const target = live ? BAR_MIN + shape(peak) * (BAR_MAX - BAR_MIN) : BAR_MIN;
-        const tau = target > heights[i]! ? ATTACK_MS : RELEASE_MS;
-        heights[i] = heights[i]! + (target - heights[i]!) * (1 - Math.exp(-dt / tau));
-        const bh = heights[i]!;
-        const x = i * (BAR_W + BAR_GAP);
-        const y = (h - bh) / 2;
-        ctx.beginPath();
-        ctx.roundRect(x, y, BAR_W, bh, BAR_W / 2);
-        ctx.fill();
-      }
-    }
+    if (canvas) wave.draw(canvas, waveColor, dt, barState === 'listening');
     raf = requestAnimationFrame(frame);
   }
 
@@ -156,7 +110,7 @@
           committed = '';
           preview = '';
           isFinal = false;
-          levels.fill(0);
+          wave.clear();
         }
         barState = p.state;
         if (p.state !== 'hidden') wake();
@@ -170,7 +124,7 @@
         isFinal = e.payload.final;
       }),
       on<number[]>('bar:levels', (e) => {
-        for (const l of e.payload) pushLevel(l);
+        for (const l of e.payload) wave.push(l);
       }),
     ];
     return () => {
