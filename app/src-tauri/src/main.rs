@@ -17,6 +17,7 @@ use utter_pipeline::{Event, Pipeline, PipelineConfig, Settings};
 use utter_platform::overlay;
 
 mod home;
+mod problem;
 mod setup;
 
 /// The Bar window's size in logical pixels (tauri.conf.json): room for the largest pill plus
@@ -270,11 +271,21 @@ fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
             home::apply_autostart(&settings);
             let mut cfg = PipelineConfig::default();
             settings.apply(&mut cfg);
+            // The quality model is optional: chosen but not installed, the light one serves.
+            let quality = utter_llm::cleanup::Tier::Quality;
+            if cfg.tier == quality && !utter_runtime::component(quality.component()).is_ok_and(|c| c.is_intact()) {
+                tracing::warn!("the quality model is not installed; using the light one");
+                cfg.tier = utter_llm::cleanup::Tier::Light;
+            }
+            let tier = cfg.tier;
             let mut pipeline = match Pipeline::start(cfg) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::error!("could not start: {e}");
-                    set_tray_status(&app, &format!("Utter: could not start ({e})"));
+                    set_tray_status(&app, "Utter: could not start");
+                    // Retry (first run's or the problem screen's) may start it again.
+                    app.state::<Core>().started.store(false, Ordering::Relaxed);
+                    setup::failed(&app, problem::diagnose(&e, tier));
                     return;
                 }
             };
@@ -286,7 +297,10 @@ fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
             *link.0.lock().expect("pipeline link") = Some(pipeline.settings_sender());
             if let Err(e) = pipeline.run(|event| bar.on_event(event)) {
                 tracing::error!("dictation stopped: {e}");
-                set_tray_status(&app, &format!("Utter: stopped ({e})"));
+                set_tray_status(&app, "Utter: stopped");
+                drop(pipeline);
+                app.state::<Core>().started.store(false, Ordering::Relaxed);
+                setup::failed(&app, problem::diagnose(&e, tier));
             }
         })
         .expect("spawn the pipeline");
@@ -305,6 +319,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| home::show(app)))
         .manage(setup::MicCheck::default())
         .manage(setup::Downloading::default())
+        .manage(setup::LastProblem::default())
         .invoke_handler(tauri::generate_handler![
             home::home_state,
             home::save_settings,
@@ -315,6 +330,9 @@ fn main() {
             setup::setup_mic_stop,
             setup::setup_download,
             setup::setup_finish,
+            setup::setup_problem,
+            setup::setup_retry,
+            setup::setup_repair,
         ])
         .on_window_event(|window, event| {
             let tauri::WindowEvent::CloseRequested { api, .. } = event else { return };
@@ -350,16 +368,18 @@ fn main() {
             let link = home::PipelineLink::default();
             home::watch(app.handle().clone(), link.clone());
             app.manage(Core { bar: Bar::new(window), link, started: AtomicBool::new(false) });
-            if setup::missing().is_empty() {
-                start_pipeline(app.handle());
-            } else {
-                set_tray_status(app.handle(), "Utter: setting up");
-                tauri::WebviewWindowBuilder::new(app, "setup", tauri::WebviewUrl::App("setup.html".into()))
-                    .title("Utter")
-                    .inner_size(640.0, 520.0)
-                    .resizable(false)
-                    .center()
-                    .build()?;
+            // What an update left behind goes first: it may be the disk space the next
+            // download needs.
+            let freed = utter_runtime::prune();
+            if freed > 0 {
+                tracing::info!("removed superseded components: {:.1} GB", freed as f64 / 1e9);
+            }
+            match setup::mode_for(&setup::missing()) {
+                None => start_pipeline(app.handle()),
+                Some(mode) => {
+                    set_tray_status(app.handle(), "Utter: setting up");
+                    setup::open(app.handle(), mode)?;
+                }
             }
             Ok(())
         })

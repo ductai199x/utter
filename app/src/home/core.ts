@@ -18,6 +18,7 @@ export interface HomeState {
   error: string | null;
   microphones: string[];
   qualityInstalled: boolean;
+  qualityFits: boolean;
   version: string;
   dataDir: string;
   settingsPath: string;
@@ -44,6 +45,7 @@ const mock: HomeState = {
   error: null,
   microphones: ['Microphone (Shure MV7)', 'Headset (Jabra Evolve2 65)'],
   qualityInstalled: true,
+  qualityFits: true,
   version: '0.0.1',
   dataDir: 'C:\\Users\\you\\.cache\\utter',
   settingsPath: 'C:\\Users\\you\\.cache\\utter\\settings.toml',

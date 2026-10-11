@@ -119,6 +119,47 @@ Enter presses the main action (except in the step 4 text box); Esc does nothing 
 and should be deliberate). Tab reaches every control; focus rings as in the Home window. The
 main action takes the focus when a step shows, except step 4, where the text box does.
 
+## When Utter starts: three paths
+
+At every start, before anything else, Utter removes component versions that components.json
+no longer lists (an update leaves the old model behind: 5 GB), then checks each required
+component: installed, and every file its receipt lists still there at its size (a quick check,
+no hashing). Then:
+
+| Situation | What shows |
+|---|---|
+| Everything is installed and intact | nothing: dictation starts, the tray says it is ready |
+| Nothing of Utter's is installed yet | First run, as above |
+| Some components are missing or damaged (an update, a deleted file) | the same window in **update mode**: the system check titled "Utter needs to download an update" (or "Some of Utter's files are missing or damaged"), then the download, then it closes itself once dictation is ready. No microphone or Try it steps. |
+| Dictation could not start | the same window in **problem mode** (below) |
+
+## Problem mode: when dictation cannot start
+
+One screen: an amber icon, a title that names the cause, one or two lines saying what to do,
+and the actions that fit. Never a raw error alone; the technical detail is under "Details"
+(collapsed), with **Open logs**.
+
+| Cause (how it is recognized) | Title | What to do | Actions |
+|---|---|---|---|
+| GPU memory full: an out-of-memory error, or less free GPU memory than Utter needs | Not enough free GPU memory | "Utter needs about 6 GB free on the graphics card; 2.1 GB are free now. Close games or other apps using the GPU, then retry." | Retry, Quit |
+| No microphone at all | No microphone found | "Plug in a microphone or headset, then retry." | Retry, Quit |
+| A model file will not load (missing, damaged) | Some of Utter's files are damaged | "Repair checks every file and downloads again the ones that are damaged." | Repair, Quit |
+| The GPU driver fails to start the models | The graphics driver could not run Utter | "Update the NVIDIA driver, restart the computer, then retry." | Retry, Quit |
+| Anything else | Utter could not start | the error in one line | Retry, Open logs, Quit |
+
+A saved microphone that is not connected is not a failure: dictation uses the system default,
+and the Home window's microphone row says the saved one is not connected.
+
+## Download errors
+
+| Cause | Message under the bar | Action |
+|---|---|---|
+| The disk filled up | "The disk is full. Free up {n} GB on {drive}, then retry." | Retry |
+| No connection | "Can't reach the download server. Check your internet connection, then retry." | Retry |
+| The server refused (an HTTP error) | "The download server answered {status}. Try again in a few minutes." | Retry |
+| A file arrived damaged (size or checksum) | "A file arrived damaged. Retry downloads it again." | Retry |
+| Anything else | "Download interrupted ({detail}). Retry picks up where it stopped." | Retry |
+
 ## Acceptance checks
 
 1. On a machine without the models, Utter opens First run, not the tray only.
@@ -130,3 +171,10 @@ main action takes the focus when a step shows, except step 4, where the text box
 5. Pulling the network cable shows the amber error; Retry after reconnecting continues.
 6. The test dictation lands in the box, cleaned ("four o'clock", not "three, no, four").
 7. After Finish, a restart goes straight to the tray.
+8. Deleting a model file and restarting shows "Some of Utter's files are damaged"; Repair
+   downloads only that component again, and dictation starts.
+9. Starting while a game holds most of the GPU memory shows "Not enough free GPU memory" with
+   the free amount; Retry after closing the game starts dictation.
+10. A components.json update (a new cleanup model) shows update mode, downloads only the new
+    component, removes the old one's folder, and needs no other step.
+11. With the saved microphone unplugged, dictation starts on the default one.

@@ -142,6 +142,44 @@ impl Component {
         self.dir().join(RECEIPT).is_file()
     }
 
+    /// Installed, and every file the receipt lists still there (files downloaded as they are
+    /// also at their size). A quick check, no hashing: it catches a deleted or truncated file,
+    /// not one changed in place ([`Component::damaged_files`] hashes).
+    pub fn is_intact(&self) -> bool {
+        let dir = self.dir();
+        let Ok(text) = fs::read_to_string(dir.join(RECEIPT)) else { return false };
+        let Ok(receipt) = serde_json::from_str::<ReadReceipt>(&text) else { return false };
+        let sizes: std::collections::HashMap<&str, u64> = match &self.source {
+            Source::Files { files } => files.iter().map(|f| (f.name.as_str(), f.file.size)).collect(),
+            Source::Archive { .. } => Default::default(),
+        };
+        receipt.files.iter().all(|name| match fs::metadata(dir.join(name)) {
+            Ok(m) => sizes.get(name.as_str()).is_none_or(|&size| m.len() == size),
+            Err(_) => false,
+        })
+    }
+
+    /// The files of an installed component that fail their SHA-256 (only files downloaded as
+    /// they are have one; an archive's extracted files are checked by [`Component::is_intact`]).
+    pub fn damaged_files(&self) -> Vec<String> {
+        let Source::Files { files } = &self.source else { return Vec::new() };
+        let dir = self.dir();
+        files
+            .iter()
+            .filter(|f| verify(&self.id, &f.file, &dir.join(&f.name), &mut |_| {}).is_err())
+            .map(|f| f.name.clone())
+            .collect()
+    }
+
+    /// Removes the installed component, so the next [`install`] fetches it again.
+    pub fn uninstall(&self) -> Result<(), RuntimeError> {
+        let dir = self.dir();
+        if dir.exists() {
+            fs::remove_dir_all(&dir).map_err(io_err(&dir))?;
+        }
+        Ok(())
+    }
+
     /// The installed component's folder, or an error naming how to install it.
     pub fn installed_dir(&self) -> Result<PathBuf, RuntimeError> {
         if self.is_installed() {
@@ -162,6 +200,82 @@ impl Component {
 
 /// Written last into a component folder: what was installed, from what.
 const RECEIPT: &str = "utter-component.json";
+
+/// The part of a receipt read back: the files the install wrote.
+#[derive(Deserialize)]
+struct ReadReceipt {
+    files: Vec<String>,
+}
+
+/// Removes what an update left behind: component folders (and unfinished installs) of versions
+/// components.json no longer lists, and downloads that are not current. Returns the bytes freed.
+/// Only folders named `<known id>-<version>` are touched; anything else in the runtime folder
+/// is left alone.
+pub fn prune() -> u64 {
+    let current: std::collections::HashSet<std::ffi::OsString> = components()
+        .iter()
+        .flat_map(|c| {
+            let dir = c.dir();
+            [dir.file_name().map(|n| n.to_owned()), staging_dir(&dir).file_name().map(|n| n.to_owned())]
+        })
+        .flatten()
+        .collect();
+    let ids: Vec<String> = components().iter().map(|c| format!("{}-", c.id)).collect();
+    let mut freed = 0;
+    if let Ok(entries) = fs::read_dir(runtime_dir()) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let text = name.to_string_lossy();
+            let ours = ids.iter().any(|prefix| text.starts_with(prefix.as_str()));
+            if ours && !current.contains(&name) && entry.path().is_dir() {
+                let size = dir_size(&entry.path());
+                match fs::remove_dir_all(entry.path()) {
+                    Ok(()) => {
+                        tracing::info!(dir = %entry.path().display(), bytes = size, "removed a superseded component");
+                        freed += size;
+                    }
+                    Err(e) => tracing::warn!(dir = %entry.path().display(), "could not remove: {e}"),
+                }
+            }
+        }
+    }
+    // Archives are deleted once extracted; any left over belong to no current install.
+    let wanted: std::collections::HashSet<String> = components()
+        .iter()
+        .filter_map(|c| match &c.source {
+            Source::Archive { archive, .. } => archive.url.rsplit('/').next().map(str::to_owned),
+            Source::Files { .. } => None,
+        })
+        .flat_map(|name| [format!("{name}.part"), name])
+        .collect();
+    if let Ok(entries) = fs::read_dir(downloads_dir()) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !wanted.contains(&name) && entry.path().is_file() {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                if fs::remove_file(entry.path()).is_ok() {
+                    freed += size;
+                }
+            }
+        }
+    }
+    freed
+}
+
+fn dir_size(dir: &Path) -> u64 {
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| match e.metadata() {
+                    Ok(m) if m.is_dir() => dir_size(&e.path()),
+                    Ok(m) => m.len(),
+                    Err(_) => 0,
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
 
 #[derive(Serialize)]
 struct Receipt<'a> {
@@ -430,6 +544,15 @@ mod tests {
             assert_eq!(seen, ["range: bytes=40000-"]);
             assert_eq!(last, body.len() as u64, "progress counts what was there");
             let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    #[ignore = "reads this machine's installed components"]
+    fn installed_components_are_intact() {
+        for c in components().iter().filter(|c| c.is_installed()) {
+            assert!(c.is_intact(), "{} is installed but not intact", c.id);
+            println!("{} {}: intact", c.id, c.version);
         }
     }
 

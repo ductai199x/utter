@@ -183,6 +183,8 @@ impl Kernel {
 pub struct GpuInfo {
     pub name: String,
     pub memory_bytes: u64,
+    /// Free GPU memory right now (what other apps, a game say, leave), when the driver says.
+    pub free_bytes: Option<u64>,
     /// The newest CUDA version the driver supports, as major * 1000 + minor * 10 (13040: 13.4).
     pub driver_cuda: i32,
 }
@@ -218,9 +220,30 @@ pub fn probe() -> Result<GpuInfo, String> {
         check("cuDeviceGetName", get_name(name.as_mut_ptr(), name.len() as i32, device))?;
         let mut memory = 0usize;
         check("cuDeviceTotalMem", total_mem(&mut memory, device))?;
+        // Free memory needs a context: the primary one, released at once.
+        let free_bytes = (|| {
+            let retain = *lib
+                .get::<unsafe extern "system" fn(*mut CuPtr, CuDevice) -> CuResult>(b"cuDevicePrimaryCtxRetain\0")
+                .ok()?;
+            let release =
+                *lib.get::<unsafe extern "system" fn(CuDevice) -> CuResult>(b"cuDevicePrimaryCtxRelease_v2\0").ok()?;
+            let set_current = *lib.get::<unsafe extern "system" fn(CuPtr) -> CuResult>(b"cuCtxSetCurrent\0").ok()?;
+            let mem_info =
+                *lib.get::<unsafe extern "system" fn(*mut usize, *mut usize) -> CuResult>(b"cuMemGetInfo_v2\0").ok()?;
+            let mut ctx = std::ptr::null_mut();
+            if retain(&mut ctx, device) != 0 {
+                return None;
+            }
+            let (mut free, mut total) = (0usize, 0usize);
+            let ok = set_current(ctx) == 0 && mem_info(&mut free, &mut total) == 0;
+            set_current(std::ptr::null_mut());
+            release(device);
+            ok.then_some(free as u64)
+        })();
         Ok(GpuInfo {
             name: CStr::from_ptr(name.as_ptr()).to_string_lossy().into_owned(),
             memory_bytes: memory as u64,
+            free_bytes,
             driver_cuda,
         })
     }

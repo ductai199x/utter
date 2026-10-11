@@ -372,7 +372,15 @@ impl Pipeline {
 
         let cleaner = start_cleaner(&cfg)?;
         let vad = SileroVad::load_installed()?;
-        let mic = Microphone::open(&cfg.mic)?;
+        // A saved microphone that is not connected is no reason not to start: the system
+        // default stands in (the Home window shows the saved one as not connected).
+        let mic = match Microphone::open(&cfg.mic) {
+            Err(utter_audio::AudioError::NoDevice(_)) if cfg.mic.device.is_some() => {
+                tracing::warn!(device = ?cfg.mic.device, "saved microphone not connected; using the default");
+                Microphone::open(&MicConfig { device: None, ..cfg.mic.clone() })?
+            }
+            other => other?,
+        };
         let (settings_tx, settings_rx) = mpsc::channel();
         Ok(Self {
             mic,
