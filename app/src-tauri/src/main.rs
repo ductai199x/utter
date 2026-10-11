@@ -13,7 +13,7 @@ use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
-use utter_pipeline::{Event, Pipeline, PipelineConfig};
+use utter_pipeline::{Event, Pipeline, PipelineConfig, Settings};
 use utter_platform::overlay;
 
 /// The Bar window's size in logical pixels (tauri.conf.json): room for the largest pill plus
@@ -207,7 +207,19 @@ fn run_pipeline(app: AppHandle, bar: Bar) {
         .name("utter-pipeline".into())
         .spawn(move || {
             let start = std::time::Instant::now();
-            let mut pipeline = match Pipeline::start(PipelineConfig::default()) {
+            let path = Settings::path();
+            let settings = match Settings::load_or_create(&path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("settings: {e}");
+                    set_tray_status(&app, &format!("Utter: settings.toml has an error ({e})"));
+                    return;
+                }
+            };
+            tracing::info!(terms = settings.dictionary.len(), lists = settings.lists, "settings loaded");
+            let mut cfg = PipelineConfig::default();
+            settings.apply(&mut cfg);
+            let mut pipeline = match Pipeline::start(cfg) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::error!("could not start: {e}");
