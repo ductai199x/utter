@@ -396,8 +396,17 @@ impl Pipeline {
     /// Loads everything up front (models, server, microphone) and warms it, so the first
     /// dictation is as fast as the rest.
     pub fn start(cfg: PipelineConfig) -> Result<Self, PipelineError> {
+        Self::start_reporting(cfg, |_| {})
+    }
+
+    /// [`Pipeline::start`], saying which stage is loading as it goes (for the splash,
+    /// docs/ux/splash.md): "speech", "cleanup", then "microphone".
+    pub fn start_reporting(cfg: PipelineConfig, mut stage: impl FnMut(&'static str)) -> Result<Self, PipelineError> {
+        stage("speech");
         let (job_tx, done_rx) = start_speech(speech_for(cfg.tier), &cfg.dictionary)?;
+        stage("cleanup");
         let cleaner = start_cleaner(&cfg)?;
+        stage("microphone");
         let vad = SileroVad::load_installed()?;
         // A saved microphone that is not connected is no reason not to start: the system
         // default stands in (the Home window shows the saved one as not connected).

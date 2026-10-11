@@ -19,6 +19,7 @@ use utter_platform::overlay;
 mod home;
 mod problem;
 mod setup;
+mod splash;
 
 /// The Bar window's size in logical pixels (tauri.conf.json): room for the largest pill plus
 /// its shadow.
@@ -297,20 +298,24 @@ fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
             let mut cfg = PipelineConfig::default();
             settings.apply(&mut cfg);
             let tier = cfg.tier;
-            let mut pipeline = match Pipeline::start(cfg) {
+            let reporting = app.clone();
+            let mut pipeline = match Pipeline::start_reporting(cfg, |s| splash::stage(&reporting, s)) {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::error!("could not start: {e}");
                     set_tray_status(&app, "Utter: could not start");
                     // Retry (first run's or the problem screen's) may start it again.
                     app.state::<Core>().started.store(false, Ordering::Relaxed);
+                    // The problem screen opens first, then the card goes: no blank moment.
                     setup::failed(&app, problem::diagnose(&e, tier));
+                    splash::close(&app);
                     return;
                 }
             };
             tracing::info!("ready in {:.1} s", start.elapsed().as_secs_f64());
             set_tray_status(&app, "Utter: hold Right Ctrl to dictate");
             setup::ready(&app);
+            splash::stage(&app, "ready");
             *bar.meter.lock().expect("meter lock") = Some(pipeline.microphone().level_meter());
             level_feed(bar.clone());
             *link.0.lock().expect("pipeline link") = Some(pipeline.settings_sender());
@@ -357,6 +362,7 @@ fn main() {
             setup::setup_repair,
             setup::setup_models,
             setup::setup_choose,
+            splash::splash_close,
         ])
         .on_window_event(|window, event| {
             let tauri::WindowEvent::CloseRequested { api, .. } = event else { return };
@@ -403,6 +409,10 @@ fn main() {
             }
             match setup::mode_for(&setup::missing()) {
                 None => {
+                    // The person started Utter: the card shows while it loads. Not at sign-in.
+                    if !splash::started_at_sign_in() {
+                        splash::open(app.handle());
+                    }
                     start_pipeline(app.handle());
                 }
                 Some(mode) => {

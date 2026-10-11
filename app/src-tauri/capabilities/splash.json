@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash",
+  "description": "The splash listens to loading stages, reads the app version, and asks the core to close it (splash.rs).",
+  "windows": ["splash"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:app:allow-version"]
+}
