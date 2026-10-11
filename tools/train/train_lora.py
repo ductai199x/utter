@@ -25,8 +25,19 @@ from pathlib import Path
 
 import typer
 
-BASE = "google/gemma-4-e4b-it-qat-q4_0-unquantized"
-BASE_REVISION = "476025a01dbf99361c062bbeca3d6a76bb4c4566"
+# The models a cleanup model is trained from, pinned: E4B for the light tier, E2B for extra
+# light (its GPU part is half of E4B's: docs/eval-results.md).
+BASES = {
+    "e4b": (
+        "google/gemma-4-e4b-it-qat-q4_0-unquantized",
+        "476025a01dbf99361c062bbeca3d6a76bb4c4566",
+    ),
+    "e2b": (
+        "google/gemma-4-E2B-it-qat-q4_0-unquantized",
+        "6befbaca7398925921802abd1f277b495b78b738",
+    ),
+}
+
 # Attention and MLP projections of the language model only; the vision and audio towers stay
 # untouched.
 TARGETS = r".*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)"
@@ -72,17 +83,16 @@ class Collator:
         return {"input_ids": ids, "labels": labels, "attention_mask": mask}
 
 
-def save_merged(model, tokenizer, merged_dir: Path) -> None:
-    """Folds the LoRA into the weights and writes the full model where the converter reads it."""
+def save_merged(model, tokenizer, merged_dir: Path, base: str, revision: str) -> None:
+    """Folds the LoRA into the weights and writes the full model where the converter reads it;
+    `base` at `revision` is the model it was trained from."""
     merged = model.merge_and_unload()
     merged.save_pretrained(merged_dir, safe_serialization=True)
     tokenizer.save_pretrained(merged_dir)
     # The converter wants the processor and chat template files beside the weights.
     from huggingface_hub import snapshot_download
 
-    src = Path(
-        snapshot_download(BASE, revision=BASE_REVISION, allow_patterns=["*.json", "*.jinja"])
-    )
+    src = Path(snapshot_download(base, revision=revision, allow_patterns=["*.json", "*.jinja"]))
     for f in src.iterdir():
         if f.suffix in (".json", ".jinja") and not (merged_dir / f.name).exists():
             shutil.copy(f, merged_dir / f.name)
@@ -109,6 +119,7 @@ def main(
     seed: int = 0,
     device: str = "cuda",
     max_steps: int = -1,
+    base: str = typer.Option("e4b", help=f"The model to train from: {', '.join(BASES)}."),
     init_adapter: Path | None = typer.Option(
         None,
         help="Continue training this LoRA adapter (its rank and targets) instead of a new one.",
@@ -123,7 +134,8 @@ def main(
     from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import AutoModelForImageTextToText, AutoTokenizer, Trainer, TrainingArguments
 
-    tokenizer = AutoTokenizer.from_pretrained(BASE, revision=BASE_REVISION)
+    repo, revision = BASES[base]
+    tokenizer = AutoTokenizer.from_pretrained(repo, revision=revision)
     train_rows = _load(data, tokenizer, max_length)
     eval_rows = _load(eval_data, tokenizer, max_length) if eval_data else None
 
@@ -131,8 +143,8 @@ def main(
     # onto its own GPU, so host memory holds no full copy per process.
     local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
     model = AutoModelForImageTextToText.from_pretrained(
-        BASE,
-        revision=BASE_REVISION,
+        repo,
+        revision=revision,
         dtype=torch.bfloat16,
         device_map={"": f"cuda:{local_rank}"} if local_rank >= 0 else device,
         attn_implementation="sdpa",
@@ -188,10 +200,10 @@ def main(
 
     model.save_pretrained(out / "adapter")
     if merge:
-        save_merged(model, tokenizer, out / "merged")
+        save_merged(model, tokenizer, out / "merged", repo, revision)
     record = {
-        "base": BASE,
-        "revision": BASE_REVISION,
+        "base": repo,
+        "revision": revision,
         "data": str(data),
         "rows": len(train_rows),
         "epochs": epochs,

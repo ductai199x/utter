@@ -34,7 +34,7 @@ export interface Problem {
   title: string;
   message: string;
   detail: string;
-  actions: ('retry' | 'repair' | 'logs' | 'quit')[];
+  actions: ('retry' | 'repair' | 'logs' | 'quit' | 'close')[];
 }
 
 export type Mode = 'first' | 'update' | 'repair' | 'problem';

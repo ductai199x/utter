@@ -40,10 +40,9 @@ fn init_inner() -> Result<PathBuf, AsrError> {
         return Err(AsrError::Runtime(format!("{} does not exist", lib.display())));
     }
     if custom.is_none() {
-        let mut dirs = Vec::new();
-        for id in CUDA_COMPONENTS {
-            dirs.push(component_dir(id)?);
-        }
+        // Only the installed ones: the speech model on the CPU (the extra light tier) needs
+        // neither, and a GPU session without them fails when it is created, saying so.
+        let dirs: Vec<PathBuf> = CUDA_COMPONENTS.iter().filter_map(|id| component_dir(id).ok()).collect();
         prepend_library_path(&dirs)?;
     }
     let builder = ort::init_from(&lib).map_err(|e| AsrError::Runtime(format!("{}: {e}", lib.display())))?;

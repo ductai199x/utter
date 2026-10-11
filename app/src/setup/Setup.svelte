@@ -388,7 +388,12 @@
       {#if problem?.actions.includes('logs')}
         <button class="text" onclick={() => core.openLogs()}>Open logs</button>
       {/if}
-      <button class="text" onclick={core.quit}>Quit Utter</button>
+      {#if problem?.actions.includes('close')}
+        <!-- Dictation keeps running on the previous model: closing is enough. -->
+        <button class="text" onclick={core.finish}>Close</button>
+      {:else}
+        <button class="text" onclick={core.quit}>Quit Utter</button>
+      {/if}
       {#if problem?.actions.includes('repair')}
         <button class="primary" bind:this={primary} onclick={repair}>Repair</button>
       {:else}

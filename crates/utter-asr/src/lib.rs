@@ -34,10 +34,43 @@ pub enum AsrError {
 /// The runtime component holding the English speech model (crates/utter-runtime/components.json).
 pub const MODEL_COMPONENT: &str = "parakeet-ultra-onnx-fp16";
 
-/// The installed speech model's folder, or an error naming how to install it.
+/// The speech model's two builds: the same weights, run where the tier has room for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpeechModel {
+    /// The encoder in float16 on the GPU: about 2.3 GB of GPU memory, 35-55 ms a clip.
+    #[default]
+    Gpu,
+    /// The encoder's weights in 8 bits on the CPU (export/quantize_encoder.py): no GPU memory,
+    /// for the extra light tier's 2.5 GB budget, at a few hundred milliseconds more a clip.
+    Cpu,
+}
+
+impl SpeechModel {
+    pub fn component(self) -> &'static str {
+        match self {
+            SpeechModel::Gpu => MODEL_COMPONENT,
+            SpeechModel::Cpu => "parakeet-ultra-onnx-w8",
+        }
+    }
+
+    /// How this build runs: where the encoder goes.
+    pub fn options(self) -> ParakeetOptions {
+        match self {
+            SpeechModel::Gpu => ParakeetOptions::default(),
+            SpeechModel::Cpu => ParakeetOptions { encoder: Device::Cpu, ..ParakeetOptions::default() },
+        }
+    }
+
+    /// The installed model's folder, or an error naming how to install it.
+    pub fn installed_dir(self) -> Result<PathBuf, AsrError> {
+        let c = utter_runtime::component(self.component()).map_err(|e| AsrError::Runtime(e.to_string()))?;
+        c.installed_dir().map_err(|e| AsrError::Runtime(e.to_string()))
+    }
+}
+
+/// The installed GPU speech model's folder, or an error naming how to install it.
 pub fn installed_model_dir() -> Result<PathBuf, AsrError> {
-    let c = utter_runtime::component(MODEL_COMPONENT).map_err(|e| AsrError::Runtime(e.to_string()))?;
-    c.installed_dir().map_err(|e| AsrError::Runtime(e.to_string()))
+    SpeechModel::Gpu.installed_dir()
 }
 
 impl AsrError {
