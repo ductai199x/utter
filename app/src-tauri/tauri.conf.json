@@ -27,6 +27,17 @@
         "resizable": false,
         "visible": false,
         "shadow": false
+      },
+      {
+        "label": "home",
+        "url": "home.html",
+        "title": "Utter",
+        "width": 880,
+        "height": 600,
+        "minWidth": 640,
+        "minHeight": 440,
+        "center": true,
+        "visible": false
       }
     ],
     "security": {

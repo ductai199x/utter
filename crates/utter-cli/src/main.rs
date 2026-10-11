@@ -632,7 +632,12 @@ fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, d
                 let _ = std::io::stdout().flush();
                 return;
             }
-            Event::Finishing | Event::Final { .. } => return,
+            // The CLI sends no settings changes: these only follow from the app's.
+            Event::Finishing
+            | Event::Final { .. }
+            | Event::Applied { .. }
+            | Event::ModelLoading
+            | Event::Microphone(_) => return,
             Event::Cancelled => {
                 println!("\r\x1b[2Kcancelled");
                 return;

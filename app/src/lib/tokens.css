@@ -20,4 +20,39 @@
 
   --bar-text-size: 14px;
   --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+
+  /* The Home window (docs/ux/home.md): follows the OS theme. */
+  --dur-flash: 600ms;
+  --home-bg: #f9f9fb;
+  --home-sidebar: #f0f0f3;
+  --home-surface: #ffffff;
+  --home-text: #1b1b1f;
+  --home-muted: #6b6b74;
+  --home-border: rgba(0, 0, 0, 0.09);
+  --home-hover: rgba(0, 0, 0, 0.045);
+  --home-selected: rgba(0, 0, 0, 0.07);
+  --home-accent: #3a64f0;
+  --home-accent-text: #ffffff;
+  --home-accent-soft: rgba(58, 100, 240, 0.2);
+  --home-error: #b25e00;
+  --home-error-bg: rgba(255, 179, 64, 0.16);
+  --home-focus: 0 0 0 2px var(--home-bg), 0 0 0 4px var(--home-accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --home-bg: #1c1c1f;
+    --home-sidebar: #161618;
+    --home-surface: #242428;
+    --home-text: #ececf0;
+    --home-muted: #9a9aa3;
+    --home-border: rgba(255, 255, 255, 0.09);
+    --home-hover: rgba(255, 255, 255, 0.05);
+    --home-selected: rgba(255, 255, 255, 0.08);
+    --home-accent: #6b8cff;
+    --home-accent-text: #0e0e10;
+    --home-accent-soft: rgba(107, 140, 255, 0.22);
+    --home-error: #ffb340;
+    --home-error-bg: rgba(255, 179, 64, 0.12);
+  }
 }

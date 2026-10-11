@@ -77,6 +77,16 @@ pub struct Microphone {
     native_rate: u32,
 }
 
+/// The names of the input devices there are now, for a picker; `MicConfig::device` matches
+/// part of one.
+pub fn input_devices() -> Vec<String> {
+    let Ok(devices) = cpal::default_host().input_devices() else { return Vec::new() };
+    let mut names: Vec<String> =
+        devices.filter_map(|d| d.description().ok().map(|desc| desc.name().to_owned())).collect();
+    names.dedup();
+    names
+}
+
 impl Microphone {
     pub fn open(config: &MicConfig) -> Result<Self, AudioError> {
         let host = cpal::default_host();
@@ -186,6 +196,12 @@ impl Microphone {
 /// Reads the microphone's level; cheap to clone, safe to share.
 #[derive(Clone)]
 pub struct LevelMeter(Arc<Shared>);
+
+impl std::fmt::Debug for LevelMeter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("LevelMeter").field(&self.level()).finish()
+    }
+}
 
 impl LevelMeter {
     /// RMS level of the latest audio, 0 to 1.

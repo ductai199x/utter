@@ -4510,6 +4510,7 @@ dependencies = [
  "indexmap 2.14.2",
  "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 
@@ -4807,8 +4808,10 @@ dependencies = [
  "tracing-subscriber",
  "utter-audio",
  "utter-core",
+ "utter-llm",
  "utter-pipeline",
  "utter-platform",
+ "utter-runtime",
 ]
 
 [[package]]
@@ -4887,6 +4890,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
+ "toml_edit 0.25.17+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
  "utter-asr",

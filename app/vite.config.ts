@@ -12,7 +12,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     rollupOptions: {
-      input: { bar: resolve(__dirname, 'bar.html') },
+      input: { bar: resolve(__dirname, 'bar.html'), home: resolve(__dirname, 'home.html') },
     },
   },
 });

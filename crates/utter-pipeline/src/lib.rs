@@ -87,6 +87,31 @@ impl Default for PipelineConfig {
     }
 }
 
+/// A cleanup model started for a model change: the cleaner, or why it could not start.
+type ModelLoad = Result<Option<Cleaner>, String>;
+
+/// How often the idle pipeline looks for new settings.
+const SETTINGS_POLL: Duration = Duration::from_millis(200);
+
+/// The context lines every cleanup request carries, from the settings.
+fn cleanup_context(cfg: &PipelineConfig) -> cleanup::Context {
+    cleanup::Context { lists_off: !cfg.lists, ..cleanup::Context::default() }
+}
+
+/// Starts the cleanup model's server and warms it (`None` with cleanup off).
+fn start_cleaner(cfg: &PipelineConfig) -> Result<Option<Cleaner>, PipelineError> {
+    if cfg.no_cleanup {
+        return Ok(None);
+    }
+    let server = LlamaServer::start(&cleanup::server_options(cfg.tier)?)?;
+    let system = cfg.prompt.clone().unwrap_or_else(|| cfg.tier.system_prompt().to_owned());
+    // The first request after loading is slow; pay for it now.
+    let ctx = cleanup_context(cfg);
+    let warm = "Um, this is a warm-up, no, a second warm-up.";
+    server.chat(&cleanup::messages_with(&system, warm, &cfg.dictionary, &ctx), &ChatParams::default())?;
+    Ok(Some(Cleaner::start(server, system, cfg.dictionary.clone(), ctx)))
+}
+
 /// The longest the paste waits for the final cleanup before inserting the raw text instead.
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -132,9 +157,21 @@ pub enum Event {
     },
     Done(Box<Dictation>),
     Cancelled,
+    /// A settings change took effect (`error: None`) or could not (the old value stays).
+    /// `what` names the setting: "dictionary", "lists", "microphone" or "model".
+    Applied {
+        what: &'static str,
+        error: Option<String>,
+    },
+    /// A new cleanup model is loading; the current one serves until [`Event::Applied`].
+    ModelLoading,
+    /// The microphone changed: its level meter replaces the old one's.
+    Microphone(utter_audio::LevelMeter),
 }
 
 enum Job {
+    /// From now on, boost these phrases (the user's dictionary).
+    Phrases(Vec<String>),
     /// A recognizer pass on a short silent clip, only to keep the GPU busy.
     KeepAlive,
     /// The segment being spoken, transcribed so far, for live words.
@@ -204,6 +241,10 @@ fn speech_worker(mut asr: ParakeetTdt, jobs: Receiver<Job>, done: Sender<Done>) 
         let (generation, kind, audio) = match job {
             Job::KeepAlive => {
                 let _ = asr.transcribe(&silence);
+                continue;
+            }
+            Job::Phrases(phrases) => {
+                asr.set_phrases(&phrases, BoostConfig::default());
                 continue;
             }
             Job::Preview { generation, audio } => (generation, DoneKind::Preview, audio),
@@ -290,6 +331,11 @@ impl AudioSource for ReplaySource<'_> {
 pub struct Pipeline {
     mic: Microphone,
     engine: Engine,
+    /// Settings changes, applied between dictations ([`Pipeline::settings_sender`]).
+    settings_tx: Sender<Settings>,
+    settings_rx: Receiver<Settings>,
+    /// A cleanup model loading for a model change, with the settings that asked for it.
+    loading: Option<(Settings, Receiver<ModelLoad>)>,
 }
 
 /// Everything but the microphone: voice activity detection, the speech worker, the cleanup
@@ -324,22 +370,16 @@ impl Pipeline {
             .spawn(move || speech_worker(asr, job_rx, done_tx))
             .map_err(|_| PipelineError::WorkerGone)?;
 
-        let cleaner = if cfg.no_cleanup {
-            None
-        } else {
-            let server = LlamaServer::start(&cleanup::server_options(cfg.tier)?)?;
-            let system = cfg.prompt.clone().unwrap_or_else(|| cfg.tier.system_prompt().to_owned());
-            // The first request after loading is slow; pay for it now.
-            let ctx = cleanup::Context { lists_off: !cfg.lists, ..cleanup::Context::default() };
-            let warm = "Um, this is a warm-up, no, a second warm-up.";
-            server.chat(&cleanup::messages_with(&system, warm, &cfg.dictionary, &ctx), &ChatParams::default())?;
-            Some(Cleaner::start(server, system, cfg.dictionary.clone(), ctx))
-        };
+        let cleaner = start_cleaner(&cfg)?;
         let vad = SileroVad::load_installed()?;
         let mic = Microphone::open(&cfg.mic)?;
+        let (settings_tx, settings_rx) = mpsc::channel();
         Ok(Self {
             mic,
             engine: Engine { cfg, vad, jobs: job_tx, done: done_rx, cleaner, generation: 0, gpu: GpuWarmer::new() },
+            settings_tx,
+            settings_rx,
+            loading: None,
         })
     }
 
@@ -347,18 +387,101 @@ impl Pipeline {
         &self.mic
     }
 
+    /// Where to send new settings: they apply between dictations, the newest winning
+    /// (docs/ux/home.md, "Saving and applying").
+    pub fn settings_sender(&self) -> Sender<Settings> {
+        self.settings_tx.clone()
+    }
+
     /// Runs dictations until the hotkey listener ends; `on_event` sees everything that
     /// happens, from the key going down to the paste.
     pub fn run(&mut self, mut on_event: impl FnMut(Event)) -> Result<(), PipelineError> {
         let listener = hotkey::listen(self.engine.cfg.hotkey)?;
         loop {
-            let Some((action, _at)) = listener.recv_timeout(Duration::from_secs(3600)) else { continue };
+            self.apply_settings(&mut on_event);
+            let Some((action, _at)) = listener.recv_timeout(SETTINGS_POLL) else { continue };
             if action != Action::Start {
                 continue;
             }
             let target = focus::foreground();
             let mut source = MicSource(&self.mic);
             self.engine.dictate(&mut source, |t| listener.recv_timeout(t), target, true, &mut on_event)?;
+        }
+    }
+
+    /// Applies the newest settings sent, and swaps in a cleanup model that finished loading.
+    fn apply_settings(&mut self, on_event: &mut impl FnMut(Event)) {
+        if let Some((wanted, rx)) = &self.loading {
+            match rx.try_recv() {
+                Ok(result) => {
+                    let error = match result {
+                        Ok(cleaner) => {
+                            self.engine.cleaner = cleaner;
+                            self.engine.cfg.tier = wanted.model.into();
+                            None
+                        }
+                        Err(e) => Some(e),
+                    };
+                    self.loading = None;
+                    on_event(Event::Applied { what: "model", error });
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.loading = None;
+                    on_event(Event::Applied { what: "model", error: Some("the model loader stopped".into()) });
+                }
+            }
+        }
+        let Some(s) = self.settings_rx.try_iter().last() else { return };
+        let cfg = &mut self.engine.cfg;
+        if s.dictionary != cfg.dictionary || s.lists != cfg.lists {
+            let what = if s.dictionary != cfg.dictionary { "dictionary" } else { "lists" };
+            if s.dictionary != cfg.dictionary {
+                let _ = self.engine.jobs.send(Job::Phrases(s.dictionary.clone()));
+            }
+            cfg.dictionary = s.dictionary.clone();
+            cfg.lists = s.lists;
+            if let Some(cleaner) = &self.engine.cleaner {
+                cleaner.configure(cfg.dictionary.clone(), cleanup_context(cfg));
+            }
+            on_event(Event::Applied { what, error: None });
+        }
+        let device = (!s.microphone.is_empty()).then(|| s.microphone.clone());
+        if device != cfg.mic.device {
+            let mic_cfg = MicConfig { device: device.clone(), ..cfg.mic.clone() };
+            match Microphone::open(&mic_cfg) {
+                Ok(mic) => {
+                    cfg.mic = mic_cfg;
+                    self.mic = mic;
+                    on_event(Event::Microphone(self.mic.level_meter()));
+                    on_event(Event::Applied { what: "microphone", error: None });
+                }
+                Err(e) => on_event(Event::Applied { what: "microphone", error: Some(e.to_string()) }),
+            }
+        }
+        let tier: Tier = s.model.into();
+        let loading_tier = self.loading.as_ref().map(|(w, _)| Tier::from(w.model));
+        if tier == cfg.tier && loading_tier.is_some() {
+            // Changed back while the other model loads: it is dropped (and its server ended)
+            // when it arrives to a closed channel.
+            self.loading = None;
+            on_event(Event::Applied { what: "model", error: None });
+        } else if !cfg.no_cleanup && tier != cfg.tier && loading_tier != Some(tier) {
+            // The new model loads beside the old one, which serves until it is ready.
+            let mut next = cfg.clone();
+            next.tier = tier;
+            next.prompt = None;
+            let (tx, rx) = mpsc::channel();
+            let spawned = std::thread::Builder::new()
+                .name("utter-model-load".into())
+                .spawn(move || {
+                    let _ = tx.send(start_cleaner(&next).map_err(|e| e.to_string()));
+                })
+                .is_ok();
+            if spawned {
+                self.loading = Some((s, rx));
+                on_event(Event::ModelLoading);
+            }
         }
     }
 
