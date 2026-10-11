@@ -16,39 +16,41 @@ pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
 /// must be sent exactly this.
 pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
 
-/// Which cleanup model runs, chosen by measurement (docs/eval-results.md); both run with
-/// [`SERVER_ARGS`], each with its own system prompt ([`Tier::system_prompt`]).
+/// Which cleanup model runs, chosen by measurement (docs/eval-results.md); all run with
+/// [`SERVER_ARGS`], each with its own system prompt ([`Tier::system_prompt`]). People choose
+/// between two (Tai, 2026-10-11): Quality, the bigger model, and Light, the smaller one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tier {
-    /// Gemma 4 E4B fine-tuned for cleanup (ft5, huggingface.co/ductai199x/utter-cleanup-e4b):
-    /// about 3.3 GB of GPU memory (its per-layer embeddings stay in system RAM), and better than
-    /// the prompted 26B on every final-text eval (2026-10-10). The default: with the speech model,
-    /// Utter takes about 5.6 GB of GPU memory in all (Tai, 2026-10-09).
+    /// Gemma 4 E4B fine-tuned for cleanup (huggingface.co/ductai199x/utter-cleanup-e4b, a 5 GB
+    /// file): about 3.3 GB of GPU memory (its per-layer embeddings stay in system RAM), and
+    /// better than the prompted 26B on every final-text eval (2026-10-10). The default: with the
+    /// speech model, Utter takes about 5.6 GB of GPU memory in all (Tai, 2026-10-09).
     #[default]
-    Light,
-    /// Gemma 4 26B-A4B, prompted: about 15 GB of GPU memory. Optional, for GPUs with room.
     Quality,
-    /// Gemma 4 E2B fine-tuned on the light tier's data with its recipe: about half of E4B's GPU
-    /// memory, for an extra light Utter of about 2.5 GB in all (Tai, 2026-10-11) with the speech
-    /// model on the CPU.
-    ExtraLight,
+    /// Gemma 4 E2B fine-tuned on the same data with the same recipe: about half of E4B's GPU
+    /// memory, for a light Utter of about 2.5 GB in all (Tai, 2026-10-11), the speech model on
+    /// the CPU.
+    Light,
+    /// Gemma 4 26B-A4B, prompted: about 15 GB of GPU memory. Never offered: the fine-tuned E4B
+    /// beats it ([`Tier::offered`]); a reference for the eval tools only.
+    Reference,
 }
 
 impl Tier {
     /// The runtime component holding the model (crates/utter-runtime/components.json).
     pub fn component(self) -> &'static str {
         match self {
-            Tier::Light => "utter-cleanup-e4b",
-            Tier::Quality => "gemma4-26b-a4b-qat",
-            Tier::ExtraLight => "utter-cleanup-e2b",
+            Tier::Quality => "utter-cleanup-e4b",
+            Tier::Reference => "gemma4-26b-a4b-qat",
+            Tier::Light => "utter-cleanup-e2b",
         }
     }
 
     pub fn model_file(self) -> &'static str {
         match self {
-            Tier::Light => "utter-cleanup-e4b-ft5.q4_0.gguf",
-            Tier::Quality => "gemma-4-26B_q4_0-it.gguf",
-            Tier::ExtraLight => "utter-cleanup-e2b.q4_0.gguf",
+            Tier::Quality => "utter-cleanup-e4b-ft5.q4_0.gguf",
+            Tier::Reference => "gemma-4-26B_q4_0-it.gguf",
+            Tier::Light => "utter-cleanup-e2b.q4_0.gguf",
         }
     }
 
@@ -56,8 +58,8 @@ impl Tier {
     /// [`FINE_TUNED_PROMPT`] and must get exactly it.
     pub fn system_prompt(self) -> &'static str {
         match self {
-            Tier::Light | Tier::ExtraLight => FINE_TUNED_PROMPT,
-            Tier::Quality => SYSTEM_PROMPT,
+            Tier::Quality | Tier::Light => FINE_TUNED_PROMPT,
+            Tier::Reference => SYSTEM_PROMPT,
         }
     }
 
@@ -65,6 +67,13 @@ impl Tier {
     /// once it is.
     pub fn available(self) -> bool {
         utter_runtime::component(self.component()).is_ok()
+    }
+
+    /// Whether people are offered this tier (first run, Settings). The prompted 26B is not:
+    /// the fine-tuned E4B beats it on every eval at a third of its size (docs/eval-results.md,
+    /// 2026-10-10), so it stays a reference for the eval tools only (Tai, 2026-10-11).
+    pub fn offered(self) -> bool {
+        self != Tier::Reference && self.available()
     }
 }
 
@@ -206,22 +215,22 @@ mod tests {
 
     #[test]
     fn the_dictionary_comes_before_the_transcript() {
-        let [system, user] = messages(Tier::Quality, "  hello there ", &["Utter".into(), "Nguyen".into()]);
+        let [system, user] = messages(Tier::Reference, "  hello there ", &["Utter".into(), "Nguyen".into()]);
         assert_eq!(system.role, "system");
         assert_eq!(user.content, "Dictionary: Utter, Nguyen\nDictated: hello there");
     }
 
     #[test]
     fn no_dictionary_line_without_words() {
-        let [_, user] = messages(Tier::Quality, "hi", &[]);
+        let [_, user] = messages(Tier::Reference, "hi", &[]);
         assert_eq!(user.content, "Dictated: hi");
     }
 
     #[test]
     fn each_tier_sends_the_prompt_its_model_expects() {
-        let [system, _] = messages(Tier::Light, "hi", &[]);
-        assert_eq!(system.content, FINE_TUNED_PROMPT);
         let [system, _] = messages(Tier::Quality, "hi", &[]);
+        assert_eq!(system.content, FINE_TUNED_PROMPT);
+        let [system, _] = messages(Tier::Reference, "hi", &[]);
         assert_eq!(system.content, SYSTEM_PROMPT);
     }
 

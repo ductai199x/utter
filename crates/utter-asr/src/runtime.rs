@@ -40,7 +40,7 @@ fn init_inner() -> Result<PathBuf, AsrError> {
         return Err(AsrError::Runtime(format!("{} does not exist", lib.display())));
     }
     if custom.is_none() {
-        // Only the installed ones: the speech model on the CPU (the extra light tier) needs
+        // Only the installed ones: the speech model on the CPU (the light tier) needs
         // neither, and a GPU session without them fails when it is created, saying so.
         let dirs: Vec<PathBuf> = CUDA_COMPONENTS.iter().filter_map(|id| component_dir(id).ok()).collect();
         prepend_library_path(&dirs)?;

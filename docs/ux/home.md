@@ -72,7 +72,7 @@ right. Groups have a 13 px uppercase header.
 **Cleanup model**
 | Setting | Control | Description |
 |---|---|---|
-| Model | segmented: Light / Quality | Light: "Fastest. Runs on most GPUs (about 6 GB)." Quality: "Slower and larger (about 18 GB of GPU memory)." Quality is disabled, with "Not installed" under it, when its model is not installed. |
+| Model | segmented: Quality / Light | Quality: "The bigger model, most accurate: about 6 GB of GPU memory." Light: "The smaller model, for 4 GB graphics cards: about 2.5 GB. Speech runs on the processor." A model this GPU cannot run is disabled; one not installed yet says how much it downloads, and choosing it opens setup to fetch it, then switches. Light is listed once its model is published. |
 
 **Shortcut**
 | Setting | Control | Description |
@@ -133,8 +133,8 @@ Checked on the real machine at 100% and 150% scaling, in light and dark themes.
    bullets, without a restart.
 7. Choosing another microphone takes effect on the next dictation; unplugging it shows the
    amber error and dictation keeps working on the previous one.
-8. Switching to Quality shows Loading... and the next dictation after it finishes uses the
-   Quality model (the dictation log names it).
+8. Switching to Light shows Loading... and the next dictation after it finishes uses the
+   Light model (the dictation log names it).
 9. A hand edit to settings.toml shows in the open window within a second; a broken edit shows
    the banner and overwrites nothing.
 10. Everything is reachable and operable with the keyboard alone.

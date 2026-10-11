@@ -67,15 +67,20 @@ impl From<ConvSearchArg> for ConvSearch {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum TierArg {
-    Light,
+    /// The bigger fine-tuned model (E4B), the default.
     Quality,
+    /// The smaller fine-tuned model (E2B).
+    Light,
+    /// The prompted 26B, for comparisons.
+    Reference,
 }
 
 impl From<TierArg> for utter_llm::cleanup::Tier {
     fn from(t: TierArg) -> Self {
         match t {
-            TierArg::Light => Self::Light,
             TierArg::Quality => Self::Quality,
+            TierArg::Light => Self::Light,
+            TierArg::Reference => Self::Reference,
         }
     }
 }
@@ -109,7 +114,7 @@ enum Command {
     /// Right Ctrl for hands-free, Esc to cancel, Ctrl+C here to quit.
     Dictate {
         /// Which cleanup model.
-        #[arg(long, value_enum, default_value_t = TierArg::Light)]
+        #[arg(long, value_enum, default_value_t = TierArg::Quality)]
         tier: TierArg,
         /// Dictionary words, comma-separated.
         #[arg(long, default_value = "")]
@@ -133,7 +138,7 @@ enum Command {
         /// Results name (results/e2e/<name>/ and results/asr/e2e-<name>/).
         #[arg(long, default_value = "light")]
         name: String,
-        #[arg(long, value_enum, default_value_t = TierArg::Light)]
+        #[arg(long, value_enum, default_value_t = TierArg::Quality)]
         tier: TierArg,
         /// Seconds of silence between clips, as between dictations.
         #[arg(long, default_value_t = 1.0)]
@@ -204,7 +209,7 @@ enum Command {
         #[arg(long, default_value = "")]
         dictionary: String,
         /// Which cleanup model.
-        #[arg(long, value_enum, default_value_t = TierArg::Light)]
+        #[arg(long, value_enum, default_value_t = TierArg::Quality)]
         tier: TierArg,
     },
     /// Start Utter's llama-server on a GGUF model and send one chat message.

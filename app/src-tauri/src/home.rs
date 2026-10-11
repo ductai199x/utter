@@ -26,11 +26,10 @@ pub struct State {
     settings: Option<Settings>,
     error: Option<String>,
     microphones: Vec<String>,
-    quality_installed: bool,
-    /// The GPU has the memory the quality model needs (with the speech model, about 18 GB).
+    /// The light model is published (components.json): until then only Quality is offered.
+    light_available: bool,
+    /// The GPU has the memory the quality model needs (with the speech model, about 6 GB).
     quality_fits: bool,
-    /// The extra light tier's model is published (components.json).
-    extra_light_available: bool,
     /// What choosing each model would download now, in bytes (0: installed).
     download_bytes: std::collections::HashMap<&'static str, u64>,
     version: &'static str,
@@ -38,9 +37,9 @@ pub struct State {
     settings_path: String,
 }
 
-/// The quality model with the speech model needs about 18 GB; a 20 GB card leaves the room
+/// The quality model with the speech model needs about 6 GB; a card with 7.5 GB leaves the room
 /// the desktop itself takes.
-const QUALITY_GPU_BYTES: u64 = 20_000_000_000;
+const QUALITY_GPU_BYTES: u64 = 7_500_000_000;
 
 /// The GPU's memory, asked once: it does not change while Utter runs.
 fn gpu_memory() -> Option<u64> {
@@ -64,22 +63,16 @@ fn state() -> State {
         Ok(s) => (Some(s), None),
         Err(e) => (None, Some(e)),
     };
-    let quality = utter_llm::cleanup::Tier::Quality.component();
     State {
         settings,
         error,
         microphones: utter_audio::input_devices(),
-        quality_installed: utter_runtime::component(quality).is_ok_and(|c| c.is_intact()),
+        light_available: utter_llm::cleanup::Tier::Light.offered(),
         quality_fits: gpu_memory().is_some_and(|m| m >= QUALITY_GPU_BYTES),
-        extra_light_available: utter_llm::cleanup::Tier::ExtraLight.available(),
-        download_bytes: [
-            ("light", utter_llm::cleanup::Tier::Light),
-            ("quality", utter_llm::cleanup::Tier::Quality),
-            ("extra-light", utter_llm::cleanup::Tier::ExtraLight),
-        ]
-        .into_iter()
-        .map(|(name, tier)| (name, to_download(tier)))
-        .collect(),
+        download_bytes: [("quality", utter_llm::cleanup::Tier::Quality), ("light", utter_llm::cleanup::Tier::Light)]
+            .into_iter()
+            .map(|(name, tier)| (name, to_download(tier)))
+            .collect(),
         version: env!("CARGO_PKG_VERSION"),
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),

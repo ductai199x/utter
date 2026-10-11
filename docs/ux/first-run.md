@@ -19,7 +19,7 @@ Status: **spec, not built**. It replaces `utter-cli setup` for everyone but deve
 
 ## Steps
 
-One step at a time, a row of step dots at the top (4), the step's content in the middle, the
+One step at a time, a row of step dots at the top (5), the step's content in the middle, the
 buttons at the bottom right (Back as a text button, the main action filled).
 
 ### 1. Welcome and system check
@@ -40,13 +40,35 @@ driver to version 580 or newer", "Free up 6 GB on C:"), and Continue is replaced
 again**. No NVIDIA GPU: "Utter needs an NVIDIA graphics card (8 GB or more). Support for
 other cards is planned." and **Quit**.
 
-### 2. Microphone
+### 2. Choose your model
+
+Title "Choose your model". Line: "Bigger models write more carefully. You can change this later
+in Settings."
+
+Two cards side by side, the two models (Tai, 2026-10-11; Light is listed once its model is
+published):
+
+| Card | Says | Needs |
+|---|---|---|
+| Quality | "The bigger model. Most accurate; best for most cards." | about 6 GB of GPU memory (the fine-tuned E4B) |
+| Light | "The smaller model. Runs on 4 GB graphics cards." | about 2.5 GB of GPU memory (the fine-tuned E2B, speech on the CPU) |
+
+- Each card: the name, its sentence, "N GB GPU memory", and "N GB download".
+- The best fit for this GPU is selected when the step opens and marked **Recommended** (a
+  badge on the card's top edge): Quality when the card has 7.5 GB or more, Light below.
+- A model this GPU cannot run is shown disabled, with "Needs an N GB graphics card".
+- The prompted 26B is never offered: the fine-tuned E4B beats it on every eval.
+- Choosing a card saves it (settings.toml `model`); the download step fetches what it needs,
+  and the disk check of step 1 is redone for it before the download starts.
+- Keyboard: arrow keys move between cards, Enter continues.
+
+### 3. Microphone
 
 Title "Your microphone". A dropdown of input devices (System default first) and a level meter
 under it: 24 bars, moving with the voice. Line: "Say something. The bars should move."
 Choosing a device saves it to settings.toml. **Continue**.
 
-### 3. Download
+### 4. Download
 
 Title "Downloading the models". Line: "About 7.8 GB. You can use your computer meanwhile;
 Utter will let you know when it is ready."
@@ -57,9 +79,9 @@ Utter will let you know when it is ready."
   models load.
 - An error shows in amber under the bar with **Retry**: "Download interrupted. Retry picks up
   where it stopped." Retry resumes; nothing is downloaded twice.
-- Done: it moves on by itself to step 4.
+- Done: it moves on by itself to step 5.
 
-### 4. Try it
+### 5. Try it
 
 Title "Try it". Line: "Click in the box, hold **Right Ctrl**, and say:" then the sentence in
 quotes: "Hi team, the meeting moved to three, no, four o'clock. Bring the slides."
@@ -73,7 +95,7 @@ The step can be skipped (**Skip** text button).
 ## Layout (logical pixels)
 
 - Window 640 x 520, theme tokens of the Home window (light and dark follow the OS).
-- Step dots: 4 dots, 6 px, 8 px apart, centered 28 px from the top. Done and current dots use
+- Step dots: 5 dots, 6 px, 8 px apart, centered 28 px from the top. Done and current dots use
   the accent (the current one stretched to 18 px wide, a pill); the rest are the border color.
 - Content column: 48 px side padding, starting 72 px from the top. Title 24/32 semibold, line
   14/20 muted under it, 8 px apart; the step's body 28 px below.
