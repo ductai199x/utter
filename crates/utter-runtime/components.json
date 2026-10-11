@@ -160,20 +160,20 @@
       "optional": true
     },
     {
-      "id": "utter-cleanup-e4b",
-      "version": "b0646215",
+      "id": "utter-quality",
+      "version": "dc947f0c",
       "os": "any",
       "arch": "any",
       "files": [
         {
-          "name": "utter-cleanup-e4b-ft5.q4_0.gguf",
-          "url": "https://huggingface.co/ductai199x/utter-cleanup-e4b/resolve/b0646215ad6dde3561a1f024373498864527b12d/utter-cleanup-e4b-ft5.q4_0.gguf",
-          "sha256": "9b6dc8c712b993416d72951e9a0b6144e1f962b7bebc71c25baa6d9f1a9cf6b5",
+          "name": "utter-quality-v1-q4_0.gguf",
+          "url": "https://huggingface.co/ductai199x/utter/resolve/dc947f0c4477621528bba5003471af9eb3fb0f17/utter-quality-v1-q4_0.gguf",
+          "sha256": "7e872c97e82eebc0f10060b8e082814d0e2cee3aa3f5179f51b39bc3ca143a9e",
           "size": 5154940832
         }
       ],
-      "license": "Apache-2.0 (Gemma 4 E4B fine-tuned by Utter, ductai199x/utter-cleanup-e4b)",
-      "purpose": "Cleanup model, light tier (default): Gemma 4 E4B fine-tuned for dictation cleanup (ft5), Q4_0; about 3.3 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
+      "license": "Apache-2.0 (Gemma 4 E4B fine-tuned by Utter, ductai199x/utter)",
+      "purpose": "Cleanup model, Quality (the default): Gemma 4 E4B fine-tuned for dictation cleanup, v1 (run ft6), Q4_0; about 3.3 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
     },
     {
       "id": "gemma4-26b-a4b-qat",

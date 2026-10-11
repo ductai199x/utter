@@ -56,9 +56,9 @@ version, a publisher's URL and that publisher's SHA-256:
 | cudnn 9.27 | NVIDIA's PyPI package | onnxruntime's convolutions |
 | llama-cpp b11535 (llama-server) | ggml-org's GitHub release | The language model, as Utter's child process |
 | parakeet-ultra-onnx-fp16 3f7de939 (1.4 GB) | Hugging Face `ductai199x/utter-parakeet-ultra-onnx`, `fp16/` | The speech model (half-precision encoder) |
-| utter-cleanup-e4b b0646215 (5.2 GB) | Hugging Face `ductai199x/utter-cleanup-e4b` | The cleanup model, light tier (default): Gemma 4 E4B fine-tuned (ft5) |
+| utter-quality dc947f0c (5.2 GB) | Hugging Face `ductai199x/utter`, `utter-quality-v1-q4_0.gguf` | The cleanup model, Quality (default): Gemma 4 E4B fine-tuned (run ft6) |
 | gemma4-e4b-qat 4b4a2c1d (5.2 GB) | Hugging Face `google/gemma-4-E4B-it-qat-q4_0-gguf` | The prompted E4B, kept for evals: optional |
-| gemma4-26b-a4b-qat d1c082be (14.4 GB) | Hugging Face `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | The cleanup model, quality tier: optional, `utter-cli setup gemma4-26b-a4b-qat` |
+| gemma4-26b-a4b-qat d1c082be (14.4 GB) | Hugging Face `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | The prompted 26B, the eval reference: optional, `utter-cli setup gemma4-26b-a4b-qat` |
 
 `utter-cli setup` downloads, verifies and installs them, and the speech model (2.6 GB, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx`), into
 `%LOCALAPPDATA%\Utter_dev\runtime\` (about 8.2 GB for the default tier, most of it the two models); `utter-cli doctor` lists them. The same

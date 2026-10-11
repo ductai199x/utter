@@ -6,6 +6,43 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-11: Quality v1 (run ft6), and the dictionary
+
+Shipped as **utter-quality-v1-q4_0.gguf** (huggingface.co/ductai199x/utter). Shipped models
+are named `utter-<tier>-v<N>-<quantization>.gguf` (Tai, 2026-10-11); ft5, ft6 and the like are
+training runs, named here only.
+
+**Why a new run:** with a dictionary, ft5 got worse, not better (84.3% ready to send on the
+realistic set). It sometimes echoed the `Dictionary:` line into the text, and it forced
+dictionary words onto words that only sounded a little like them.
+
+**ft6:** ft5's adapter trained one more epoch (lr 1e-4) on 45,660 of ft5's pairs with
+`Dictionary:` lines added (tools/eval/finaltext/dictaug.py): some hold the right spelling of a
+misheard word, some hold near-miss words that must be left alone. The app now sends only the
+terms that sound like something in the dictation (gate::relevant_terms), as the eval does.
+
+All graded by the local 26B (Q4_0, llama.cpp; label v4local). It grades a little differently
+from the vLLM 26B the earlier entries used, so only rows graded the same way are compared.
+
+| Ready to send | ft5 | **ft6** |
+|---|---|---|
+| Realistic, Kokoro voices (950) | 90.4% | 89.3% |
+| Realistic, unseen Chatterbox voices (950) | 81.7% | 82.3% |
+| Realistic, 300-term dictionary, phrase boost | 84.3% (vLLM grader) | 88.9% |
+| Directed, dictionary, phrase boost (292) | | 89.7% |
+
+- **Without a dictionary they are level.** Paired by dictation over both voice sets, ft6 fails
+  47 that ft5 passed and passes 42 that ft5 failed: no difference beyond noise (z = 0.5).
+- **With a dictionary ft6 is the one to ship.** Dictionary terms come out right 97.8% of the time
+  (ft5 96.2%), it never echoes the line (ft5 did 74 times over the two sets), and the score with a dictionary is within half a
+  point of the score without one.
+- **The six earlier strict sets:** within a point of ft5 everywhere (spans that must come out
+  exactly: brackets, numbers, quotes, symbols, terms).
+- **Latency is the same.** Back to back on the restate set (575 requests): ft5 252 ms p50, ft6
+  257 ms, ft5 again 258 ms. An earlier gap of 20 to 35 ms came from runs at different times.
+
+---
+
 ## 2026-10-11: text that must be typed, not answered
 
 **The directed set** (en-finaltext-kokoro-directed, 292 dictations): messages.py `--directed`
