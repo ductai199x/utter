@@ -45,16 +45,15 @@
 
   const terms = $derived(settings?.dictionary ?? []);
   // Why the quality model cannot be chosen, if it cannot.
-  const qualityBlocked = $derived(home && !home.qualityFits ? 'needs a graphics card with 20 GB of memory.' : '');
-  // The models offered, lightest first; extra light once its model is published.
+  const qualityBlocked = $derived(home && !home.qualityFits ? 'needs a graphics card with 8 GB of memory.' : '');
+  // The two models: Quality, the bigger one, and Light, once its model is published.
   const MODELS = $derived(
     (
       [
-        ['extra-light', 'Extra light', 'Smallest: about 2.5 GB of GPU memory, for 4 GB cards. Speech runs on the processor.'],
-        ['light', 'Light', 'Fast and accurate: about 6 GB of GPU memory.'],
-        ['quality', 'Quality', 'Most careful, and slower: about 18 GB of GPU memory.'],
+        ['quality', 'Quality', 'The bigger model, most accurate: about 6 GB of GPU memory.'],
+        ['light', 'Light', 'The smaller model, for 4 GB graphics cards: about 2.5 GB. Speech runs on the processor.'],
       ] as const
-    ).filter(([id]) => id !== 'extra-light' || home?.extraLightAvailable),
+    ).filter(([id]) => id !== 'light' || home?.lightAvailable),
   );
   /** "Downloads 3.9 GB" when choosing `model` needs a download first. */
   function downloadNote(model: Model): string | undefined {

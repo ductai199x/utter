@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type Model = 'extra-light' | 'light' | 'quality';
+export type Model = 'quality' | 'light';
 
 export interface Settings {
   dictionary: string[];
@@ -17,9 +17,8 @@ export interface HomeState {
   settings: Settings | null;
   error: string | null;
   microphones: string[];
-  qualityInstalled: boolean;
   qualityFits: boolean;
-  extraLightAvailable: boolean;
+  lightAvailable: boolean;
   /** What choosing each model would download now, in bytes (0: installed). */
   downloadBytes: Record<Model, number>;
   version: string;
@@ -43,14 +42,13 @@ const mock: HomeState = {
     lists: true,
     start_at_login: true,
     microphone: '',
-    model: 'light',
+    model: 'quality',
   },
   error: null,
   microphones: ['Microphone (Shure MV7)', 'Headset (Jabra Evolve2 65)'],
-  qualityInstalled: true,
   qualityFits: true,
-  extraLightAvailable: true,
-  downloadBytes: { 'extra-light': 3.9e9, light: 0, quality: 14.44e9 },
+  lightAvailable: true,
+  downloadBytes: { quality: 0, light: 3.9e9 },
   version: '0.0.1',
   dataDir: 'C:\\Users\\you\\.cache\\utter',
   settingsPath: 'C:\\Users\\you\\.cache\\utter\\settings.toml',

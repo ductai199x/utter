@@ -14,11 +14,11 @@ use utter_runtime::Component;
 
 /// Room left on the drive beyond the download, for extraction and logs.
 const SPARE_BYTES: u64 = 2_000_000_000;
-/// The least GPU memory Utter runs in (the light tier with the speech model, about 6 GB).
-const MIN_GPU_BYTES: u64 = 7_500_000_000;
-/// The least GPU memory the extra light tier runs in (about 2.5 GB, on a 4 GB card the
+/// The least GPU memory Utter runs in (the quality tier with the speech model, about 6 GB).
+const MIN_QUALITY_GPU_BYTES: u64 = 7_500_000_000;
+/// The least GPU memory the light tier runs in (about 2.5 GB, on a 4 GB card the
 /// desktop takes some of).
-const MIN_EXTRA_LIGHT_GPU_BYTES: u64 = 3_500_000_000;
+const MIN_LIGHT_GPU_BYTES: u64 = 3_500_000_000;
 /// The meter's level rate, the Bar's (main.rs): 60 a second.
 const LEVEL_EVERY: Duration = Duration::from_millis(16);
 
@@ -38,7 +38,7 @@ fn required() -> Vec<&'static Component> {
 /// The tier in the settings, or light when that one is not published yet.
 pub fn chosen_tier() -> Tier {
     let tier: Tier = Settings::load_or_create(&Settings::path()).map(|s| s.model.into()).unwrap_or_default();
-    if tier.available() { tier } else { Tier::Light }
+    if tier.available() { tier } else { Tier::Quality }
 }
 
 /// Which window opens at start (docs/ux/first-run.md, "When Utter starts: three paths").
@@ -78,6 +78,73 @@ pub fn mode_for(missing: &[&Component]) -> Option<Mode> {
     } else {
         Some(Mode::Update)
     }
+}
+
+/// One tier as first run's "Choose your model" step shows it (docs/ux/first-run.md).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCard {
+    /// The settings value: "quality" or "light".
+    id: &'static str,
+    /// GPU memory the tier needs, in bytes.
+    gpu_bytes: u64,
+    /// The graphics card memory it is offered on, in bytes.
+    card_bytes: u64,
+    /// What choosing it downloads now (0: installed).
+    download_bytes: u64,
+    /// This GPU has the memory for it.
+    fits: bool,
+    recommended: bool,
+    selected: bool,
+}
+
+/// GPU memory each tier needs with the speech model (DESIGN.md section 6; light per
+/// docs/eval-results.md), and the card size it is offered on.
+fn tier_gpu(tier: Tier) -> (u64, u64) {
+    match tier {
+        Tier::Light => (2_500_000_000, MIN_LIGHT_GPU_BYTES),
+        Tier::Quality => (6_000_000_000, MIN_QUALITY_GPU_BYTES),
+        Tier::Reference => (18_000_000_000, 20_000_000_000),
+    }
+}
+
+/// The tiers on offer, lightest first, with the best fit for this GPU recommended: light when
+/// it fits (the measured default), else light.
+#[tauri::command]
+pub fn setup_models() -> Vec<ModelCard> {
+    use utter_pipeline::settings::Model;
+    let memory = utter_runtime::gpu::probe().map(|g| g.memory_bytes).unwrap_or(0);
+    let fits = |tier: Tier| memory >= tier_gpu(tier).1;
+    let recommended = if fits(Tier::Quality) || !Tier::Light.available() { Tier::Quality } else { Tier::Light };
+    let chosen = chosen_tier();
+    [(Model::Quality, "quality"), (Model::Light, "light")]
+        .into_iter()
+        .map(|(model, id)| (Tier::from(model), id))
+        .filter(|(tier, _)| tier.offered())
+        .map(|(tier, id)| ModelCard {
+            id,
+            gpu_bytes: tier_gpu(tier).0,
+            card_bytes: tier_gpu(tier).1,
+            download_bytes: utter_pipeline::components_for(tier)
+                .into_iter()
+                .filter_map(|c| utter_runtime::component(c).ok())
+                .filter(|c| !c.is_intact())
+                .map(|c| c.download_size())
+                .sum(),
+            fits: fits(tier),
+            recommended: tier == recommended,
+            selected: tier == chosen,
+        })
+        .collect()
+}
+
+/// Saves the tier first run's model step chose.
+#[tauri::command]
+pub fn setup_choose(model: utter_pipeline::settings::Model) -> Result<(), String> {
+    let path = Settings::path();
+    let mut s = Settings::load_or_create(&path)?;
+    s.model = model;
+    s.save(&path)
 }
 
 /// The last reason dictation could not start, for the problem screen.
@@ -157,38 +224,22 @@ fn gb(bytes: u64) -> String {
 #[tauri::command]
 pub fn setup_check() -> Checks {
     let gpu = utter_runtime::gpu::probe();
-    // A GPU too small for the light tier gets extra light, if it fits that: the tier decides
-    // what is downloaded, so it is settled before the disk is checked.
-    if let Ok(g) = &gpu
-        && g.memory_bytes < MIN_GPU_BYTES
-        && g.memory_bytes >= MIN_EXTRA_LIGHT_GPU_BYTES
-        && Tier::ExtraLight.available()
-        && chosen_tier() == Tier::Light
-    {
-        let path = Settings::path();
-        if let Ok(mut s) = Settings::load_or_create(&path) {
-            s.model = utter_pipeline::settings::Model::ExtraLight;
-            if let Err(e) = s.save(&path) {
-                tracing::warn!("choosing extra light: {e}");
-            }
-        }
-    }
     let need: u64 = missing().iter().map(|c| c.download_size()).sum();
     let mut checks = Vec::new();
     let no_gpu = gpu.is_err();
     match &gpu {
         Ok(g) => {
             checks.push(Check { id: "gpu", ok: true, value: g.name.clone(), fix: None });
-            let extra_light = chosen_tier() == Tier::ExtraLight;
-            let need_memory = if extra_light { MIN_EXTRA_LIGHT_GPU_BYTES } else { MIN_GPU_BYTES };
-            let ok = g.memory_bytes >= need_memory;
+            // Enough for the smallest tier on offer: which one runs is the next step's choice.
+            let smallest = if Tier::Light.available() { MIN_LIGHT_GPU_BYTES } else { MIN_QUALITY_GPU_BYTES };
+            let ok = g.memory_bytes >= smallest;
             let gib = g.memory_bytes as f64 / (1u64 << 30) as f64;
             checks.push(Check {
                 id: "memory",
                 ok,
-                value: if extra_light && ok { format!("{gib:.0} GB, Extra light") } else { format!("{gib:.0} GB") },
+                value: format!("{gib:.0} GB"),
                 fix: (!ok).then(|| {
-                    if Tier::ExtraLight.available() {
+                    if Tier::Light.available() {
                         "Utter needs a graphics card with 4 GB of memory or more.".into()
                     } else {
                         "Utter needs a graphics card with 8 GB of memory or more.".into()

@@ -41,7 +41,7 @@ pub enum SpeechModel {
     #[default]
     Gpu,
     /// The encoder's weights in 8 bits on the CPU (export/quantize_encoder.py): no GPU memory,
-    /// for the extra light tier's 2.5 GB budget, at a few hundred milliseconds more a clip.
+    /// for the light tier's 2.5 GB budget, at a few hundred milliseconds more a clip.
     Cpu,
 }
 

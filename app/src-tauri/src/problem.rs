@@ -25,9 +25,9 @@ pub struct Problem {
 /// section 6: about 5.6 GB for the light tier).
 fn needed_bytes(tier: Tier) -> u64 {
     match tier {
-        Tier::ExtraLight => 2_500_000_000,
-        Tier::Light => 6_000_000_000,
-        Tier::Quality => 18_000_000_000,
+        Tier::Light => 2_500_000_000,
+        Tier::Quality => 6_000_000_000,
+        Tier::Reference => 18_000_000_000,
     }
 }
 
@@ -97,11 +97,10 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
                 "Utter needs about {} free on the graphics card{}. Close games or other apps using the GPU, then retry.{}",
                 gb(need),
                 now.unwrap_or_default(),
-                match tier {
-                    Tier::Quality => " Or choose the Light model in Settings: it needs about 6 GB.",
-                    Tier::Light if Tier::ExtraLight.available() =>
-                        " Or choose Extra light in Settings: it needs about 2.5 GB.",
-                    _ => "",
+                if tier == Tier::Quality && Tier::Light.offered() {
+                    " Or choose the Light model in Settings: it needs about 2.5 GB."
+                } else {
+                    ""
                 }
             ),
             vec!["retry", "quit"],
@@ -195,7 +194,7 @@ mod tests {
 
     #[test]
     fn a_missing_microphone_says_so() {
-        let p = diagnose(&PipelineError::Audio(utter_audio::AudioError::NoDevice(String::new())), Tier::Light);
+        let p = diagnose(&PipelineError::Audio(utter_audio::AudioError::NoDevice(String::new())), Tier::Quality);
         assert_eq!(p.kind, "no-microphone");
         assert_eq!(p.actions, ["retry", "quit"]);
     }
@@ -205,7 +204,7 @@ mod tests {
         let e = PipelineError::Asr(utter_asr::AsrError::Runtime(
             "Failed to allocate memory for requested buffer of size 52428800".into(),
         ));
-        assert_eq!(diagnose(&e, Tier::Light).kind, "gpu-memory");
+        assert_eq!(diagnose(&e, Tier::Quality).kind, "gpu-memory");
     }
 
     #[test]
