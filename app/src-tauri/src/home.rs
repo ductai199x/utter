@@ -29,6 +29,10 @@ pub struct State {
     quality_installed: bool,
     /// The GPU has the memory the quality model needs (with the speech model, about 18 GB).
     quality_fits: bool,
+    /// The extra light tier's model is published (components.json).
+    extra_light_available: bool,
+    /// What choosing each model would download now, in bytes (0: installed).
+    download_bytes: std::collections::HashMap<&'static str, u64>,
     version: &'static str,
     data_dir: String,
     settings_path: String,
@@ -44,6 +48,16 @@ fn gpu_memory() -> Option<u64> {
     *MEMORY.get_or_init(|| utter_runtime::gpu::probe().ok().map(|g| g.memory_bytes))
 }
 
+/// Bytes `tier` still needs downloaded (its components that are not installed and intact).
+fn to_download(tier: utter_llm::cleanup::Tier) -> u64 {
+    utter_pipeline::components_for(tier)
+        .into_iter()
+        .filter_map(|id| utter_runtime::component(id).ok())
+        .filter(|c| !c.is_intact())
+        .map(|c| c.download_size())
+        .sum()
+}
+
 fn state() -> State {
     let path = Settings::path();
     let (settings, error) = match Settings::load_or_create(&path) {
@@ -57,6 +71,15 @@ fn state() -> State {
         microphones: utter_audio::input_devices(),
         quality_installed: utter_runtime::component(quality).is_ok_and(|c| c.is_intact()),
         quality_fits: gpu_memory().is_some_and(|m| m >= QUALITY_GPU_BYTES),
+        extra_light_available: utter_llm::cleanup::Tier::ExtraLight.available(),
+        download_bytes: [
+            ("light", utter_llm::cleanup::Tier::Light),
+            ("quality", utter_llm::cleanup::Tier::Quality),
+            ("extra-light", utter_llm::cleanup::Tier::ExtraLight),
+        ]
+        .into_iter()
+        .map(|(name, tier)| (name, to_download(tier)))
+        .collect(),
         version: env!("CARGO_PKG_VERSION"),
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),
@@ -130,7 +153,16 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
                 let s = state();
                 if let Some(settings) = &s.settings {
                     apply_autostart(settings);
-                    if let Some(tx) = link.0.lock().expect("pipeline link").as_ref() {
+                    // A model whose files are not here yet: setup fetches them first, and
+                    // hands the settings over when done (setup_download).
+                    let missing = crate::setup::missing();
+                    if let Some(mode) = crate::setup::mode_for(&missing) {
+                        if app.get_webview_window("setup").is_none()
+                            && let Err(e) = crate::setup::open(&app, mode)
+                        {
+                            tracing::error!("could not open setup: {e}");
+                        }
+                    } else if let Some(tx) = link.0.lock().expect("pipeline link").as_ref() {
                         let _ = tx.send(settings.clone());
                     }
                 }

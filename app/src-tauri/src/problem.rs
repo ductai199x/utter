@@ -17,7 +17,7 @@ pub struct Problem {
     pub message: String,
     /// The error itself, for "Details".
     pub detail: String,
-    /// The actions offered, in order: "retry", "repair", "logs", "quit".
+    /// The actions offered, in order: "retry", "repair", "logs", "quit" or "close".
     pub actions: Vec<&'static str>,
 }
 
@@ -25,6 +25,7 @@ pub struct Problem {
 /// section 6: about 5.6 GB for the light tier).
 fn needed_bytes(tier: Tier) -> u64 {
     match tier {
+        Tier::ExtraLight => 2_500_000_000,
         Tier::Light => 6_000_000_000,
         Tier::Quality => 18_000_000_000,
     }
@@ -96,7 +97,12 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
                 "Utter needs about {} free on the graphics card{}. Close games or other apps using the GPU, then retry.{}",
                 gb(need),
                 now.unwrap_or_default(),
-                if tier == Tier::Quality { " Or choose the Light model in Settings: it needs 6 GB." } else { "" }
+                match tier {
+                    Tier::Quality => " Or choose the Light model in Settings: it needs about 6 GB.",
+                    Tier::Light if Tier::ExtraLight.available() =>
+                        " Or choose Extra light in Settings: it needs about 2.5 GB.",
+                    _ => "",
+                }
             ),
             vec!["retry", "quit"],
         );
@@ -123,6 +129,28 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
         );
     }
     problem("other", "Utter could not start", first_line(&detail), vec!["retry", "logs", "quit"])
+}
+
+/// A model switch that failed after its download (the pipeline reports it as text).
+pub fn model_switch(error: &str) -> Problem {
+    let lower = error.to_lowercase();
+    let (kind, title, message) = if OUT_OF_MEMORY.iter().any(|w| lower.contains(w)) {
+        (
+            "gpu-memory",
+            "Not enough free GPU memory for this model",
+            "Close games or other apps using the GPU, then retry, or choose a lighter model in Settings.",
+        )
+    } else {
+        ("other", "The new model could not start", "The previous model is still in use. Retry, or open the logs.")
+    };
+    Problem {
+        kind,
+        title: title.into(),
+        message: message.into(),
+        detail: error.to_owned(),
+        // Dictation keeps the previous model: closing is enough.
+        actions: vec!["retry", "logs", "close"],
+    }
 }
 
 fn first_line(s: &str) -> String {
