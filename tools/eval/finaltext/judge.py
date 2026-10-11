@@ -48,7 +48,10 @@ was misheard; never judge the Heard text. First list every difference between Ty
   curly quotes, a number written in another standard way, a list marker style. Nothing a reader
   would call wrong. Also acceptable: a difference where Meant itself has a clear typo or grammar
   error (real people's text sometimes does) and Typed is the correct version of exactly that
-  part, with the same meaning.
+  part, with the same meaning. Punctuation is a writer's choice unless it garbles the sentence
+  or changes its meaning: an aside in commas or none instead of parentheses, a period instead of
+  an ellipsis or an exclamation mark, a period on a question the wording does not mark as one
+  ("Or you are afraid of bugs."), all acceptable.
 - "needs_edit": at least one difference is wrong: a missing, extra or changed word, a misspelled
   name, a grammar error, punctuation that changes or garbles the reading, a correction applied
   wrongly or left in, a list that should be a list or should not be.
