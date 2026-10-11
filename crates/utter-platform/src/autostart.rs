@@ -2,9 +2,10 @@
 
 use std::path::Path;
 
-/// Registers `exe` to start at sign-in, or removes the registration.
-pub fn set(enabled: bool, exe: &Path) -> Result<(), String> {
-    imp::set(enabled, exe)
+/// Registers `exe` to start at sign-in with `arg` (so it can tell a sign-in start from the
+/// person starting it), or removes the registration.
+pub fn set(enabled: bool, exe: &Path, arg: &str) -> Result<(), String> {
+    imp::set(enabled, exe, arg)
 }
 
 #[cfg(windows)]
@@ -23,7 +24,7 @@ mod imp {
         s.encode_utf16().chain(Some(0)).collect()
     }
 
-    pub fn set(enabled: bool, exe: &Path) -> Result<(), String> {
+    pub fn set(enabled: bool, exe: &Path, arg: &str) -> Result<(), String> {
         let mut key: HKEY = std::ptr::null_mut();
         // SAFETY: a NUL-terminated subkey name and an out-pointer for the key handle.
         let r = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, wide(RUN).as_ptr(), 0, KEY_SET_VALUE, &mut key) };
@@ -32,8 +33,8 @@ mod imp {
         }
         let name = wide(NAME);
         let r = if enabled {
-            // Quoted: the path may have spaces.
-            let value = wide(&format!("\"{}\"", exe.display()));
+            // The path quoted (it may have spaces), then the argument.
+            let value = wide(&format!("\"{}\" {arg}", exe.display()));
             // SAFETY: an open key, a NUL-terminated name, and REG_SZ data with its byte length
             // (the terminating NUL included).
             unsafe { RegSetValueExW(key, name.as_ptr(), 0, REG_SZ, value.as_ptr().cast(), (value.len() * 2) as u32) }
@@ -54,7 +55,7 @@ mod imp {
 mod imp {
     use std::path::Path;
 
-    pub fn set(_enabled: bool, _exe: &Path) -> Result<(), String> {
+    pub fn set(_enabled: bool, _exe: &Path, _arg: &str) -> Result<(), String> {
         Err("starting at sign-in is not supported on this platform yet".into())
     }
 }

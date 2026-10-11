@@ -115,7 +115,7 @@ pub fn apply_autostart(settings: &Settings) {
         return;
     }
     let Ok(exe) = std::env::current_exe() else { return };
-    if let Err(e) = utter_platform::autostart::set(settings.start_at_login, &exe) {
+    if let Err(e) = utter_platform::autostart::set(settings.start_at_login, &exe, crate::splash::AUTOSTART_ARG) {
         tracing::warn!("start at sign-in: {e}");
     }
 }

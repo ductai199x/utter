@@ -16,6 +16,7 @@ export default defineConfig({
         bar: resolve(__dirname, 'bar.html'),
         home: resolve(__dirname, 'home.html'),
         setup: resolve(__dirname, 'setup.html'),
+        splash: resolve(__dirname, 'splash.html'),
       },
     },
   },
