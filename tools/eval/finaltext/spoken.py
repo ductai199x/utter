@@ -483,11 +483,20 @@ def main(
     ),
     per_passage: int = typer.Option(0, help="Kinds per passage, chosen by its id (0: every kind)."),
     passages_name: str = typer.Option("", help="Passages file stem (default: passages-<split>)."),
+    grammar_boost: str = typer.Option(
+        "", help='Grammar error types weighted up, e.g. "DET=2,PREP=2" (grammar kind).'
+    ),
 ) -> None:
     """Renders every passage of a split in each kind; resumes where a previous run stopped."""
     from eval.finaltext.llm import Remote, Server, model_path
     from eval.paths import eval_dir
 
+    if grammar_boost:
+        from eval.finaltext import grammar
+
+        grammar.BOOST.update(
+            {t: float(w) for t, w in (pair.split("=") for pair in grammar_boost.split(","))}
+        )
     root = eval_dir() / "finaltext"
     passages = [
         json.loads(line)
