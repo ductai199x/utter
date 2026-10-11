@@ -249,17 +249,32 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
         .setup(|app| {
+            let settings = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
+            let restart = MenuItem::with_id(app, "restart", "Restart (applies settings)", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Utter", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quit])?;
+            let menu = Menu::with_items(app, &[&settings, &restart, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("an app icon"))
                 .tooltip("Utter: loading...")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| {
-                    if event.id() == "quit" {
-                        app.exit(0);
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "settings" => {
+                        // The pipeline writes the file when it starts; this covers a click before
+                        // that. A file with an error opens all the same, to be fixed.
+                        let path = Settings::path();
+                        if !path.exists()
+                            && let Err(e) = Settings::load_or_create(&path)
+                        {
+                            tracing::error!("write settings: {e}");
+                        }
+                        if let Err(e) = utter_platform::shell::open(&path) {
+                            tracing::error!("open {}: {e}", path.display());
+                        }
                     }
+                    "restart" => app.restart(),
+                    "quit" => app.exit(0),
+                    _ => {}
                 })
                 .build(app)?;
 
