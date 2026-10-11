@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+from rapidfuzz.distance import Levenshtein
+
 _SPLIT = re.compile(r"[^\w'-]+")
 
 
@@ -15,13 +17,8 @@ def _letters(s: str) -> str:
 
 
 def _distance(a: str, b: str) -> int:
-    prev = list(range(len(b) + 1))
-    for i in range(1, len(a) + 1):
-        cur = [i] + [0] * len(b)
-        for j in range(1, len(b) + 1):
-            cur[j] = min(prev[j - 1] + (a[i - 1] != b[j - 1]), prev[j] + 1, cur[j - 1] + 1)
-        prev = cur
-    return prev[len(b)]
+    # Plain Levenshtein, as gate.rs computes it, in C: training data runs this millions of times.
+    return Levenshtein.distance(a, b)
 
 
 def heard(term: str, words: list[str]) -> bool:
@@ -33,8 +30,14 @@ def heard(term: str, words: list[str]) -> bool:
             joined = "".join(_letters(w) for w in words[i : i + n])
             if not joined:
                 continue
+            # The distance is at least the difference in length: skip what cannot match.
+            if joined != target and (
+                len(target) < 5 or abs(len(joined) - len(target)) > 0.25 * len(target) + 1
+            ):
+                continue
             d = _distance(joined, target)
-            if d == 0 or d / max(len(target), len(joined)) <= 0.34:
+            # Short terms are close to too many words ("TOP" to "to"): exact only.
+            if d == 0 or (len(target) >= 5 and d / max(len(target), len(joined)) <= 0.25):
                 return True
     return False
 
@@ -52,3 +55,4 @@ def test_relevant_terms() -> None:
         "Kubernetes",
     ]
     assert relevant_terms("lunch at noon?", d) == []
+    assert relevant_terms("go to the top and then to the beach", ["TOP", "Sand", "CTO"]) == ["TOP"]
