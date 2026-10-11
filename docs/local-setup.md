@@ -11,6 +11,7 @@ How the development machine is laid out. Tai's choice (2026-10-09): downloads go
 | Eval clips and manifests | `%USERPROFILE%\.cache\utter\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl`. Override the root with `UTTER_DATA_DIR`. |
 | Eval results | `%USERPROFILE%\.cache\utter\eval\results\` | One JSONL per model and set, re-scored by the report commands. |
 | Local model exports | `%USERPROFILE%\.cache\utter\models\<name>\` | Output of `tools/export/export_parakeet.py`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
+| Settings | `%USERPROFILE%\.cache\utter\settings.toml` | The dictionary, list formatting, microphone and cleanup model. The Home window edits it; a hand edit applies on the next dictation too. Written with every key commented when missing. |
 | Logs | `%USERPROFILE%\.cache\utter\logs\` | `llama-server.log` |
 | Dictation log | `%USERPROFILE%\.cache\utter\dictations\` | One `<id>.json` per live dictation (every recognizer pass, Bar state, cleanup input and output, timings) and `<id>.wav`. Never leaves the machine. |
 
