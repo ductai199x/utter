@@ -157,13 +157,19 @@ fn heard(term: &str, words: &[&str], exact: bool) -> bool {
                 }
                 continue;
             }
-            if (d as f32) / (target.chars().count().max(joined.chars().count()) as f32) <= 0.34 {
+            // A short term is close to too many words ("TOP" to "to", "Sand" to "and"): only
+            // terms of five letters or more match approximately.
+            let len = target.chars().count();
+            if len >= FUZZY_MIN && (d as f32) / (len.max(joined.chars().count()) as f32) <= 0.25 {
                 return true;
             }
         }
     }
     false
 }
+
+/// The fewest letters a dictionary term needs to be matched approximately.
+const FUZZY_MIN: usize = 5;
 
 fn edit_distance(a: &str, b: &str) -> usize {
     let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
@@ -270,6 +276,8 @@ mod tests {
             ["Supabase", "Kubernetes"]
         );
         assert!(relevant_terms("lunch at noon?", &dictionary).is_empty());
+        let short: Vec<String> = ["TOP", "Sand", "CTO"].map(String::from).to_vec();
+        assert!(relevant_terms("go to the top and then to the beach", &short) == ["TOP"]);
     }
 
     #[test]
