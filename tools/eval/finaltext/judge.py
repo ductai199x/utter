@@ -39,6 +39,10 @@ SYSTEM = """You grade a voice-typing app. You get what the speech recognizer hea
 the speaker meant to type, and what the app typed. Decide whether a careful writer would send the
 app's text exactly as it is.
 
+Compare Typed with Meant, word by word. "Heard" is only context, to tell whether a wrong word
+was misheard; never judge the Heard text. First list every difference between Typed and Meant
+("differences"), each as "typed X / meant Y". Judge only those differences.
+
 - "acceptable": every difference from the intended text is an equally valid choice: an optional
   comma, a semicolon or dash instead of a period between sentences, "OK" for "okay", straight or
   curly quotes, a number written in another standard way, a list marker style. Nothing a reader
@@ -52,16 +56,18 @@ style (only if acceptable), recognition (the recognizer misheard a word and noth
 heard lets anyone recover it), punctuation, capitalization, grammar, correction, list,
 numbers-symbols, words, other.
 
-Return JSON: {"verdict": "acceptable" | "needs_edit", "cause": ..., "note": a few words}."""
+Return JSON: {"differences": [...], "verdict": "acceptable" | "needs_edit", "cause": ...,
+"note": a few words}."""
 
 SCHEMA = {
     "type": "object",
     "properties": {
+        "differences": {"type": "array", "items": {"type": "string"}},
         "verdict": {"enum": ["acceptable", "needs_edit"]},
         "cause": {"enum": list(CAUSES)},
         "note": {"type": "string"},
     },
-    "required": ["verdict", "cause", "note"],
+    "required": ["differences", "verdict", "cause", "note"],
 }
 
 
@@ -115,7 +121,7 @@ def main(
             user = f"Heard: {c['heard']}\n\nMeant: {c['gold']}\n\nTyped: {c['typed']}"
             reply = llm.chat(
                 [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
-                max_tokens=200,
+                max_tokens=600,
                 temperature=0.0,
                 json_schema=SCHEMA,
             )
