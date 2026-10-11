@@ -284,6 +284,9 @@ struct ResultRow<'a> {
 
 fn main() -> Result<()> {
     utter_core::init_tracing();
+    if let Some(old) = utter_core::move_legacy_data() {
+        tracing::info!("moved {} to {}", old.display(), utter_core::data_dir().display());
+    }
     let cli = Cli::parse();
     match &cli.command {
         Command::Setup { ids } => return setup(ids),

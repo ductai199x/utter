@@ -2,7 +2,7 @@
 converter at the runtime's build, then quantize to Q4_0 (the format the QAT checkpoint was
 trained for), and record the file's SHA-256 so it can be pinned as a component.
 
-Run: UV_PROJECT_ENVIRONMENT=C:/Users/Tai/.cache/utter/envs/train uv run python export_gguf.py MERGED OUT.gguf
+Run: UV_PROJECT_ENVIRONMENT=C:/Users/Tai/AppData/Local/Utter_dev/envs/train uv run python export_gguf.py MERGED OUT.gguf
 """
 
 from __future__ import annotations

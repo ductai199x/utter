@@ -118,10 +118,10 @@ pub fn open_path(which: String) -> Result<(), String> {
 /// Keeps the sign-in registration in step with the setting. Only an installed copy registers
 /// itself: a development build (anything under a cargo `target` folder) never does.
 pub fn apply_autostart(settings: &Settings) {
-    let Ok(exe) = std::env::current_exe() else { return };
-    if exe.components().any(|c| c.as_os_str() == "target") {
+    if utter_core::is_development_build() {
         return;
     }
+    let Ok(exe) = std::env::current_exe() else { return };
     if let Err(e) = utter_platform::autostart::set(settings.start_at_login, &exe) {
         tracing::warn!("start at sign-in: {e}");
     }

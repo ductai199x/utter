@@ -8,7 +8,7 @@ each covers several things. They are held out: never trained on.
    word: say it the way you would. Mistakes, restarts and "um"s are welcome; they are part of
    what is being tested.
 2. After each, fix the text in Notepad until it is exactly what you meant. That is the gold.
-3. Utter logs every dictation (audio and transcript) in `C:\Users\Tai\.cache\utter\dictations\`.
+3. Utter logs every dictation (audio and transcript) in `C:\Users\Tai\AppData\Local\Utter_dev\dictations\`.
    Save each fixed text as `<that dictation's id>.gold.txt` next to its log, or paste the texts
    to me and I'll match them.
 
