@@ -28,6 +28,10 @@ struct Cli {
     /// (e.g. a fresh tools/export output under <data_dir>/models/).
     #[arg(long, global = true)]
     model_dir: Option<PathBuf>,
+    /// Where the encoder runs: the GPU, or the CPU as the Light model does (with its 8-bit
+    /// export, parakeet-ultra-onnx-w8).
+    #[arg(long, global = true, value_enum, default_value_t = DeviceArg::Cuda)]
+    encoder_device: DeviceArg,
     /// Where the decoder and joint graphs run.
     #[arg(long, global = true, value_enum, default_value_t = DeviceArg::Cpu)]
     decoder_device: DeviceArg,
@@ -37,15 +41,24 @@ struct Cli {
     /// cuDNN convolution algorithm search.
     #[arg(long, global = true, value_enum, default_value_t = ConvSearchArg::Heuristic)]
     conv_search: ConvSearchArg,
-    /// Disable onnxruntime's memory-pattern planning.
+    /// Turn on onnxruntime's memory-pattern planning (off in the product).
     #[arg(long, global = true)]
-    no_memory_pattern: bool,
+    memory_pattern: bool,
     /// Threads for graphs on the CPU (0: one per core).
     #[arg(long, global = true, default_value_t = 0)]
     cpu_threads: usize,
     /// Stop idle CPU worker threads from spin-waiting.
     #[arg(long, global = true)]
     no_cpu_spinning: bool,
+    /// Keep cuDNN to a small convolution workspace.
+    #[arg(long, global = true)]
+    no_conv_max_workspace: bool,
+    /// Grow the GPU memory pool by exactly what is requested, not in powers of two.
+    #[arg(long, global = true)]
+    arena_exact: bool,
+    /// Put the speech model's weights outside the GPU memory pool.
+    #[arg(long, global = true)]
+    weights_outside_pool: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -337,12 +350,16 @@ fn main() -> Result<()> {
         _ => {}
     }
     let opts = ParakeetOptions {
+        encoder: cli.encoder_device.into(),
         decoder: cli.decoder_device.into(),
         tf32: !cli.no_tf32,
         conv_search: cli.conv_search.into(),
-        memory_pattern: !cli.no_memory_pattern,
+        memory_pattern: cli.memory_pattern,
         cpu_threads: cli.cpu_threads,
         cpu_spinning: !cli.no_cpu_spinning,
+        conv_max_workspace: !cli.no_conv_max_workspace,
+        arena_exact: cli.arena_exact,
+        weights_outside_pool: cli.weights_outside_pool,
         ..Default::default()
     };
     let dir = match &cli.model_dir {
