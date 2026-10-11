@@ -42,13 +42,23 @@ pub struct ParakeetOptions {
     pub tf32: bool,
     /// How cuDNN picks a convolution algorithm for each new input shape.
     pub conv_search: ConvSearch,
-    /// onnxruntime's memory-pattern planning. It plans for the last input shape only, and
-    /// every utterance has a new length.
+    /// onnxruntime's memory-pattern planning. It plans for each new input shape and keeps the
+    /// plan, and every utterance has a new length: off, the 8-bit build holds 1.3 GB over 240
+    /// utterances instead of growing to 2.3 GB, at the same speed and with the same transcripts.
     pub memory_pattern: bool,
     /// Threads for graphs on the CPU (0: onnxruntime's default, one per core).
     pub cpu_threads: usize,
     /// Let idle CPU worker threads spin-wait for the next call instead of sleeping.
     pub cpu_spinning: bool,
+    /// Let cuDNN take as much workspace as its fastest convolution wants (onnxruntime's
+    /// default); off, it picks among algorithms that fit a small workspace.
+    pub conv_max_workspace: bool,
+    /// How the GPU memory pool grows: in powers of two (onnxruntime's default) or by exactly
+    /// what is requested.
+    pub arena_exact: bool,
+    /// Put the weights in their own GPU allocations instead of the memory pool, which rounds a
+    /// block up to the next power of two.
+    pub weights_outside_pool: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,9 +75,12 @@ impl Default for ParakeetOptions {
             decoder: Device::Cpu,
             tf32: true,
             conv_search: ConvSearch::Heuristic,
-            memory_pattern: true,
+            memory_pattern: false,
             cpu_threads: 0,
             cpu_spinning: true,
+            conv_max_workspace: true,
+            arena_exact: false,
+            weights_outside_pool: false,
         }
     }
 }
@@ -347,8 +360,20 @@ fn session(path: &Path, device: Device, opts: &ParakeetOptions) -> Result<Sessio
         // The memory pool keeps onnxruntime's default growth (powers of two). Growing by exactly
         // what is requested measured worse, 3.1 GB against 2.3 GB: with a new input length on
         // every utterance, exact-size blocks fragment instead of being reused (2026-10-09).
-        let cuda = ep::CUDA::default().with_conv_algorithm_search(search).with_tf32(opts.tf32);
+        let arena = if opts.arena_exact {
+            ep::ArenaExtendStrategy::SameAsRequested
+        } else {
+            ep::ArenaExtendStrategy::NextPowerOfTwo
+        };
+        let cuda = ep::CUDA::default()
+            .with_conv_algorithm_search(search)
+            .with_tf32(opts.tf32)
+            .with_conv_max_workspace(opts.conv_max_workspace)
+            .with_arena_extend_strategy(arena);
         builder = builder.with_execution_providers([cuda.build().error_on_failure()])?;
+        if opts.weights_outside_pool {
+            builder = builder.with_config_entry("session.use_device_allocator_for_initializers", "1")?;
+        }
     } else {
         if opts.cpu_threads > 0 {
             builder = builder.with_intra_threads(opts.cpu_threads)?;

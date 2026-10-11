@@ -6,6 +6,49 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-11: Light on the GPU, and the speech model's memory
+
+**Light runs everything on the GPU** (Tai): the speech model on the CPU took 736 ms p50 a clip
+(the 8-bit encoder alone 705 ms, Ryzen 9 9900X, all cores), against about 45 ms on the GPU.
+Its transcripts were fine (1 of 200 AMI clips differs from full precision); the speed was not.
+
+**Light's cleanup model (E2B) is already lean:** 1,342 MiB of weights on the GPU (its 2,152 MiB
+of per-layer embeddings stay in system RAM), a 72 MiB cache, 122 MiB of compute buffers, about
+1.77 GB with its CUDA context.
+
+**The speech model's GPU memory was mostly the memory pool, not the weights.** Measured as the
+peak over loading plus 240 utterances (60 eval clips, the 10 longest included, up to 24.8 s, in
+4 shuffled passes), each run twice (they agree within 25 MiB):
+
+| Speech build, settings | GPU memory | Encoder p50 |
+|---|---|---|
+| float16, as it was | 2,326 MiB | 22.6 ms |
+| float16, weights outside the pool, no memory pattern | **1,960 MiB** | 22.7 ms |
+| 8-bit weights, as it was | 2,315 MiB | 28.6 ms |
+| 8-bit weights, no memory pattern | **1,295 MiB** | 26.9 ms |
+| 8-bit weights, weights outside the pool, no memory pattern | 1,410 MiB | 26.1 ms |
+| 8-bit weights, pool grown by exact sizes | 4,067 MiB | 26.9 ms |
+| 8-bit weights, cuDNN kept to a small workspace | 2,322 MiB | 27.7 ms |
+
+- **Memory-pattern planning** plans for each new input length and keeps the plan, and every
+  utterance has a new length. Off, the 8-bit build stays flat at its load size.
+- **Weights outside the pool** (`session.use_device_allocator_for_initializers`) helps float16,
+  whose 1.2 GB of weights the power-of-two pool rounds up to 2 GB; the 8-bit build does better
+  with its weights in the pool, whose spare room the activations then use.
+- **Growing the pool by exact sizes fragments** over many utterances, as on 2026-10-09.
+- **Every setting gives the same transcripts:** 240 of 240 identical to the build as it was.
+- **What is left** of the 8-bit build's 1.3 GB: 650 MB of weights, and about 450 MB of CUDA
+  context and cuDNN/cuBLAS kernels, which every CUDA process pays (lazy module loading is
+  already on; eager loading takes 2.0 GB). Running speech and cleanup in one process, with one
+  context, is the next saving.
+- **The 4-bit encoder** would save another 300 MB but costs accuracy (+0.08 WER points, worse in
+  90% of resamples), so it stays out.
+
+**Light, all on the GPU: about 3.1 GB** (1.77 cleanup + 1.30 speech). **Quality: about
+5.6 GB → 5.2 GB** with the float16 settings, for free.
+
+---
+
 ## 2026-10-11: Quality v1 (run ft6), and the dictionary
 
 Shipped as **utter-quality-v1-q4_0.gguf** (huggingface.co/ductai199x/utter). Shipped models

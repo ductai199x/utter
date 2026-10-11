@@ -94,23 +94,16 @@ type Speech = (Sender<Job>, Receiver<Done>);
 /// speech model elsewhere; or why it could not start.
 type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
 
-/// Where a tier runs the speech model: on the GPU, except where the light tier's 2.5 GB
-/// budget has no room for it.
+/// Which speech build a tier runs: Light's small GPU budget takes the 8-bit one.
 pub fn speech_for(tier: Tier) -> SpeechModel {
-    if tier == Tier::Light { SpeechModel::Cpu } else { SpeechModel::Gpu }
+    if tier == Tier::Light { SpeechModel::W8 } else { SpeechModel::Fp16 }
 }
 
 /// The runtime components a tier needs (crates/utter-runtime/components.json): onnxruntime,
-/// the CUDA runtime llama-server and the GPU speech model use, voice detection, llama-server,
-/// cuDNN when the speech model runs on the GPU, then the tier's two models.
+/// the CUDA runtime and cuDNN that llama-server and the speech model use, voice detection,
+/// llama-server, then the tier's two models.
 pub fn components_for(tier: Tier) -> Vec<&'static str> {
-    let speech = speech_for(tier);
-    let mut ids = vec!["onnxruntime-gpu", "cuda-runtime", "silero-vad", "llama-cpp"];
-    if speech == SpeechModel::Gpu {
-        ids.push("cudnn");
-    }
-    ids.extend([speech.component(), tier.component()]);
-    ids
+    vec!["onnxruntime-gpu", "cuda-runtime", "cudnn", "silero-vad", "llama-cpp", speech_for(tier).component(), tier.component()]
 }
 
 /// Loads and warms the speech model, boosting `dictionary`, on its own worker thread.
