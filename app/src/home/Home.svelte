@@ -364,6 +364,23 @@
         {#if saveError}<div class="banner" role="alert"><span>{saveError}</span></div>{/if}
 
         {#if settings && home}
+          <h2>General</h2>
+          <div class="row">
+            <div class="label">
+              <label for="login">Start with Windows</label>
+              <span class="desc">Utter starts in the tray when you sign in.</span>
+            </div>
+            <button
+              id="login"
+              class="switch"
+              role="switch"
+              aria-checked={settings.start_at_login}
+              aria-label="Start with Windows"
+              onclick={() => settings && save({ ...settings, start_at_login: !settings.start_at_login })}
+              ><span></span></button
+            >
+          </div>
+
           <h2>Dictation</h2>
           <div class="row">
             <div class="label">

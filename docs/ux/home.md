@@ -58,6 +58,11 @@ Rules the code enforces (not the UI):
 Title "Settings". Rows of label, a description in a smaller muted line, and the control on the
 right. Groups have a 13 px uppercase header.
 
+**General**
+| Setting | Control | Description |
+|---|---|---|
+| Start with Windows | switch, on | "Utter starts in the tray when you sign in." Only an installed copy registers itself; a development build never does. |
+
 **Dictation**
 | Setting | Control | Description |
 |---|---|---|
