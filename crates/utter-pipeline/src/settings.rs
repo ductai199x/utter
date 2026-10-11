@@ -23,6 +23,9 @@ dictionary = []
 # Spoken lists (\"first..., second...\", or items read one after another) become bullets.
 lists = true
 
+# Start Utter in the tray when you sign in.
+start_at_login = true
+
 # The microphone: part of its name, or \"\" for the system default.
 microphone = \"\"
 
@@ -38,6 +41,7 @@ pub const MAX_TERMS: usize = 2000;
 pub struct Settings {
     pub dictionary: Vec<String>,
     pub lists: bool,
+    pub start_at_login: bool,
     /// Part of the input device's name; empty for the system default.
     pub microphone: String,
     pub model: Model,
@@ -62,7 +66,13 @@ impl From<Model> for Tier {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { dictionary: Vec::new(), lists: true, microphone: String::new(), model: Model::Light }
+        Self {
+            dictionary: Vec::new(),
+            lists: true,
+            start_at_login: true,
+            microphone: String::new(),
+            model: Model::Light,
+        }
     }
 }
 
@@ -109,6 +119,7 @@ impl Settings {
         terms.set_trailing_comma(!self.dictionary.is_empty());
         set(&mut doc, "dictionary", toml_edit::Value::Array(terms));
         set(&mut doc, "lists", self.lists.into());
+        set(&mut doc, "start_at_login", self.start_at_login.into());
         set(&mut doc, "microphone", self.microphone.as_str().into());
         set(&mut doc, "model", (if self.model == Model::Quality { "quality" } else { "light" }).into());
         // Write then rename, so a crash never leaves half a file.
@@ -195,6 +206,7 @@ mod tests {
         let s = Settings {
             dictionary: vec!["Supabase".into(), "Nguyen".into()],
             lists: false,
+            start_at_login: false,
             microphone: "USB".into(),
             model: Model::Quality,
         };

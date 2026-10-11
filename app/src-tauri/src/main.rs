@@ -267,6 +267,7 @@ fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
                 Settings::default()
             });
             tracing::info!(terms = settings.dictionary.len(), lists = settings.lists, "settings loaded");
+            home::apply_autostart(&settings);
             let mut cfg = PipelineConfig::default();
             settings.apply(&mut cfg);
             let mut pipeline = match Pipeline::start(cfg) {

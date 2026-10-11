@@ -74,6 +74,18 @@ pub fn open_path(which: String) -> Result<(), String> {
     utter_platform::shell::open(&path).map_err(|e| e.to_string())
 }
 
+/// Keeps the sign-in registration in step with the setting. Only an installed copy registers
+/// itself: a development build (anything under a cargo `target` folder) never does.
+pub fn apply_autostart(settings: &Settings) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    if exe.components().any(|c| c.as_os_str() == "target") {
+        return;
+    }
+    if let Err(e) = utter_platform::autostart::set(settings.start_at_login, &exe) {
+        tracing::warn!("start at sign-in: {e}");
+    }
+}
+
 /// Shows the Home window, focused.
 pub fn show(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("home") {
@@ -98,8 +110,11 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
                 }
                 seen = modified;
                 let s = state();
-                if let (Some(settings), Some(tx)) = (&s.settings, link.0.lock().expect("pipeline link").as_ref()) {
-                    let _ = tx.send(settings.clone());
+                if let Some(settings) = &s.settings {
+                    apply_autostart(settings);
+                    if let Some(tx) = link.0.lock().expect("pipeline link").as_ref() {
+                        let _ = tx.send(settings.clone());
+                    }
                 }
                 if let Some(e) = &s.error {
                     tracing::warn!("settings: {e}");
