@@ -5,8 +5,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -15,6 +15,8 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use utter_pipeline::{Event, Pipeline, PipelineConfig, Settings};
 use utter_platform::overlay;
+
+mod home;
 
 /// The Bar window's size in logical pixels (tauri.conf.json): room for the largest pill plus
 /// its shadow.
@@ -62,6 +64,18 @@ struct Bar {
     window: WebviewWindow,
     generation: Arc<AtomicU64>,
     listening: Arc<AtomicBool>,
+    /// The microphone's level, for the waveform; replaced when the microphone changes.
+    meter: Arc<Mutex<Option<utter_audio::LevelMeter>>>,
+}
+
+/// What the Home page shows about a settings change taking effect (docs/ux/home.md).
+#[derive(Clone, Serialize)]
+struct Applied {
+    what: &'static str,
+    /// "loading", "ok" or "error".
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 impl Bar {
@@ -70,7 +84,12 @@ impl Bar {
             overlay::make_overlay(hwnd.0 as isize);
         }
         let _ = window.set_ignore_cursor_events(true);
-        Self { window, generation: Arc::new(AtomicU64::new(0)), listening: Arc::new(AtomicBool::new(false)) }
+        Self {
+            window,
+            generation: Arc::new(AtomicU64::new(0)),
+            listening: Arc::new(AtomicBool::new(false)),
+            meter: Arc::new(Mutex::new(None)),
+        }
     }
 
     fn handle(&self) -> Option<isize> {
@@ -135,6 +154,21 @@ impl Bar {
                 self.emit_state(BarState::new("cancelled"));
                 self.hide_after(EXIT);
             }
+            Event::Applied { what, error } => {
+                if let Some(e) = &error {
+                    tracing::warn!("{what} not applied: {e}");
+                }
+                let status = if error.is_some() { "error" } else { "ok" };
+                let _ = self.window.emit_to("home", "home-applied", Applied { what, status, error });
+            }
+            Event::ModelLoading => {
+                let _ = self.window.emit_to(
+                    "home",
+                    "home-applied",
+                    Applied { what: "model", status: "loading", error: None },
+                );
+            }
+            Event::Microphone(meter) => *self.meter.lock().expect("meter lock") = Some(meter),
         }
     }
 
@@ -187,14 +221,15 @@ fn insert_message(error: &str) -> String {
 }
 
 /// Feeds the microphone level to the Bar while it is listening.
-fn level_feed(bar: Bar, meter: utter_audio::LevelMeter) {
+fn level_feed(bar: Bar) {
     std::thread::Builder::new()
         .name("utter-levels".into())
         .spawn(move || {
             loop {
                 std::thread::sleep(LEVEL_EVERY);
                 if bar.listening.load(Ordering::Relaxed) {
-                    let _ = bar.window.emit_to(bar.window.label(), "bar:levels", [meter.level()]);
+                    let level = bar.meter.lock().expect("meter lock").as_ref().map_or(0.0, |m| m.level());
+                    let _ = bar.window.emit_to(bar.window.label(), "bar:levels", [level]);
                 }
             }
         })
@@ -202,20 +237,19 @@ fn level_feed(bar: Bar, meter: utter_audio::LevelMeter) {
 }
 
 /// Loads the pipeline and runs dictations for as long as the app lives.
-fn run_pipeline(app: AppHandle, bar: Bar) {
+fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
     std::thread::Builder::new()
         .name("utter-pipeline".into())
         .spawn(move || {
             let start = std::time::Instant::now();
             let path = Settings::path();
-            let settings = match Settings::load_or_create(&path) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!("settings: {e}");
-                    set_tray_status(&app, &format!("Utter: settings.toml has an error ({e})"));
-                    return;
-                }
-            };
+            // A file with an error: dictation starts on the defaults, and Home opens on its
+            // banner so the error gets fixed (docs/ux/home.md).
+            let settings = Settings::load_or_create(&path).unwrap_or_else(|e| {
+                tracing::error!("settings: {e}");
+                home::show(&app);
+                Settings::default()
+            });
             tracing::info!(terms = settings.dictionary.len(), lists = settings.lists, "settings loaded");
             let mut cfg = PipelineConfig::default();
             settings.apply(&mut cfg);
@@ -229,7 +263,9 @@ fn run_pipeline(app: AppHandle, bar: Bar) {
             };
             tracing::info!("ready in {:.1} s", start.elapsed().as_secs_f64());
             set_tray_status(&app, "Utter: hold Right Ctrl to dictate");
-            level_feed(bar.clone(), pipeline.microphone().level_meter());
+            *bar.meter.lock().expect("meter lock") = Some(pipeline.microphone().level_meter());
+            level_feed(bar.clone());
+            *link.0.lock().expect("pipeline link") = Some(pipeline.settings_sender());
             if let Err(e) = pipeline.run(|event| bar.on_event(event)) {
                 tracing::error!("dictation stopped: {e}");
                 set_tray_status(&app, &format!("Utter: stopped ({e})"));
@@ -247,39 +283,38 @@ fn set_tray_status(app: &AppHandle, text: &str) {
 fn main() {
     tracing_subscriber_init();
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        // Launching Utter again while it runs opens the Home window.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| home::show(app)))
+        .invoke_handler(tauri::generate_handler![home::home_state, home::save_settings, home::open_path])
+        .on_window_event(|window, event| {
+            // Closing Home hides it; Utter keeps running in the tray.
+            if window.label() == "home"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
-            let settings = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
-            let restart = MenuItem::with_id(app, "restart", "Restart (applies settings)", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Utter", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Utter", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&settings, &restart, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("an app icon"))
                 .tooltip("Utter: loading...")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "settings" => {
-                        // The pipeline writes the file when it starts; this covers a click before
-                        // that. A file with an error opens all the same, to be fixed.
-                        let path = Settings::path();
-                        if !path.exists()
-                            && let Err(e) = Settings::load_or_create(&path)
-                        {
-                            tracing::error!("write settings: {e}");
-                        }
-                        if let Err(e) = utter_platform::shell::open(&path) {
-                            tracing::error!("open {}: {e}", path.display());
-                        }
-                    }
-                    "restart" => app.restart(),
+                    "open" => home::show(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
 
             let window = app.get_webview_window("bar").expect("the bar window (tauri.conf.json)");
-            run_pipeline(app.handle().clone(), Bar::new(window));
+            let link = home::PipelineLink::default();
+            home::watch(app.handle().clone(), link.clone());
+            run_pipeline(app.handle().clone(), Bar::new(window), link);
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -8,6 +8,7 @@
 //! clean; a newer request makes older queued ones stale, and they are skipped.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use utter_llm::cleanup;
@@ -36,9 +37,14 @@ impl Cleaned {
     }
 }
 
+/// The user's part of every prompt: their dictionary and the context lines. Settings can
+/// change it between requests.
+pub(crate) type Prompt = Arc<Mutex<(Vec<String>, cleanup::Context)>>;
+
 pub(crate) struct Cleaner {
     jobs: Sender<Job>,
     done: Receiver<Cleaned>,
+    prompt: Prompt,
 }
 
 impl Cleaner {
@@ -46,11 +52,18 @@ impl Cleaner {
     pub fn start(server: LlamaServer, system: String, dictionary: Vec<String>, ctx: cleanup::Context) -> Self {
         let (jobs, job_rx) = mpsc::channel::<Job>();
         let (done_tx, done) = mpsc::channel::<Cleaned>();
+        let prompt: Prompt = Arc::new(Mutex::new((dictionary, ctx)));
+        let shared = prompt.clone();
         std::thread::Builder::new()
             .name("utter-cleanup".into())
-            .spawn(move || worker(server, system, dictionary, ctx, job_rx, done_tx))
+            .spawn(move || worker(server, system, shared, job_rx, done_tx))
             .expect("spawn the cleanup worker");
-        Self { jobs, done }
+        Self { jobs, done, prompt }
+    }
+
+    /// From the next request on, prompts carry this dictionary and context.
+    pub fn configure(&self, dictionary: Vec<String>, ctx: cleanup::Context) {
+        *self.prompt.lock().expect("cleanup prompt lock") = (dictionary, ctx);
     }
 
     pub fn request(&self, generation: u64, raw: String) {
@@ -76,14 +89,7 @@ impl Cleaner {
     }
 }
 
-fn worker(
-    server: LlamaServer,
-    system: String,
-    dictionary: Vec<String>,
-    ctx: cleanup::Context,
-    jobs: Receiver<Job>,
-    done: Sender<Cleaned>,
-) {
+fn worker(server: LlamaServer, system: String, prompt: Prompt, jobs: Receiver<Job>, done: Sender<Cleaned>) {
     while let Ok(mut job) = jobs.recv() {
         // Only the newest request matters: the dictation has grown since the older ones.
         while let Ok(next) = jobs.try_recv() {
@@ -91,11 +97,12 @@ fn worker(
         }
         let started = Instant::now();
         let params = ChatParams { max_tokens: (job.raw.len() as u32 / 2).max(64), ..ChatParams::default() };
+        let messages = {
+            let (dictionary, ctx) = &*prompt.lock().expect("cleanup prompt lock");
+            cleanup::messages_with(&system, &job.raw, &crate::gate::relevant_terms(&job.raw, dictionary), ctx)
+        };
         let text = server
-            .chat(
-                &cleanup::messages_with(&system, &job.raw, &crate::gate::relevant_terms(&job.raw, &dictionary), &ctx),
-                &params,
-            )
+            .chat(&messages, &params)
             .map(|out| cleanup::tidy_output(&out.text))
             .map_err(|e| e.to_string())
             // A reply instead of the dictation: the transcript is typed instead (logged as an error).
