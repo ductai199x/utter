@@ -139,9 +139,14 @@ def plan(passage: str, rng: random.Random) -> tuple[str, str, list[str]]:
     span = LEVELS[level]
     n = rng.randint(*span) if span else max(3, min(10, words // 8))
     n = min(n, max(1, words // 5))
-    weights = PROFILES[profile]
+    weights = {t: w * BOOST.get(t, 1.0) for t, w in PROFILES[profile].items()}
     requested = rng.choices(list(weights), weights=list(weights.values()), k=n)
     return profile, level, requested
+
+
+# Extra weight per error type, set from the command line (spoken.py --grammar-boost) to aim a
+# training round at the types a model still misses (the grammar eval, broken down by type).
+BOOST: dict[str, float] = {}
 
 
 def grammar_script(passage: str, rng: random.Random, llm, seed: int):
