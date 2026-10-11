@@ -10,10 +10,14 @@
 mod clean;
 pub mod gate;
 pub mod log;
+pub mod settings;
+
+pub use settings::Settings;
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+use utter_asr::boost::BoostConfig;
 use utter_asr::vad::{FRAME, Segmenter, SegmenterConfig, SileroVad};
 use utter_asr::{ParakeetOptions, ParakeetTdt};
 use utter_audio::{MicConfig, Microphone};
@@ -52,7 +56,10 @@ pub enum PipelineError {
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
     pub tier: Tier,
+    /// The user's terms: boosted in recognition and given to cleanup to spell.
     pub dictionary: Vec<String>,
+    /// Spoken lists become bullets (false: "Lists: off" in every cleanup request).
+    pub lists: bool,
     pub mic: MicConfig,
     pub hotkey: HotkeyConfig,
     /// Skip the cleanup model entirely (raw transcripts).
@@ -69,6 +76,7 @@ impl Default for PipelineConfig {
         Self {
             tier: Tier::Light,
             dictionary: Vec::new(),
+            lists: true,
             mic: MicConfig::default(),
             hotkey: HotkeyConfig::default(),
             no_cleanup: false,
@@ -303,6 +311,9 @@ impl Pipeline {
     pub fn start(cfg: PipelineConfig) -> Result<Self, PipelineError> {
         let model_dir = utter_asr::installed_model_dir()?;
         let mut asr = ParakeetTdt::load(&model_dir, ParakeetOptions::default())?;
+        if !cfg.dictionary.is_empty() {
+            asr.set_phrases(&cfg.dictionary, BoostConfig::default());
+        }
         for _ in 0..3 {
             asr.transcribe(&vec![0.0f32; 16_000])?;
         }
@@ -319,12 +330,10 @@ impl Pipeline {
             let server = LlamaServer::start(&cleanup::server_options(cfg.tier)?)?;
             let system = cfg.prompt.clone().unwrap_or_else(|| cfg.tier.system_prompt().to_owned());
             // The first request after loading is slow; pay for it now.
+            let ctx = cleanup::Context { lists_off: !cfg.lists, ..cleanup::Context::default() };
             let warm = "Um, this is a warm-up, no, a second warm-up.";
-            server.chat(
-                &cleanup::messages_with(&system, warm, &cfg.dictionary, &cleanup::Context::default()),
-                &ChatParams::default(),
-            )?;
-            Some(Cleaner::start(server, system, cfg.dictionary.clone()))
+            server.chat(&cleanup::messages_with(&system, warm, &cfg.dictionary, &ctx), &ChatParams::default())?;
+            Some(Cleaner::start(server, system, cfg.dictionary.clone(), ctx))
         };
         let vad = SileroVad::load_installed()?;
         let mic = Microphone::open(&cfg.mic)?;
@@ -388,6 +397,7 @@ impl Engine {
                 serde_json::json!({ "id": self.cfg.tier.component(), "version": version(self.cfg.tier.component()) })
             },
             "dictionary": self.cfg.dictionary,
+            "lists": self.cfg.lists,
         })
     }
 

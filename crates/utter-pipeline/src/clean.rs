@@ -42,13 +42,13 @@ pub(crate) struct Cleaner {
 }
 
 impl Cleaner {
-    /// Takes over the server; `system` and `dictionary` are the prompt's fixed parts.
-    pub fn start(server: LlamaServer, system: String, dictionary: Vec<String>) -> Self {
+    /// Takes over the server; `system`, `dictionary` and `ctx` are the prompt's fixed parts.
+    pub fn start(server: LlamaServer, system: String, dictionary: Vec<String>, ctx: cleanup::Context) -> Self {
         let (jobs, job_rx) = mpsc::channel::<Job>();
         let (done_tx, done) = mpsc::channel::<Cleaned>();
         std::thread::Builder::new()
             .name("utter-cleanup".into())
-            .spawn(move || worker(server, system, dictionary, job_rx, done_tx))
+            .spawn(move || worker(server, system, dictionary, ctx, job_rx, done_tx))
             .expect("spawn the cleanup worker");
         Self { jobs, done }
     }
@@ -76,7 +76,14 @@ impl Cleaner {
     }
 }
 
-fn worker(server: LlamaServer, system: String, dictionary: Vec<String>, jobs: Receiver<Job>, done: Sender<Cleaned>) {
+fn worker(
+    server: LlamaServer,
+    system: String,
+    dictionary: Vec<String>,
+    ctx: cleanup::Context,
+    jobs: Receiver<Job>,
+    done: Sender<Cleaned>,
+) {
     while let Ok(mut job) = jobs.recv() {
         // Only the newest request matters: the dictation has grown since the older ones.
         while let Ok(next) = jobs.try_recv() {
@@ -85,7 +92,10 @@ fn worker(server: LlamaServer, system: String, dictionary: Vec<String>, jobs: Re
         let started = Instant::now();
         let params = ChatParams { max_tokens: (job.raw.len() as u32 / 2).max(64), ..ChatParams::default() };
         let text = server
-            .chat(&cleanup::messages_with(&system, &job.raw, &dictionary, &cleanup::Context::default()), &params)
+            .chat(
+                &cleanup::messages_with(&system, &job.raw, &crate::gate::relevant_terms(&job.raw, &dictionary), &ctx),
+                &params,
+            )
             .map(|out| cleanup::tidy_output(&out.text))
             .map_err(|e| e.to_string())
             // A reply instead of the dictation: the transcript is typed instead (logged as an error).

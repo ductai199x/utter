@@ -590,17 +590,22 @@ fn setup(ids: &[String]) -> Result<()> {
 }
 
 fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, device: Option<String>) -> Result<()> {
-    use utter_pipeline::{Pipeline, PipelineConfig};
+    use utter_pipeline::{Pipeline, PipelineConfig, Settings};
 
-    let dictionary: Vec<String> =
-        dictionary.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect();
-    let cfg = PipelineConfig {
+    // The app's settings, with --dictionary in place of its dictionary when given.
+    let settings = Settings::load_or_create(&Settings::path()).map_err(|e| anyhow::anyhow!(e))?;
+    let mut cfg = PipelineConfig {
         tier,
-        dictionary,
         no_cleanup,
         mic: utter_audio::MicConfig { device, ..Default::default() },
         ..Default::default()
     };
+    settings.apply(&mut cfg);
+    let dictionary: Vec<String> =
+        dictionary.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect();
+    if !dictionary.is_empty() {
+        cfg.dictionary = dictionary;
+    }
     let start = std::time::Instant::now();
     println!("Loading (speech model, cleanup model {tier:?}, microphone)...");
     let mut pipeline = Pipeline::start(cfg)?;
