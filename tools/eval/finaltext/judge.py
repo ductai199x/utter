@@ -46,7 +46,9 @@ was misheard; never judge the Heard text. First list every difference between Ty
 - "acceptable": every difference from the intended text is an equally valid choice: an optional
   comma, a semicolon or dash instead of a period between sentences, "OK" for "okay", straight or
   curly quotes, a number written in another standard way, a list marker style. Nothing a reader
-  would call wrong.
+  would call wrong. Also acceptable: a difference where Meant itself has a clear typo or grammar
+  error (real people's text sometimes does) and Typed is the correct version of exactly that
+  part, with the same meaning.
 - "needs_edit": at least one difference is wrong: a missing, extra or changed word, a misspelled
   name, a grammar error, punctuation that changes or garbles the reading, a correction applied
   wrongly or left in, a list that should be a list or should not be.
