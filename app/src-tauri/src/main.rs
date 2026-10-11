@@ -339,6 +339,9 @@ fn set_tray_status(app: &AppHandle, text: &str) {
 
 fn main() {
     tracing_subscriber_init();
+    if let Some(old) = utter_core::move_legacy_data() {
+        tracing::info!("moved {} to {}", old.display(), utter_core::data_dir().display());
+    }
     tauri::Builder::default()
         // Launching Utter again while it runs opens the Home window.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| home::show(app)))
