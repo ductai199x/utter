@@ -87,7 +87,15 @@ fn worker(server: LlamaServer, system: String, dictionary: Vec<String>, jobs: Re
         let text = server
             .chat(&cleanup::messages_with(&system, &job.raw, &dictionary, &cleanup::Context::default()), &params)
             .map(|out| cleanup::tidy_output(&out.text))
-            .map_err(|e| e.to_string());
+            .map_err(|e| e.to_string())
+            // A reply instead of the dictation: the transcript is typed instead (logged as an error).
+            .and_then(|text| {
+                if cleanup::strayed(&job.raw, &text) {
+                    Err(format!("output strayed from the dictation: {text}"))
+                } else {
+                    Ok(text)
+                }
+            });
         let cleaned =
             Cleaned { generation: job.generation, raw: job.raw, text, ms: started.elapsed().as_secs_f64() * 1e3 };
         if done.send(cleaned).is_err() {
