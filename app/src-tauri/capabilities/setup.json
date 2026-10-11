@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "setup",
+  "description": "First run listens to setup events, calls the app's own commands (setup.rs), and closes its window to quit.",
+  "windows": ["setup"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-close"]
+}

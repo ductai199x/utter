@@ -1,0 +1,110 @@
+/* Base styles for Utter's windows (Home, first run). Tokens come from tokens.css. The Bar has
+   its own: it floats over other apps and is always dark. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--home-bg);
+  color: var(--home-text);
+  font: 14px/20px var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+#app {
+  height: 100%;
+}
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+input,
+textarea {
+  user-select: text;
+}
+:focus-visible {
+  outline: none;
+  box-shadow: var(--home-focus);
+}
+button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--home-border);
+  border-radius: 6px;
+  background: var(--home-surface);
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease-out),
+    opacity 120ms var(--ease-out);
+}
+button:hover:not(:disabled) {
+  background: var(--home-hover);
+}
+button:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.primary {
+  height: 36px;
+  min-width: 112px;
+  border-color: var(--home-accent);
+  background: var(--home-accent);
+  color: var(--home-accent-text);
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) {
+  background: var(--home-accent);
+  filter: brightness(1.08);
+}
+button.link {
+  height: auto;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--home-accent);
+  font-weight: 600;
+}
+button.link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+button.text {
+  border-color: transparent;
+  background: none;
+  color: var(--home-muted);
+}
+select,
+input[type='text'],
+input:not([type]),
+textarea {
+  box-sizing: border-box;
+  border: 1px solid var(--home-border);
+  border-radius: 6px;
+  background: var(--home-surface);
+}
+select,
+input[type='text'],
+input:not([type]) {
+  height: 36px;
+  padding: 0 12px;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--home-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

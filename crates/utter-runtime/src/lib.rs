@@ -433,6 +433,14 @@ mod tests {
         }
     }
 
+    #[test]
+    #[ignore = "needs an NVIDIA GPU"]
+    fn the_gpu_is_probed() {
+        let g = gpu::probe().unwrap();
+        println!("{g:?}");
+        assert!(g.memory_bytes > 1 << 30 && g.driver_cuda > 10_000 && !g.name.is_empty());
+    }
+
     fn all() -> Vec<Component> {
         let m: Manifest = serde_json::from_str(include_str!("../components.json")).unwrap();
         m.components
