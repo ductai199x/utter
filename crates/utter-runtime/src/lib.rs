@@ -178,9 +178,8 @@ pub fn install(c: &Component, mut progress: impl FnMut(Progress)) -> Result<(), 
     }
     let final_dir = c.dir();
     let staging = staging_dir(&final_dir);
-    if staging.exists() {
-        fs::remove_dir_all(&staging).map_err(io_err(&staging))?;
-    }
+    // A staging folder left by an interrupted install is kept: its partial downloads resume.
+    // Every file is verified by size and SHA-256 before it counts.
     fs::create_dir_all(&staging).map_err(io_err(&staging))?;
     let total = c.download_size();
 
@@ -209,8 +208,11 @@ pub fn install(c: &Component, mut progress: impl FnMut(Progress)) -> Result<(), 
                     });
                 }
                 let path = staging.join(&f.name);
-                download(&f.file, &path, done, total, &mut progress)?;
-                verify(&c.id, &f.file, &path, &mut progress)?;
+                // A file finished before an interruption is kept if it still verifies.
+                if !(path.is_file() && verify(&c.id, &f.file, &path, &mut progress).is_ok()) {
+                    download(&f.file, &path, done, total, &mut progress)?;
+                    verify(&c.id, &f.file, &path, &mut progress)?;
+                }
                 done += f.file.size;
                 names.push(f.name.clone());
             }
@@ -240,7 +242,9 @@ fn staging_dir(final_dir: &Path) -> PathBuf {
 }
 
 /// Downloads `file` to `dest` (through `<dest>.part`). `offset` and `total` place this file's
-/// bytes within the whole component, for progress.
+/// bytes within the whole component, for progress. A `.part` left by an interrupted download
+/// is continued with a range request; a server that ignores the range sends the whole file,
+/// and it starts over.
 fn download(
     file: &RemoteFile,
     dest: &Path,
@@ -250,12 +254,23 @@ fn download(
 ) -> Result<(), RuntimeError> {
     let part = staging_dir(dest);
     let fail = |message: String| RuntimeError::Download { url: file.url.clone(), message };
-    let response = ureq::get(&file.url).call().map_err(|e| fail(e.to_string()))?;
+    let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+    let have = if have < file.size { have } else { 0 };
+    let mut request = ureq::get(&file.url);
+    if have > 0 {
+        request = request.header("Range", &format!("bytes={have}-"));
+    }
+    let response = request.call().map_err(|e| fail(e.to_string()))?;
+    let resumed = have > 0 && response.status() == 206;
     let mut body = response.into_body().into_reader();
-    let out_file = File::create(&part).map_err(io_err(&part))?;
+    let out_file = if resumed {
+        fs::OpenOptions::new().append(true).open(&part).map_err(io_err(&part))?
+    } else {
+        File::create(&part).map_err(io_err(&part))?
+    };
     let mut out = BufWriter::with_capacity(1 << 20, out_file);
     let mut buf = vec![0u8; 1 << 20];
-    let mut done = 0u64;
+    let mut done = if resumed { have } else { 0 };
     loop {
         let n = body.read(&mut buf).map_err(|e| fail(e.to_string()))?;
         if n == 0 {
@@ -351,6 +366,72 @@ fn extract_archive(id: &str, patterns: &[String], archive: &Path, dest: &Path) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serves `body` on localhost, honoring "Range: bytes=N-" when `ranges`; returns the URL
+    /// and the Range headers it saw.
+    fn serve(body: Vec<u8>, ranges: bool) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::BufRead;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/file.bin", listener.local_addr().unwrap());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut reader = io::BufReader::new(stream.try_clone().unwrap());
+                let mut from = 0usize;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line.trim().is_empty() {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
+                        log.lock().unwrap().push(line.trim().to_owned());
+                        if ranges {
+                            from = v.trim().trim_end_matches('-').parse().unwrap();
+                        }
+                    }
+                }
+                let part = &body[from..];
+                let status = if from > 0 { "206 Partial Content" } else { "200 OK" };
+                let head = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", part.len());
+                stream.write_all(head.as_bytes()).unwrap();
+                stream.write_all(part).unwrap();
+            }
+        });
+        (url, seen)
+    }
+
+    fn remote(url: &str, body: &[u8]) -> RemoteFile {
+        RemoteFile { url: url.to_owned(), sha256: hex::encode(Sha256::digest(body)), size: body.len() as u64 }
+    }
+
+    #[test]
+    fn an_interrupted_download_resumes_where_it_stopped() {
+        let body: Vec<u8> = (0..100_000u32).map(|i| (i % 251) as u8).collect();
+        for ranges in [true, false] {
+            let (url, seen) = serve(body.clone(), ranges);
+            let dir = std::env::temp_dir().join(format!("utter-resume-{}-{ranges}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let dest = dir.join("file.bin");
+            let _ = fs::remove_file(&dest);
+            fs::write(staging_dir(&dest), &body[..40_000]).unwrap();
+            let file = remote(&url, &body);
+            let mut last = 0;
+            download(&file, &dest, 0, file.size, &mut |p| {
+                if let Progress::Downloading { done, .. } = p {
+                    last = done;
+                }
+            })
+            .unwrap();
+            verify("test", &file, &dest, &mut |_| {}).unwrap();
+            let seen: Vec<String> = seen.lock().unwrap().iter().map(|h| h.to_ascii_lowercase()).collect();
+            assert_eq!(seen, ["range: bytes=40000-"]);
+            assert_eq!(last, body.len() as u64, "progress counts what was there");
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
 
     fn all() -> Vec<Component> {
         let m: Manifest = serde_json::from_str(include_str!("../components.json")).unwrap();
