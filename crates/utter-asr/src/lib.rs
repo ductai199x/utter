@@ -34,30 +34,35 @@ pub enum AsrError {
 /// The runtime component holding the English speech model (crates/utter-runtime/components.json).
 pub const MODEL_COMPONENT: &str = "parakeet-ultra-onnx-fp16";
 
-/// The speech model's two builds: the same weights, run where the tier has room for them.
+/// The speech model's two builds, both on the GPU (2026-10-11: everything on the GPU),
+/// with the same transcripts on the eval clips. GPU memory after load and 240 utterances, the
+/// 10 longest eval clips among them, with each build's settings (docs/eval-results.md):
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpeechModel {
-    /// The encoder in float16 on the GPU: about 2.3 GB of GPU memory, 35-55 ms a clip.
+    /// The encoder in float16: about 2.0 GB, 21-23 ms of encoder a clip. Quality's.
     #[default]
-    Gpu,
-    /// The encoder's weights in 8 bits on the CPU (export/quantize_encoder.py): no GPU memory,
-    /// for the light tier's 2.5 GB budget, at a few hundred milliseconds more a clip.
-    Cpu,
+    Fp16,
+    /// The encoder's weights in 8 bits, float16 activations (export/quantize_encoder.py): about
+    /// 1.3 GB, some 5 ms slower. Light's, for its small GPU budget.
+    W8,
 }
 
 impl SpeechModel {
     pub fn component(self) -> &'static str {
         match self {
-            SpeechModel::Gpu => MODEL_COMPONENT,
-            SpeechModel::Cpu => "parakeet-ultra-onnx-w8",
+            SpeechModel::Fp16 => MODEL_COMPONENT,
+            SpeechModel::W8 => "parakeet-ultra-onnx-w8",
         }
     }
 
-    /// How this build runs: where the encoder goes.
+    /// How this build runs, memory-pattern planning off for both ([`ParakeetOptions`]). The
+    /// float16 weights go outside the memory pool, which would round their 1.2 GB up to 2 GB;
+    /// the 8-bit ones stay in it, where the rounding leaves room the activations then use.
     pub fn options(self) -> ParakeetOptions {
+        let base = ParakeetOptions::default();
         match self {
-            SpeechModel::Gpu => ParakeetOptions::default(),
-            SpeechModel::Cpu => ParakeetOptions { encoder: Device::Cpu, ..ParakeetOptions::default() },
+            SpeechModel::Fp16 => ParakeetOptions { weights_outside_pool: true, ..base },
+            SpeechModel::W8 => base,
         }
     }
 
@@ -70,7 +75,7 @@ impl SpeechModel {
 
 /// The installed GPU speech model's folder, or an error naming how to install it.
 pub fn installed_model_dir() -> Result<PathBuf, AsrError> {
-    SpeechModel::Gpu.installed_dir()
+    SpeechModel::Fp16.installed_dir()
 }
 
 impl AsrError {
