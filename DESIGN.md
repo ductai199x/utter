@@ -225,9 +225,10 @@ On first run, models are downloaded with size and SHA-256 checks, the same as Si
 VRAM use is shown in Settings.
 
 Off-the-shelf models come first (Tai, 2026-10-09). A fine-tuned cleanup model is considered
-only when the eval set shows where they fail. It did (2026-10-10): the light tier is now Gemma 4
-E4B fine-tuned for cleanup (huggingface.co/ductai199x/utter-cleanup-e4b), better than the
-prompted 26B on every final-text eval; Parakeet is never fine-tuned.
+only when the eval set shows where they fail. It did (2026-10-10): the Quality model is now Gemma 4
+E4B fine-tuned for cleanup, better than the prompted 26B on every final-text eval, and Light is
+E2B fine-tuned the same way (both at huggingface.co/ductai199x/utter, named
+utter-<tier>-v<N>-<quantization>.gguf); Parakeet is never fine-tuned.
 
 ---
 

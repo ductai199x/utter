@@ -21,8 +21,7 @@ pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
 /// between two (Tai, 2026-10-11): Quality, the bigger model, and Light, the smaller one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tier {
-    /// Gemma 4 E4B fine-tuned for cleanup (huggingface.co/ductai199x/utter-cleanup-e4b, a 5 GB
-    /// file): about 3.3 GB of GPU memory (its per-layer embeddings stay in system RAM), and
+    /// Gemma 4 E4B fine-tuned for cleanup (huggingface.co/ductai199x/utter, a 5 GB file): about 3.3 GB of GPU memory (its per-layer embeddings stay in system RAM), and
     /// better than the prompted 26B on every final-text eval (2026-10-10). The default: with the
     /// speech model, Utter takes about 5.6 GB of GPU memory in all (Tai, 2026-10-09).
     #[default]
@@ -40,17 +39,17 @@ impl Tier {
     /// The runtime component holding the model (crates/utter-runtime/components.json).
     pub fn component(self) -> &'static str {
         match self {
-            Tier::Quality => "utter-cleanup-e4b",
+            Tier::Quality => "utter-quality",
             Tier::Reference => "gemma4-26b-a4b-qat",
-            Tier::Light => "utter-cleanup-e2b",
+            Tier::Light => "utter-light",
         }
     }
 
     pub fn model_file(self) -> &'static str {
         match self {
-            Tier::Quality => "utter-cleanup-e4b-ft5.q4_0.gguf",
+            Tier::Quality => "utter-quality-v1-q4_0.gguf",
             Tier::Reference => "gemma-4-26B_q4_0-it.gguf",
-            Tier::Light => "utter-cleanup-e2b.q4_0.gguf",
+            Tier::Light => "utter-light-v1-q4_0.gguf",
         }
     }
 
