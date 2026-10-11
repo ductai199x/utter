@@ -109,6 +109,10 @@ def main(
     seed: int = 0,
     device: str = "cuda",
     max_steps: int = -1,
+    init_adapter: Path | None = typer.Option(
+        None,
+        help="Continue training this LoRA adapter (its rank and targets) instead of a new one.",
+    ),
     merge: bool = typer.Option(
         True,
         help="Also write the merged model (for export_gguf.py); off when only the adapter "
@@ -116,7 +120,7 @@ def main(
     ),
 ) -> None:
     import torch
-    from peft import LoraConfig, get_peft_model
+    from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import AutoModelForImageTextToText, AutoTokenizer, Trainer, TrainingArguments
 
     tokenizer = AutoTokenizer.from_pretrained(BASE, revision=BASE_REVISION)
@@ -135,10 +139,17 @@ def main(
     )
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
-    lora = LoraConfig(
-        r=rank, lora_alpha=alpha, lora_dropout=0.05, target_modules=TARGETS, task_type="CAUSAL_LM"
-    )
-    model = get_peft_model(model, lora)
+    if init_adapter:
+        model = PeftModel.from_pretrained(model, init_adapter, is_trainable=True)
+    else:
+        lora = LoraConfig(
+            r=rank,
+            lora_alpha=alpha,
+            lora_dropout=0.05,
+            target_modules=TARGETS,
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
     args = TrainingArguments(
@@ -191,6 +202,7 @@ def main(
         "grad_accum": grad_accum,
         "max_length": max_length,
         "seed": seed,
+        "init_adapter": str(init_adapter) if init_adapter else None,
         "processes": trainer.args.world_size,
     }
     (out / "train_args.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
