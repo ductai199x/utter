@@ -36,6 +36,8 @@ from eval.finaltext.numbers import spoken_digits
         ("sixteen point oh four", "16.04"),
         ("zero point twenty five", "0.25"),
         ("twenty point five", "20.5"),
+        ("nine a m on friday", "9:00 AM on Friday"),
+        ("at two thirty", "at 2:30"),
         ("emperor theodosius the second", "Emperor Theodosius II"),
         ("world war two", "World War II"),
         ("louis the fourteenth", "Louis XIV"),
