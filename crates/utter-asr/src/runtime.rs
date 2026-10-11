@@ -4,8 +4,9 @@
 //! or from the system beyond the GPU driver: verified by transcribing with a PATH holding only
 //! Windows' own folders.
 //!
-//! `UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build; the
-//! CUDA libraries still come from the components.
+//! `UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build or for
+//! platforms without pinned components yet (Linux, e.g. a GPU cluster): that build then finds its CUDA
+//! libraries itself (`LD_LIBRARY_PATH`), and no component is required.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -30,18 +31,21 @@ pub fn init() -> Result<PathBuf, AsrError> {
 }
 
 fn init_inner() -> Result<PathBuf, AsrError> {
-    let lib = match std::env::var_os("UTTER_ORT_DYLIB") {
-        Some(path) => PathBuf::from(path),
+    let custom = std::env::var_os("UTTER_ORT_DYLIB").map(PathBuf::from);
+    let lib = match &custom {
+        Some(path) => path.clone(),
         None => component_dir("onnxruntime-gpu")?.join(ORT_LIB),
     };
     if !lib.is_file() {
         return Err(AsrError::Runtime(format!("{} does not exist", lib.display())));
     }
-    let mut dirs = Vec::new();
-    for id in CUDA_COMPONENTS {
-        dirs.push(component_dir(id)?);
+    if custom.is_none() {
+        let mut dirs = Vec::new();
+        for id in CUDA_COMPONENTS {
+            dirs.push(component_dir(id)?);
+        }
+        prepend_library_path(&dirs)?;
     }
-    prepend_library_path(&dirs)?;
     let builder = ort::init_from(&lib).map_err(|e| AsrError::Runtime(format!("{}: {e}", lib.display())))?;
     builder.with_name("utter").commit();
     tracing::info!(lib = %lib.display(), "onnxruntime loaded");
