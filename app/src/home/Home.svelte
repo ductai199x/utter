@@ -43,6 +43,10 @@
   let fileInput = $state<HTMLInputElement>();
 
   const terms = $derived(settings?.dictionary ?? []);
+  // Why the quality model cannot be chosen, if it cannot.
+  const qualityBlocked = $derived(
+    !home ? '' : !home.qualityFits ? 'needs a graphics card with 20 GB of memory.' : !home.qualityInstalled ? 'not installed.' : '',
+  );
   const filter = $derived(draft.includes(',') || draft.includes('\n') ? '' : draft.trim().toLowerCase());
   const shown = $derived(
     terms.map((t, i) => ({ t, i })).filter(({ t }) => !filter || t.toLowerCase().includes(filter)),
@@ -439,13 +443,13 @@
               <button
                 role="radio"
                 aria-checked={settings.model === 'quality'}
-                disabled={!home.qualityInstalled}
-                title={home.qualityInstalled ? undefined : 'Not installed'}
+                disabled={!!qualityBlocked}
+                title={qualityBlocked || undefined}
                 onclick={() => settings && save({ ...settings, model: 'quality' })}>Quality</button
               >
             </div>
           </div>
-          {#if !home.qualityInstalled}<p class="hint">Quality: not installed.</p>{/if}
+          {#if qualityBlocked && settings.model !== 'quality'}<p class="hint">Quality: {qualityBlocked}</p>{/if}
 
           <h2>Shortcut</h2>
           <div class="row">
