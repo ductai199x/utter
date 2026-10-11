@@ -1,60 +1,83 @@
 <script lang="ts">
-  // First run (docs/ux/first-run.md): system check, microphone, download, a first dictation.
-  // The core does the work and reports; this page shows it and sends intent.
+  // The setup window (docs/ux/first-run.md). One page, four modes from the URL: first run
+  // (check, microphone, download, try it), update and repair (check, download, then it closes
+  // itself), and problem (why dictation could not start, and what to do). The core does the
+  // work and reports; this page shows it and sends intent.
   import { onDestroy, onMount, tick } from 'svelte';
   import { cubicOut } from 'svelte/easing';
   import { fade, fly } from 'svelte/transition';
   import * as core from './core';
-  import type { Checks, Progress } from './core';
+  import type { Checks, Problem, Progress } from './core';
   import Logo from '../lib/Logo.svelte';
   import { Waveform } from '../lib/waveform';
 
-  const STEPS = 4;
+  type View = 'check' | 'mic' | 'download' | 'try' | 'problem' | 'done';
   const SENTENCE = "Hi team, the meeting moved to three, no, four o'clock. Bring the slides.";
 
+  const mode = core.mode();
+  const flow: View[] = mode === 'first' ? ['check', 'mic', 'download', 'try'] : ['check', 'download'];
   let step = $state(0);
-  // +1 forward, -1 back: which side the next step slides in from.
+  // The problem and done screens stand outside the steps.
+  let special = $state<'problem' | 'done' | null>(mode === 'problem' ? 'problem' : null);
+  const view = $derived<View>(special ?? flow[step]!);
+  // +1 forward, -1 back: which side the next view slides in from.
   let dir = $state(1);
   let primary = $state<HTMLButtonElement>();
 
-  // Step 1.
+  // Check.
   let checks = $state<Checks | null>(null);
   const allOk = $derived(checks !== null && checks.checks.every((c) => c.ok));
+  const checkTitle =
+    mode === 'update'
+      ? 'Utter needs to download an update'
+      : mode === 'repair'
+        ? "Some of Utter's files are missing or damaged"
+        : 'Welcome to Utter';
 
-  // Step 2.
+  // Microphone.
   let mics = $state<string[]>([]);
   let device = $state('');
   let micError = $state('');
   const wave = new Waveform({ bars: 64, barW: 3, gap: 3, min: 3, max: 40 }, 90);
   let meter = $state<HTMLCanvasElement>();
 
-  // Step 3.
+  // Download.
   let progress = $state<Progress | null>(null);
   let started = false;
+  let repairing = $state(false);
   let samples: { t: number; done: number }[] = [];
   let eta = $state('');
 
-  // Step 4.
+  // Try it.
   let typed = $state('');
   let box = $state<HTMLTextAreaElement>();
   const arrived = $derived(typed.trim().length > 0);
   // The sample has a self-correction in it; when cleanup applied it, say so.
   const corrected = $derived(/\bfour\b/i.test(typed) && !/\bthree\b/i.test(typed));
 
+  // Problem.
+  let problem = $state<Problem | null>(null);
+  let starting = $state(false);
+  let details = $state(false);
+
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const slide = (node: Element) => fly(node, { x: reduced ? 0 : 8 * dir, duration: 120, easing: cubicOut });
   const leave = (node: Element) => fade(node, { duration: reduced ? 0 : 120 });
 
+  function focusMain() {
+    // The main action takes the focus; on Try it, the text box does.
+    void tick().then(() => setTimeout(() => (view === 'try' ? box : primary)?.focus(), 130));
+  }
+
   async function go(next: number) {
     dir = next > step ? 1 : -1;
-    if (step === 1 && next !== 1) await core.micStop();
+    if (flow[step] === 'mic' && flow[next] !== 'mic') await core.micStop();
     step = next;
-    if (next === 1) void openMic();
-    if (next === 2 && !started) void startDownload();
-    await tick();
-    // The main action takes the focus; on the last step, the text box does.
-    setTimeout(() => (step === 3 ? box : primary)?.focus(), 130);
+    if (flow[next] === 'mic') void openMic();
+    if (flow[next] === 'download' && !started) void startDownload();
+    focusMain();
   }
+  const next = () => go(step + 1);
 
   async function runChecks() {
     checks = null;
@@ -85,12 +108,11 @@
   function frame(now: number) {
     const dt = Math.min(50, now - lastFrame);
     lastFrame = now;
-    if (meter) wave.draw(meter, accent, dt, step === 1);
+    if (meter) wave.draw(meter, accent, dt, view === 'mic');
     raf = requestAnimationFrame(frame);
   }
 
-  async function startDownload() {
-    started = true;
+  function resetProgress() {
     samples = [];
     eta = '';
     // A retry resumes: the bar stays where it was until the core reports.
@@ -100,10 +122,26 @@
       stage: 'downloading',
       label: progress?.label ?? '',
     };
+  }
+
+  async function startDownload() {
+    started = true;
+    resetProgress();
     await core.download();
   }
 
   function onProgress(p: Progress) {
+    if (p.stage === 'start-error') {
+      // Wherever it happens, a failed start shows the problem screen.
+      problem = p.problem ?? null;
+      starting = false;
+      started = false;
+      dir = 1;
+      special = 'problem';
+      focusMain();
+      return;
+    }
+    // Ready carries no byte counts: the bar stays full.
     progress = p.stage === 'ready' ? { ...p, done: progress?.total ?? 0, total: progress?.total ?? 0 } : p;
     if (p.stage === 'downloading') {
       const now = performance.now();
@@ -119,9 +157,34 @@
       }
     } else eta = '';
     if (p.stage === 'error') started = false;
-    if (p.stage === 'ready') setTimeout(() => step === 2 && go(3), 500);
+    if (p.stage === 'ready') {
+      starting = false;
+      if (mode === 'first' && !repairing) setTimeout(() => view === 'download' && go(flow.indexOf('try')), 500);
+      else {
+        // Update, repair or a retry: nothing more to ask. Say so briefly, then get out of the way.
+        dir = 1;
+        special = 'done';
+        setTimeout(() => void core.finish(), 1500);
+      }
+    }
   }
 
+  function retry() {
+    starting = true;
+    void core.retry();
+  }
+
+  function repair() {
+    repairing = true;
+    special = null;
+    step = flow.indexOf('download');
+    started = true;
+    progress = null;
+    resetProgress();
+    void core.repair();
+  }
+
+  const failed = $derived(progress?.stage === 'error');
   const gb = (b: number) => (b / 1e9).toFixed(1);
   const pct = $derived(progress && progress.total > 0 ? Math.min(100, (progress.done / progress.total) * 100) : 0);
   const stageLine = $derived.by(() => {
@@ -139,6 +202,9 @@
         return '';
     }
   });
+  const downloadTitle = $derived(
+    repairing ? 'Repairing Utter' : mode === 'first' ? 'Downloading the models' : 'Downloading the update',
+  );
 
   const CHECK_LABELS: Record<string, string> = {
     gpu: 'Graphics card',
@@ -154,11 +220,12 @@
   }
 
   onMount(() => {
-    void runChecks();
-    void core.microphones().then((m) => (mics = m));
+    if (mode === 'problem') void core.lastProblem().then((p) => (problem = p));
+    else void runChecks();
+    if (mode === 'first') void core.microphones().then((m) => (mics = m));
     const offs = [core.onLevel((l) => wave.push(l)), core.onProgress(onProgress)];
     raf = requestAnimationFrame(frame);
-    void tick().then(() => primary?.focus());
+    focusMain();
     return () => {
       cancelAnimationFrame(raf);
       offs.forEach((p) => void p.then((off) => off()));
@@ -170,21 +237,27 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="frame">
-  <div class="dots" aria-label="Step {step + 1} of {STEPS}" role="img">
-    {#each Array(STEPS) as _, i (i)}
+  <div class="dots" class:hidden={special !== null} aria-label="Step {step + 1} of {flow.length}" role="img">
+    {#each flow as _, i (i)}
       <span class:done={i < step} class:current={i === step}></span>
     {/each}
   </div>
 
   <div class="stage">
-    {#key step}
+    {#key view}
       <section in:slide out:leave>
-        {#if step === 0}
+        {#if view === 'check'}
           <div class="logo"><Logo size={36} /></div>
-          <h1>Welcome to Utter</h1>
+          <h1>{checkTitle}</h1>
           <p class="lede">
-            Hold a key, speak, and clean text appears where you type. Everything runs on this computer; nothing you
-            say leaves it.
+            {#if mode === 'first'}
+              Hold a key, speak, and clean text appears where you type. Everything runs on this computer; nothing you
+              say leaves it.
+            {:else if checks}
+              {gb(checks.downloadBytes)} GB to download. Dictation starts again as soon as it is done.
+            {:else}
+              Checking this computer...
+            {/if}
           </p>
           <ul class="checks">
             {#each checks?.checks ?? [{ id: 'gpu' }, { id: 'memory' }, { id: 'driver' }, { id: 'disk' }] as c (c.id)}
@@ -210,7 +283,7 @@
               Utter needs an NVIDIA graphics card with 8 GB of memory or more. Support for other cards is planned.
             </p>
           {/if}
-        {:else if step === 1}
+        {:else if view === 'mic'}
           <h1>Your microphone</h1>
           <p class="lede">Say something. The bars should move.</p>
           <select bind:value={device} onchange={openMic} aria-label="Microphone">
@@ -221,11 +294,15 @@
           <div class="meter" aria-hidden="true">
             <canvas bind:this={meter} style:width="{wave.width}px" style:height="40px"></canvas>
           </div>
-        {:else if step === 2}
-          <h1>Downloading the models</h1>
+        {:else if view === 'download'}
+          <h1>{downloadTitle}</h1>
           <p class="lede">
-            About {gb(checks?.downloadBytes ?? 0)} GB. You can use your computer meanwhile; Utter will let you know when
-            it is ready.
+            {#if repairing}
+              Checking every file and downloading again the ones that are damaged.
+            {:else}
+              About {gb(progress?.total || checks?.downloadBytes || 0)} GB. You can use your computer meanwhile; Utter will
+              let you know when it is ready.
+            {/if}
           </p>
           <div
             class="bar"
@@ -238,15 +315,15 @@
             <span style:width="{pct}%"></span>
           </div>
           <div class="bar-text">
-            <span>{progress ? `${gb(progress.done)} of ${gb(progress.total)} GB` : ''}</span>
+            <span>{progress && progress.total > 0 ? `${gb(progress.done)} of ${gb(progress.total)} GB` : ''}</span>
             <span>{eta}</span>
           </div>
-          {#if progress?.stage === 'error'}
-            <p class="error">Download interrupted. Retry picks up where it stopped.</p>
+          {#if failed}
+            <p class="error">{progress?.error}</p>
           {:else}
             <p class="muted">{stageLine}</p>
           {/if}
-        {:else}
+        {:else if view === 'try'}
           <h1>Try it</h1>
           <p class="lede">Hold <kbd>Right Ctrl</kbd>, say this, then let go:</p>
           <blockquote>{SENTENCE}</blockquote>
@@ -260,33 +337,65 @@
               </div>
             {/if}
           </div>
+        {:else if view === 'problem'}
+          <div class="badge warn" aria-hidden="true">
+            <svg viewBox="0 0 20 20"><path d="M10 5.5v5.5" /><circle cx="10" cy="14.25" r="0.4" /></svg>
+          </div>
+          <h1>{problem?.title ?? 'Utter could not start'}</h1>
+          <p class="lede">{problem?.message ?? ''}</p>
+          {#if problem?.detail}
+            <button class="disclosure" aria-expanded={details} onclick={() => (details = !details)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
+              Details
+            </button>
+            {#if details}
+              <pre class="detail" transition:fade={{ duration: 120 }}>{problem.detail}</pre>
+            {/if}
+          {/if}
+        {:else}
+          <div class="badge ok" aria-hidden="true">
+            <svg viewBox="0 0 20 20"><path d="M5.5 10.5l3 3 6-7" /></svg>
+          </div>
+          <h1>Utter is ready</h1>
+          <p class="lede">Hold Right Ctrl in any app to dictate.</p>
         {/if}
       </section>
     {/key}
   </div>
 
   <footer>
-    {#if step === 0}
+    {#if view === 'check'}
       {#if checks?.noGpu}
         <button class="primary" bind:this={primary} onclick={core.quit}>Quit</button>
       {:else if checks && !allOk}
         <button class="primary" bind:this={primary} onclick={runChecks}>Check again</button>
       {:else}
-        <button class="primary" bind:this={primary} disabled={!checks} onclick={() => go(1)}>Continue</button>
+        <button class="primary" bind:this={primary} disabled={!checks} onclick={next}>Continue</button>
       {/if}
-    {:else if step === 1}
-      <button class="text" onclick={() => go(0)}>Back</button>
-      <button class="primary" bind:this={primary} onclick={() => go(2)}>Continue</button>
-    {:else if step === 2}
-      {#if progress?.stage !== 'error'}
+    {:else if view === 'mic'}
+      <button class="text" onclick={() => go(step - 1)}>Back</button>
+      <button class="primary" bind:this={primary} onclick={next}>Continue</button>
+    {:else if view === 'download'}
+      {#if failed}
+        <button class="primary" bind:this={primary} onclick={startDownload}>Retry</button>
+      {:else}
         <p class="note">Closing this window pauses the download; it resumes next time.</p>
       {/if}
-      {#if progress?.stage === 'error'}
-        <button class="primary" bind:this={primary} onclick={startDownload}>Retry</button>
-      {/if}
-    {:else}
+    {:else if view === 'try'}
       <button class="text" onclick={core.finish}>Skip</button>
       <button class="primary" bind:this={primary} disabled={!arrived} onclick={core.finish}>Finish</button>
+    {:else if view === 'problem'}
+      {#if problem?.actions.includes('logs')}
+        <button class="text" onclick={() => core.openLogs()}>Open logs</button>
+      {/if}
+      <button class="text" onclick={core.quit}>Quit Utter</button>
+      {#if problem?.actions.includes('repair')}
+        <button class="primary" bind:this={primary} onclick={repair}>Repair</button>
+      {:else}
+        <button class="primary" bind:this={primary} disabled={starting} onclick={retry}>
+          {#if starting}<span class="spinner on-accent" aria-hidden="true"></span>Starting...{:else}Retry{/if}
+        </button>
+      {/if}
     {/if}
   </footer>
 </div>
@@ -552,5 +661,82 @@
     justify-content: flex-end;
     gap: 8px;
     min-height: 36px;
+  }
+
+  /* Outside the steps (problem, done) the dots keep their space but do not show. */
+  .dots.hidden {
+    visibility: hidden;
+  }
+  .badge {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+  }
+  .badge svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .badge.warn {
+    background: var(--home-error-bg);
+    color: var(--home-error);
+  }
+  .badge.ok {
+    background: var(--home-ok-soft);
+    color: var(--home-ok);
+  }
+  .disclosure {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 6px 0 2px;
+    margin-left: -2px;
+    border: none;
+    background: none;
+    color: var(--home-muted);
+  }
+  .disclosure svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: transform var(--dur-resize) var(--ease-out);
+  }
+  .disclosure[aria-expanded='true'] svg {
+    transform: rotate(90deg);
+  }
+  .detail {
+    max-height: 120px;
+    overflow: auto;
+    margin: 6px 0 0;
+    padding: 10px 12px;
+    border: 1px solid var(--home-border);
+    border-radius: 6px;
+    background: var(--home-surface);
+    font: 12px/18px 'Cascadia Mono', Consolas, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+  button.primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .spinner.on-accent {
+    border-color: color-mix(in srgb, var(--home-accent-text) 30%, transparent);
+    border-top-color: var(--home-accent-text);
   }
 </style>

@@ -27,9 +27,21 @@ pub struct State {
     error: Option<String>,
     microphones: Vec<String>,
     quality_installed: bool,
+    /// The GPU has the memory the quality model needs (with the speech model, about 18 GB).
+    quality_fits: bool,
     version: &'static str,
     data_dir: String,
     settings_path: String,
+}
+
+/// The quality model with the speech model needs about 18 GB; a 20 GB card leaves the room
+/// the desktop itself takes.
+const QUALITY_GPU_BYTES: u64 = 20_000_000_000;
+
+/// The GPU's memory, asked once: it does not change while Utter runs.
+fn gpu_memory() -> Option<u64> {
+    static MEMORY: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *MEMORY.get_or_init(|| utter_runtime::gpu::probe().ok().map(|g| g.memory_bytes))
 }
 
 fn state() -> State {
@@ -43,7 +55,8 @@ fn state() -> State {
         settings,
         error,
         microphones: utter_audio::input_devices(),
-        quality_installed: utter_runtime::component(quality).map(|c| c.is_installed()).unwrap_or(false),
+        quality_installed: utter_runtime::component(quality).is_ok_and(|c| c.is_intact()),
+        quality_fits: gpu_memory().is_some_and(|m| m >= QUALITY_GPU_BYTES),
         version: env!("CARGO_PKG_VERSION"),
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),
@@ -69,6 +82,11 @@ pub fn open_path(which: String) -> Result<(), String> {
     let path: PathBuf = match which.as_str() {
         "settings" => Settings::path(),
         "data" => utter_core::data_dir(),
+        "logs" => {
+            let dir = utter_core::data_dir().join("logs");
+            let _ = std::fs::create_dir_all(&dir);
+            dir
+        }
         _ => return Err(format!("unknown path {which:?}")),
     };
     utter_platform::shell::open(&path).map_err(|e| e.to_string())

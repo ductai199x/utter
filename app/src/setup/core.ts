@@ -1,6 +1,9 @@
-// First run's link to the core (app/src-tauri/src/setup.rs). In a plain browser (`npm run dev`,
-// then setup.html) a stand-in core plays every state so the page can be reviewed without the
-// app: add ?fail=driver, ?fail=gpu, ?fail=download or ?fail=mic to see the failures.
+// The setup window's link to the core (app/src-tauri/src/setup.rs). In a plain browser
+// (`npm run dev`, then setup.html) a stand-in core plays every state so the page can be reviewed
+// without the app:
+// - ?mode=first|update|repair|problem picks the mode (the core opens the window with it);
+// - ?problem=gpu-memory|no-microphone|damaged|driver|other picks the problem shown;
+// - ?fail=driver|gpu|download|start|mic plays a failure once.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -20,13 +23,31 @@ export interface Checks {
 export interface Progress {
   done: number;
   total: number;
-  stage: 'downloading' | 'verifying' | 'extracting' | 'loading' | 'ready' | 'error';
+  stage: 'downloading' | 'verifying' | 'extracting' | 'loading' | 'ready' | 'error' | 'start-error';
   label: string;
   error?: string;
+  problem?: Problem;
 }
 
+export interface Problem {
+  kind: 'gpu-memory' | 'no-microphone' | 'damaged' | 'driver' | 'other';
+  title: string;
+  message: string;
+  detail: string;
+  actions: ('retry' | 'repair' | 'logs' | 'quit')[];
+}
+
+export type Mode = 'first' | 'update' | 'repair' | 'problem';
+
+const params = new URLSearchParams(location.search);
+export const mode = (): Mode => {
+  const m = params.get('mode');
+  return m === 'update' || m === 'repair' || m === 'problem' ? m : 'first';
+};
+
 const inTauri = '__TAURI_INTERNALS__' in window;
-const fail = new URLSearchParams(location.search).get('fail');
+// Cleared once a failure has played, so Retry then succeeds.
+let fail = new URLSearchParams(location.search).get('fail');
 
 export function check(): Promise<Checks> {
   if (inTauri) return invoke<Checks>('setup_check');
@@ -117,7 +138,7 @@ export function download(): Promise<void> {
     if (fail === 'download' && mockDone > total * 0.4) {
       clearInterval(mockRun);
       emit({ done: mockDone, total, stage: 'error', label: labelAt(mockDone), error: 'connection reset' });
-      history.replaceState(null, '', location.pathname);
+      fail = null;
       return;
     }
     emit({ done: mockDone, total, stage: 'downloading', label: labelAt(mockDone) });
@@ -125,7 +146,7 @@ export function download(): Promise<void> {
       clearInterval(mockRun);
       emit({ done: total, total, stage: 'verifying', label: 'Cleanup model' });
       setTimeout(() => emit({ done: total, total, stage: 'loading', label: '' }), 1200);
-      setTimeout(() => emit({ done: 0, total: 0, stage: 'ready', label: '' }), 4000);
+      setTimeout(mockStart, 4000);
     }
   }, 100);
   return Promise.resolve();
@@ -136,6 +157,75 @@ export function onProgress(f: (p: Progress) => void): Promise<UnlistenFn> {
   progressHandlers.push(f);
   return Promise.resolve(() => progressHandlers.splice(progressHandlers.indexOf(f), 1));
 }
+
+const MOCK_PROBLEMS: Record<Problem['kind'], Problem> = {
+  'gpu-memory': {
+    kind: 'gpu-memory',
+    title: 'Not enough free GPU memory',
+    message:
+      'Utter needs about 6.0 GB free on the graphics card; 2.1 GB are free now. Close games or other apps using the GPU, then retry.',
+    detail: 'onnxruntime: Failed to allocate memory for requested buffer of size 52428800',
+    actions: ['retry', 'quit'],
+  },
+  'no-microphone': {
+    kind: 'no-microphone',
+    title: 'No microphone found',
+    message: 'Plug in a microphone or headset, then retry.',
+    detail: 'no input device',
+    actions: ['retry', 'quit'],
+  },
+  damaged: {
+    kind: 'damaged',
+    title: "Some of Utter's files are damaged",
+    message: 'Repair checks every file and downloads again the ones that are damaged.',
+    detail: 'model: Protobuf parsing failed',
+    actions: ['repair', 'quit'],
+  },
+  driver: {
+    kind: 'driver',
+    title: 'The graphics driver could not run Utter',
+    message: 'Update the NVIDIA driver, restart the computer, then retry.',
+    detail: 'CUDA driver version is insufficient for CUDA runtime version',
+    actions: ['retry', 'logs', 'quit'],
+  },
+  other: {
+    kind: 'other',
+    title: 'Utter could not start',
+    message: 'llama-server exited during start (exit code: 3221225477)',
+    detail: 'llama-server exited during start (exit code: 3221225477); see C:\\Users\\you\\.cache\\utter\\logs\\llama-server.log',
+    actions: ['retry', 'logs', 'quit'],
+  },
+};
+const mockProblem = (): Problem =>
+  MOCK_PROBLEMS[(params.get('problem') as Problem['kind']) ?? 'gpu-memory'] ?? MOCK_PROBLEMS['gpu-memory'];
+
+/** The stand-in's start: fails once with ?fail=start, then succeeds. */
+function mockStart() {
+  const emit = (p: Progress) => progressHandlers.forEach((f) => f(p));
+  if (fail === 'start') {
+    fail = null;
+    const problem = mockProblem();
+    emit({ done: 0, total: 0, stage: 'start-error', label: '', error: problem.message, problem });
+  } else emit({ done: 0, total: 0, stage: 'ready', label: '' });
+}
+
+export const lastProblem = (): Promise<Problem | null> =>
+  inTauri ? invoke<Problem | null>('setup_problem') : Promise.resolve(mockProblem());
+
+export function retry(): Promise<void> {
+  if (inTauri) return invoke('setup_retry');
+  setTimeout(mockStart, 1800);
+  return Promise.resolve();
+}
+
+export function repair(): Promise<void> {
+  if (inTauri) return invoke('setup_repair');
+  mockDone = 5.9e9;
+  return download();
+}
+
+export const openLogs = (): Promise<void> =>
+  inTauri ? invoke('open_path', { which: 'logs' }) : Promise.resolve();
 
 export const finish = (): Promise<void> => (inTauri ? invoke('setup_finish') : Promise.resolve());
 
