@@ -192,8 +192,8 @@ pub fn setup_repair(app: AppHandle, state: tauri::State<'_, Downloading>) {
 /// What a person calls a component.
 fn label(id: &str) -> &'static str {
     match id {
-        "parakeet-ultra-onnx-fp16" | "silero-vad" => "Speech model",
-        "utter-cleanup-e4b" | "gemma4-e4b-qat" | "gemma4-26b-a4b-qat" => "Cleanup model",
+        "parakeet-ultra-onnx-fp16" | "parakeet-ultra-onnx-w8" | "silero-vad" => "Speech model",
+        "utter-quality" | "utter-light" | "gemma4-e4b-qat" | "gemma4-26b-a4b-qat" => "Cleanup model",
         _ => "GPU runtime",
     }
 }
