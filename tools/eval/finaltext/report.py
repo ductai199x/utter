@@ -204,10 +204,10 @@ def score_cmd(
                 "eval passages are not gold-fixed yet: run eval.finaltext.goldfix"
             )
         fixed = {p["id"]: p["text"] for p in _rows(fixed_path)}
-        # List passages (lists.py) live in their own file.
-        lists_path = root / "passages-lists-eval.jsonl"
-        if lists_path.exists():
-            fixed |= {p["id"]: p["text"] for p in _rows(lists_path)}
+        # List and everyday passages (lists.py, messages.py) live in their own files.
+        for stem in ("passages-lists-eval", "passages-messages-eval"):
+            if (root / f"{stem}.jsonl").exists():
+                fixed |= {p["id"]: p["text"] for p in _rows(root / f"{stem}.jsonl")}
         before = len(rows)
         rows = [
             {**r, "gold": fixed[pid]} for r in rows if (pid := r["id"].rsplit("-", 1)[0]) in fixed
