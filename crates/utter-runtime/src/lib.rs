@@ -207,6 +207,116 @@ struct ReadReceipt {
     files: Vec<String>,
 }
 
+impl Component {
+    /// Every file of the installed component (empty when it is not installed), for reading
+    /// them ahead of the loaders ([`read_ahead`]).
+    pub fn files_on_disk(&self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut stack = vec![self.dir()];
+        while let Some(d) = stack.pop() {
+            let Ok(entries) = fs::read_dir(&d) else { continue };
+            for e in entries.flatten() {
+                match e.file_type() {
+                    Ok(t) if t.is_dir() => stack.push(e.path()),
+                    Ok(_) => files.push(e.path()),
+                    Err(_) => {}
+                }
+            }
+        }
+        files
+    }
+}
+
+/// Reads `files` into the file cache ahead of the loaders, in the background, and returns at
+/// once. On a cold start (after a reboot, or files not read for a while) the loaders pull them
+/// in piecemeal: llama.cpp faults its mapped model in a few pages at a time, onnxruntime reads
+/// in small pieces. Here the files are cut into [`READ_AHEAD_CHUNK`] ranges, in the order given
+/// (what loads first comes first), and [`READ_AHEAD_THREADS`] threads read them at once.
+///
+/// First the biggest file's first range is timed: at memory speed the start is warm, and
+/// nothing more is read (reading 7 GB from the cache again cost a warm start 0.3-0.6 s).
+/// Measured (docs/eval-results.md, 2026-10-12): cold launch to ready 7.3 s -> 5.6-6.0 s, bound
+/// by the disk (under 2 GB/s for these files on this machine, whatever the method: one
+/// stream, eight, or the OS's own PrefetchVirtualMemory).
+pub fn read_ahead(files: Vec<PathBuf>) {
+    let _ = std::thread::Builder::new().name("utter-read-ahead".into()).spawn(move || read_ahead_now(files));
+}
+
+fn read_ahead_now(files: Vec<PathBuf>) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let start = std::time::Instant::now();
+    let sized: Vec<(PathBuf, u64)> =
+        files.into_iter().filter_map(|p| fs::metadata(&p).ok().map(|m| (p, m.len()))).collect();
+    let Some((big, big_len)) = sized.iter().max_by_key(|(_, len)| *len) else { return };
+    let mut buf = vec![0u8; 4 << 20];
+    let probe = READ_AHEAD_CHUNK.min(*big_len);
+    let t = std::time::Instant::now();
+    let probed = File::open(big).map(|f| read_range(&f, &mut buf, 0, probe)).unwrap_or(0);
+    let rate = probed as f64 / t.elapsed().as_secs_f64().max(1e-6);
+    if rate > CACHED_RATE {
+        tracing::debug!(gb_s = rate / 1e9, "read ahead: the files are cached, nothing to read");
+        return;
+    }
+    let mut chunks = std::collections::VecDeque::new();
+    for (i, (path, len)) in sized.iter().enumerate() {
+        let mut offset = if path == big { probe } else { 0 };
+        while offset < *len {
+            chunks.push_back((i, offset, READ_AHEAD_CHUNK.min(len - offset)));
+            offset += READ_AHEAD_CHUNK;
+        }
+    }
+    let chunks = std::sync::Mutex::new(chunks);
+    let read = AtomicU64::new(probed);
+    std::thread::scope(|scope| {
+        for _ in 0..READ_AHEAD_THREADS {
+            scope.spawn(|| {
+                let mut buf = vec![0u8; 4 << 20];
+                loop {
+                    let Some((i, offset, len)) = chunks.lock().expect("read-ahead lock").pop_front() else { break };
+                    if let Ok(f) = File::open(&sized[i].0) {
+                        read.fetch_add(read_range(&f, &mut buf, offset, len), Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+    });
+    tracing::debug!(mb = read.load(Ordering::Relaxed) >> 20, ms = start.elapsed().as_millis() as u64, "read ahead");
+}
+
+/// Reads `len` bytes of `f` from `offset` (fewer at its end); returns how many.
+fn read_range(f: &File, buf: &mut [u8], offset: u64, len: u64) -> u64 {
+    let mut done = 0;
+    while done < len {
+        let want = (len - done).min(buf.len() as u64) as usize;
+        match read_at(f, &mut buf[..want], offset + done) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => done += n as u64,
+        }
+    }
+    done
+}
+
+/// The range each read-ahead read covers, how many threads read at once, and the rate (bytes a
+/// second, one thread) above which a range came from the cache: the disk here gives about
+/// 1.1 GB/s to one stream, the cache several times that.
+const READ_AHEAD_CHUNK: u64 = 64 << 20;
+const READ_AHEAD_THREADS: usize = 8;
+const CACHED_RATE: f64 = 4e9;
+
+/// One positional read (the file's cursor is not shared between threads).
+fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        f.seek_read(buf, offset)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        f.read_at(buf, offset)
+    }
+}
+
 /// Removes what an update left behind: component folders (and unfinished installs) of versions
 /// components.json no longer lists, and downloads that are not current. Returns the bytes freed.
 /// Only folders named `<known id>-<version>` are touched; anything else in the runtime folder
