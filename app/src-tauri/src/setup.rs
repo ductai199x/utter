@@ -545,12 +545,17 @@ pub fn ready(app: &AppHandle) {
     attention(app);
 }
 
+/// On the UI thread, without waiting for it: asking a window whether it is focused from another
+/// thread blocks until the UI thread answers, and dictation calls this.
 fn attention(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("setup")
-        && !w.is_focused().unwrap_or(false)
-    {
-        let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
-    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = handle.get_webview_window("setup")
+            && !w.is_focused().unwrap_or(false)
+        {
+            let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
+    });
 }
 
 /// Dictation could not start: the setup window shows why, opening in problem mode if it is not

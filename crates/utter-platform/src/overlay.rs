@@ -29,8 +29,8 @@ mod imp {
     };
     use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, HWND_TOPMOST, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
-        SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, HWND_TOPMOST, SW_HIDE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
+        SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, ShowWindowAsync, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
 
     pub fn make_overlay(handle: isize) {
@@ -65,13 +65,23 @@ mod imp {
             let work = info.rcWork;
             let x = work.left + (work.right - work.left - w) / 2;
             let y = work.bottom - h - scale(bottom_margin);
-            SetWindowPos(handle as HWND, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            // Async: the window belongs to the UI thread, and the caller (dictation) must not wait
+            // for it.
+            SetWindowPos(
+                handle as HWND,
+                HWND_TOPMOST,
+                x,
+                y,
+                w,
+                h,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS,
+            );
         }
     }
 
     pub fn hide(handle: isize) {
-        // SAFETY: hides a window this process owns.
-        unsafe { ShowWindow(handle as HWND, SW_HIDE) };
+        // SAFETY: hides a window this process owns, without waiting for its thread.
+        unsafe { ShowWindowAsync(handle as HWND, SW_HIDE) };
     }
 }
 

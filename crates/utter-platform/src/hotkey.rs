@@ -3,10 +3,9 @@
 //!
 //! Two layers:
 //! - [`HotkeyMachine`]: pure logic from key events to dictation actions, unit-tested;
-//! - the OS hook ([`listen`]): on Windows a low-level keyboard hook on its own thread. The
-//!   hook callback only forwards the raw event and returns at once: Windows silently removes a
-//!   hook whose callback is slow, and the hook never swallows a key, so every key still
-//!   reaches the focused app.
+//! - the OS listener ([`listen`]): on Windows the keyboard's Raw Input on a thread of its own
+//!   (see `imp` for why not a low-level hook). It only observes: every key still reaches the
+//!   focused app.
 
 use std::time::Duration;
 
@@ -158,11 +157,19 @@ pub fn listen(cfg: HotkeyConfig) -> Result<Listener, HotkeyError> {
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<KeyEvent>();
     let (act_tx, act_rx) = std::sync::mpsc::channel();
     let stop = imp::start_hook(raw_tx)?;
+    tracing::info!("hotkey: listening");
     std::thread::Builder::new()
         .name("utter-hotkey".into())
         .spawn(move || {
             let mut machine = HotkeyMachine::new(cfg);
+            let mut key_down = false;
             while let Ok(e) = raw_rx.recv() {
+                // The hotkey's presses and releases only (not its auto-repeat): no other key is
+                // ever logged.
+                if e.vk == cfg.key && e.down != key_down {
+                    key_down = e.down;
+                    tracing::info!(down = e.down, injected = e.injected, "hotkey: key");
+                }
                 if let Some(a) = machine.on_event(e)
                     && act_tx.send((a, std::time::Instant::now())).is_err()
                 {
@@ -174,45 +181,108 @@ pub fn listen(cfg: HotkeyConfig) -> Result<Listener, HotkeyError> {
     Ok(Listener { actions: act_rx, stop })
 }
 
+/// Windows: the keyboard's Raw Input, delivered to a message-only window on a thread of its own
+/// (RIDEV_INPUTSINK: whichever window is in front).
+///
+/// Not a low-level keyboard hook (WH_KEYBOARD_LL): Windows silently stops calling one while a
+/// Chromium window has focus, WebView2 included, so Utter's own setup and splash windows made it
+/// deaf (2026-10-12; github.com/wudaming00/wh-keyboard-ll-chromium describes the same). Raw Input
+/// has no hook chain and no timeout to fall out of. It only observes: every key still reaches
+/// the focused app.
+///
+/// Raw Input is one target per process and device type. The window library (tao) registers the
+/// keyboard for its own window at startup and never again; this registration replaces it, which
+/// costs Utter nothing (no window uses tao's keyboard device events), and its mouse registration
+/// stays.
 #[cfg(windows)]
 mod imp {
     use std::sync::Mutex;
     use std::sync::mpsc::Sender;
 
-    use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_CONTROL, VK_LCONTROL, VK_RCONTROL};
+    use windows_sys::Win32::UI::Input::{
+        GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT, RIDEV_INPUTSINK, RIDEV_REMOVE,
+        RIM_TYPEKEYBOARD, RegisterRawInputDevices,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLKHF_UP, MSG, PostThreadMessageW,
-        SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_QUIT,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageTime, GetMessageW, HWND_MESSAGE,
+        MSG, PostThreadMessageW, RI_KEY_BREAK, RI_KEY_E0, RegisterClassW, WM_INPUT, WM_QUIT, WNDCLASSW,
     };
 
     use super::{HotkeyError, KeyEvent};
 
-    /// Where the hook callback forwards events. One hook per process.
+    /// Where the window forwards events. One listener per process.
     static SINK: Mutex<Option<Sender<KeyEvent>>> = Mutex::new(None);
 
-    unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-        if code == HC_ACTION as i32 {
-            // SAFETY: for WH_KEYBOARD_LL with HC_ACTION, lparam points to a KBDLLHOOKSTRUCT.
-            let k = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
-            let event = KeyEvent {
-                vk: k.vkCode,
-                down: k.flags & LLKHF_UP == 0,
-                time_ms: k.time,
-                injected: k.flags & LLKHF_INJECTED != 0,
-            };
-            // try_lock: never wait inside the hook. A missed event while the sink is being
-            // replaced is better than Windows removing a slow hook.
-            if let Ok(guard) = SINK.try_lock()
-                && let Some(tx) = guard.as_ref()
-            {
-                let _ = tx.send(event);
-            }
+    /// HID usage page and usage of a keyboard.
+    const GENERIC_DESKTOP: u16 = 0x01;
+    const KEYBOARD: u16 = 0x06;
+    /// The prefix of Pause's fake Ctrl, which is not a Ctrl press.
+    const RI_KEY_E1: u32 = 4;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// The key event in a WM_INPUT, if it is the keyboard's.
+    fn key_event(raw: HRAWINPUT) -> Option<KeyEvent> {
+        let mut input: RAWINPUT = RAWINPUT::default();
+        let mut size = std::mem::size_of::<RAWINPUT>() as u32;
+        // SAFETY: reads this WM_INPUT's data into a RAWINPUT, which holds any keyboard input.
+        let read = unsafe {
+            GetRawInputData(
+                raw,
+                RID_INPUT,
+                (&raw mut input).cast(),
+                &mut size,
+                std::mem::size_of::<RAWINPUTHEADER>() as u32,
+            )
+        };
+        if read == u32::MAX || input.header.dwType != RIM_TYPEKEYBOARD {
+            return None;
         }
-        // Never swallow a key: it always reaches the focused app.
-        // SAFETY: passes the hook chain on, as required.
-        unsafe { CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam) }
+        // SAFETY: the header says the data is the keyboard's.
+        let k = unsafe { input.data.keyboard };
+        let flags = u32::from(k.Flags);
+        if flags & RI_KEY_E1 != 0 || k.VKey == 0xFF {
+            return None;
+        }
+        // Raw Input reports either Ctrl as VK_CONTROL; the E0 prefix marks the right one.
+        let vk = match k.VKey {
+            VK_CONTROL if flags & RI_KEY_E0 != 0 => VK_RCONTROL,
+            VK_CONTROL => VK_LCONTROL,
+            vk => vk,
+        };
+        Some(KeyEvent {
+            vk: u32::from(vk),
+            down: flags & RI_KEY_BREAK == 0,
+            // SAFETY: the time of the message being handled, the clock key events use.
+            time_ms: unsafe { GetMessageTime() } as u32,
+            // Input from software (SendInput: Utter's own Ctrl+V, other programs) comes from no
+            // device.
+            injected: input.header.hDevice.is_null(),
+        })
+    }
+
+    unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if msg == WM_INPUT
+            && let Some(event) = key_event(lparam as HRAWINPUT)
+            && let Ok(guard) = SINK.lock()
+            && let Some(tx) = guard.as_ref()
+        {
+            let _ = tx.send(event);
+        }
+        // SAFETY: the default handling (for WM_INPUT, it frees the input's data).
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    fn register(hwnd: HWND, flags: u32) -> bool {
+        let device = RAWINPUTDEVICE { usUsagePage: GENERIC_DESKTOP, usUsage: KEYBOARD, dwFlags: flags, hwndTarget: hwnd };
+        // SAFETY: one device description, of its own size.
+        unsafe { RegisterRawInputDevices(&device, 1, std::mem::size_of::<RAWINPUTDEVICE>() as u32) != 0 }
     }
 
     pub fn start_hook(tx: Sender<KeyEvent>) -> Result<Box<dyn FnMut() + Send>, HotkeyError> {
@@ -225,25 +295,56 @@ mod imp {
         }
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u32, String>>();
         let thread = std::thread::Builder::new()
-            .name("utter-hook".into())
+            .name("utter-keys-input".into())
             .spawn(move || {
-                // SAFETY: plain Win32 calls; the hook is installed and removed on this thread,
-                // which runs the message loop the hook needs.
+                let fail = |what: &str| {
+                    let error = std::io::Error::last_os_error();
+                    if let Ok(mut sink) = SINK.lock() {
+                        *sink = None;
+                    }
+                    let _ = ready_tx.send(Err(format!("{what} failed: {error}")));
+                };
+                let class = wide("UtterHotkeyInput");
+                // SAFETY: plain Win32 calls; the window is created, receives input and is
+                // destroyed on this thread, which runs its message loop.
                 unsafe {
                     let module = GetModuleHandleW(std::ptr::null());
-                    let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), module, 0);
-                    if hook.is_null() {
-                        let error = std::io::Error::last_os_error();
-                        if let Ok(mut sink) = SINK.lock() {
-                            *sink = None;
-                        }
-                        let _ = ready_tx.send(Err(format!("SetWindowsHookExW failed: {error}")));
-                        return;
+                    let wc = WNDCLASSW {
+                        lpfnWndProc: Some(window_proc),
+                        hInstance: module,
+                        lpszClassName: class.as_ptr(),
+                        ..std::mem::zeroed()
+                    };
+                    // A second listener (Retry) finds the class registered already: fine.
+                    RegisterClassW(&wc);
+                    let hwnd = CreateWindowExW(
+                        0,
+                        class.as_ptr(),
+                        std::ptr::null(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        HWND_MESSAGE,
+                        std::ptr::null_mut(),
+                        module,
+                        std::ptr::null(),
+                    );
+                    if hwnd.is_null() {
+                        return fail("CreateWindowExW");
+                    }
+                    if !register(hwnd, RIDEV_INPUTSINK) {
+                        DestroyWindow(hwnd);
+                        return fail("RegisterRawInputDevices");
                     }
                     let _ = ready_tx.send(Ok(GetCurrentThreadId()));
                     let mut msg: MSG = std::mem::zeroed();
-                    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {}
-                    UnhookWindowsHookEx(hook);
+                    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                        DispatchMessageW(&msg);
+                    }
+                    register(std::ptr::null_mut(), RIDEV_REMOVE);
+                    DestroyWindow(hwnd);
                 }
                 if let Ok(mut sink) = SINK.lock() {
                     *sink = None;
@@ -253,9 +354,9 @@ mod imp {
         let thread_id = ready_rx.recv().map_err(|e| HotkeyError(e.to_string()))?.map_err(HotkeyError)?;
         let mut thread = Some(thread);
         Ok(Box::new(move || {
-            // SAFETY: posts WM_QUIT to the hook thread's message queue.
+            // SAFETY: posts WM_QUIT to the listener thread's message queue.
             unsafe { PostThreadMessageW(thread_id, WM_QUIT, 0, 0) };
-            // Waits until the hook is removed and the sink cleared, so a new listener can start
+            // Waits until the window is gone and the sink cleared, so a new listener can start
             // right after.
             if let Some(t) = thread.take() {
                 let _ = t.join();

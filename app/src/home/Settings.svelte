@@ -352,6 +352,26 @@
         </div>
         <button onclick={() => openPath('settings')}>Open</button>
       </div>
+      {#if settings}
+      <div class="row">
+        <div class="label">
+          <label for="logs">Keep logs</label>
+          <span class="desc">Timings and errors, never what you say. They help find out what went wrong; off deletes them.</span>
+        </div>
+        <span class="row-actions">
+          {#if settings.keep_logs}<button class="link" onclick={() => openPath('logs')}>Open</button>{/if}
+          <button
+            id="logs"
+            class="switch"
+            role="switch"
+            aria-checked={settings.keep_logs}
+            aria-label="Keep logs"
+            onclick={() => settings && save({ ...settings, keep_logs: !settings.keep_logs })}
+            ><span></span></button
+          >
+        </span>
+      </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -370,6 +390,11 @@
 {/if}
 
 <style>
+  .row-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
   .rules {
     list-style: none;
     margin: 0;

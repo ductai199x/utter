@@ -42,6 +42,10 @@ keep_history = \"forever\"
 # (<data folder>/dictations). Development builds always keep it.
 debug_log = false
 
+# Keep Utter's logs (<data folder>/logs): timings, errors and what Utter did, never what you
+# said. They help find out why something went wrong. false writes none and deletes them.
+keep_logs = true
+
 # How dictations are pasted, per app (docs/ux/insertion.md). Utter's defaults cover common
 # terminals, Office and remote desktops; an entry here replaces the default for that program.
 # with: \"ctrl-v\", \"ctrl-shift-v\", \"shift-insert\" or \"type\"
@@ -67,6 +71,8 @@ pub struct Settings {
     pub keep_history: KeepHistory,
     /// Keep the detailed dictation log with audio (development builds always do).
     pub debug_log: bool,
+    /// Keep Utter's own logs (utter_core::logs); off writes none and deletes them.
+    pub keep_logs: bool,
     /// The person's paste rules: each replaces Utter's default for its program.
     pub paste: Vec<PasteOverride>,
 }
@@ -208,6 +214,7 @@ impl Default for Settings {
             model: Model::Quality,
             keep_history: KeepHistory::Forever,
             debug_log: false,
+            keep_logs: true,
             paste: Vec::new(),
         }
     }
@@ -265,6 +272,7 @@ impl Settings {
         set(&mut doc, "model", model.into());
         set(&mut doc, "keep_history", word(&self.keep_history).into());
         set(&mut doc, "debug_log", self.debug_log.into());
+        set(&mut doc, "keep_logs", self.keep_logs.into());
         // The paste rules are tables at the end of the file; with none, no entries (the
         // commented example stays).
         if self.paste.is_empty() {
@@ -378,6 +386,7 @@ mod tests {
             model: Model::Light,
             keep_history: KeepHistory::Days30,
             debug_log: true,
+            keep_logs: false,
             paste: vec![PasteOverride {
                 app: "mintty.exe".into(),
                 with: PasteWith::CtrlShiftV,

@@ -148,7 +148,7 @@ pub fn open_path(which: String) -> Result<(), String> {
         "settings" => Settings::path(),
         "data" => utter_core::data_dir(),
         "logs" => {
-            let dir = utter_core::data_dir().join("logs");
+            let dir = utter_core::logs::dir();
             let _ = std::fs::create_dir_all(&dir);
             dir
         }
@@ -166,6 +166,15 @@ pub fn apply_autostart(settings: &Settings) {
     let Ok(exe) = std::env::current_exe() else { return };
     if let Err(e) = utter_platform::autostart::set(settings.start_at_login, &exe, crate::splash::AUTOSTART_ARG) {
         tracing::warn!("start at sign-in: {e}");
+    }
+}
+
+/// Turns Utter's logs on or off with the setting; off deletes them (utter_core::logs).
+pub fn apply_logs(settings: &Settings) {
+    if utter_core::logs::enabled() != settings.keep_logs {
+        utter_core::logs::set_enabled(settings.keep_logs);
+        // Off: this line is not written, and the writer lets go of the file.
+        tracing::info!(on = settings.keep_logs, "logs");
     }
 }
 
@@ -196,6 +205,7 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
                 let s = state();
                 if let Some(settings) = &s.settings {
                     apply_autostart(settings);
+                    apply_logs(settings);
                     let models = app.state::<Models>();
                     // A model chosen again may be tried again, even one that failed.
                     if chosen.is_some_and(|m| m != settings.model) {
