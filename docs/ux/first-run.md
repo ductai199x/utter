@@ -6,7 +6,7 @@ Status: **spec, not built**. It replaces `utter-cli setup` for everyone but deve
 ## What it is for
 
 1. Say early, and plainly, if this computer cannot run Utter, before downloading anything.
-2. Get the 8 GB of models onto the machine without the person having to watch it.
+2. Get the 4 to 6 GB of models onto the machine without the person having to watch it.
 3. End with a dictation that worked, so the person knows the key, the Bar and the result.
 
 ## When it shows
@@ -31,14 +31,14 @@ A checklist, each row with a check or a cross and a short value:
 | Check | Passes when | Shows |
 |---|---|---|
 | Graphics card | an NVIDIA GPU answers (gpu::probe) | its name |
-| GPU memory | at least 8 GB | "24 GB" |
+| GPU memory | enough for the smallest model on offer (utter_pipeline::card_need: 4 GB with Light) | "24 GB" |
 | Graphics driver | supports CUDA 13.0 or newer | "CUDA 13.4" |
-| Disk space | the data folder's drive has the remaining download plus 2 GB free | "120 GB free, 7.8 GB needed" |
+| Disk space | the data folder's drive has the remaining download plus 2 GB free | "120 GB free, 6.0 GB needed" |
 
 All pass: **Continue**. One fails: the row says what to do in one line ("Update the NVIDIA
 driver to version 580 or newer", "Free up 6 GB on C:"), and Continue is replaced by **Check
-again**. No NVIDIA GPU: "Utter needs an NVIDIA graphics card (8 GB or more). Support for
-other cards is planned." and **Quit**.
+again**. No NVIDIA GPU: "Utter needs an NVIDIA graphics card. Support for other cards is
+planned." and **Quit**.
 
 ### 2. Choose your model
 
@@ -50,8 +50,8 @@ published):
 
 | Card | Says | Needs |
 |---|---|---|
-| Quality | "The bigger model. Most accurate; best for most cards." | about 6 GB of GPU memory (the fine-tuned E4B) |
-| Light | "The smaller model. Runs on 4 GB graphics cards." | about 2.5 GB of GPU memory (the fine-tuned E2B, speech on the CPU) |
+| Quality | "The bigger model. Most accurate; best for most cards." | about 4.8 GB of GPU memory with speech, on cards of 6 GB or more (the fine-tuned E4B) |
+| Light | "The smaller model. Runs on 4 GB graphics cards." | about 3.25 GB of GPU memory with speech, on 4 GB cards (the fine-tuned E2B) |
 
 - Each card: the name, its sentence, "N GB GPU memory", and "N GB download".
 - The best fit for this GPU is selected when the step opens and marked **Recommended** (a

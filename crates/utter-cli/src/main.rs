@@ -28,8 +28,7 @@ struct Cli {
     /// (e.g. a fresh tools/export output under <data_dir>/models/).
     #[arg(long, global = true)]
     model_dir: Option<PathBuf>,
-    /// Where the encoder runs: the GPU, or the CPU as the Light model does (with its 8-bit
-    /// export, parakeet-ultra-onnx-w8).
+    /// Where the encoder runs: the GPU (as both tiers do), or the CPU, for comparison.
     #[arg(long, global = true, value_enum, default_value_t = DeviceArg::Cuda)]
     encoder_device: DeviceArg,
     /// Where the decoder and joint graphs run.

@@ -65,9 +65,9 @@ export function check(): Promise<Checks> {
                 fix: 'Update the NVIDIA driver to version 580 or newer, then check again.',
               }
             : { id: 'driver', ok: true, value: 'CUDA 13.4', fix: null },
-          { id: 'disk', ok: true, value: '186.2 GB free, 7.8 GB needed', fix: null },
+          { id: 'disk', ok: true, value: '186.2 GB free, 6.0 GB needed', fix: null },
         ];
-  return new Promise((r) => setTimeout(() => r({ checks, noGpu: fail === 'gpu', downloadBytes: 7.84e9 }), 600));
+  return new Promise((r) => setTimeout(() => r({ checks, noGpu: fail === 'gpu', downloadBytes: 5.95e9 }), 600));
 }
 
 export const microphones = (): Promise<string[]> =>
@@ -116,7 +116,7 @@ let mockDone = 0;
 
 export function download(): Promise<void> {
   if (inTauri) return invoke('setup_download');
-  const total = 7.84e9;
+  const total = 5.95e9;
   const parts: [number, string][] = [
     [1.32e9, 'GPU runtime'],
     [1.36e9, 'Speech model'],
@@ -163,7 +163,7 @@ const MOCK_PROBLEMS: Record<Problem['kind'], Problem> = {
     kind: 'gpu-memory',
     title: 'Not enough free GPU memory',
     message:
-      'Utter needs about 6.0 GB free on the graphics card; 2.1 GB are free now. Close games or other apps using the GPU, then retry.',
+      'Utter needs about 4.8 GB free on the graphics card; 2.1 GB are free now. Close games or other apps using the GPU, then retry.',
     detail: 'onnxruntime: Failed to allocate memory for requested buffer of size 52428800',
     actions: ['retry', 'quit'],
   },
@@ -221,15 +221,15 @@ export interface ModelCard {
   selected: boolean;
 }
 
-// ?gpu=6 plays a 6 GB card (Quality does not fit, Light is recommended).
+// ?gpu=4 plays a 4 GB card (Quality does not fit, Light is recommended).
 const mockGpuGb = Number(params.get('gpu') ?? 24);
 
 export function models(): Promise<ModelCard[]> {
   if (inTauri) return invoke<ModelCard[]>('setup_models');
-  const quality = mockGpuGb >= 7.5;
+  const quality = mockGpuGb >= 5.4;
   return Promise.resolve([
-    { id: 'quality', gpuBytes: 6e9, cardBytes: 7.5e9, downloadBytes: 7.84e9, fits: quality, recommended: quality, selected: true },
-    { id: 'light', gpuBytes: 2.5e9, cardBytes: 3.5e9, downloadBytes: 3.9e9, fits: mockGpuGb >= 3.5, recommended: !quality, selected: false },
+    { id: 'quality', gpuBytes: 4.8e9, cardBytes: 5.8e9, downloadBytes: 5.95e9, fits: quality, recommended: quality, selected: true },
+    { id: 'light', gpuBytes: 3.25e9, cardBytes: 4.25e9, downloadBytes: 4.14e9, fits: mockGpuGb >= 3.96, recommended: !quality, selected: false },
   ]);
 }
 

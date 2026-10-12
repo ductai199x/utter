@@ -23,11 +23,11 @@ pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
 pub enum Tier {
     /// Gemma 4 E4B fine-tuned for cleanup (huggingface.co/ductai199x/utter, a 5 GB file): about 3.3 GB of GPU memory (its per-layer embeddings stay in system RAM), and
     /// better than the prompted 26B on every final-text eval (2026-10-10). The default: with the
-    /// speech model, Utter takes about 5.2 GB of GPU memory in all (Tai, 2026-10-09).
+    /// speech model, Utter takes about 4.8 GB of GPU memory in all (2026-10-11).
     #[default]
     Quality,
     /// Gemma 4 E2B fine-tuned on the same data with the same recipe: about 1.8 GB of GPU
-    /// memory. With the 8-bit speech model, a light Utter of about 3 GB in all, everything on
+    /// memory. With the speech model, a light Utter of about 3.25 GB in all, everything on
     /// the GPU (Tai, 2026-10-11: about 2.5 GB, a little more is fine).
     Light,
     /// Gemma 4 26B-A4B, prompted: about 15 GB of GPU memory. Never offered: the fine-tuned E4B
@@ -84,8 +84,13 @@ impl Tier {
 ///   input, so drafts are accepted about 60% of the time. Another 25% off on real speech;
 ///   outputs are the same as without it (all curated cases, 97% of real ones; the rest differ
 ///   by float rounding of batched verification).
+/// - `-ub 128`: prompts are processed 128 tokens at a time instead of 512, which shrinks the
+///   compute buffer (Quality 109 -> 27 MiB, Light 122 -> 30 MiB; about 90 MB of GPU memory in
+///   all) with the same outputs (200 of 200) and the same cleanup time (2026-10-11).
 pub const SERVER_ARGS: &[&str] = &[
     "--swa-full",
+    "-ub",
+    "128",
     "--spec-type",
     "ngram-simple",
     "--spec-ngram-simple-size-n",

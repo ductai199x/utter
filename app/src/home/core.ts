@@ -21,6 +21,9 @@ export interface HomeState {
   lightAvailable: boolean;
   /** What choosing each model would download now, in bytes (0: installed). */
   downloadBytes: Record<Model, number>;
+  /** GPU memory each model needs, speech included, and the smallest card it runs on (bytes). */
+  gpuNeed: Record<Model, number>;
+  cardNeed: Record<Model, number>;
   version: string;
   dataDir: string;
   settingsPath: string;
@@ -48,10 +51,12 @@ const mock: HomeState = {
   microphones: ['Microphone (Shure MV7)', 'Headset (Jabra Evolve2 65)'],
   qualityFits: true,
   lightAvailable: true,
-  downloadBytes: { quality: 0, light: 3.9e9 },
+  downloadBytes: { quality: 0, light: 4.14e9 },
+  gpuNeed: { quality: 4.8e9, light: 3.25e9 },
+  cardNeed: { quality: 5.8e9, light: 4.25e9 },
   version: '0.0.1',
-  dataDir: 'C:\\Users\\you\\.cache\\utter',
-  settingsPath: 'C:\\Users\\you\\.cache\\utter\\settings.toml',
+  dataDir: 'C:\\Users\\you\\AppData\\Local\\Utter',
+  settingsPath: 'C:\\Users\\you\\AppData\\Local\\Utter\\settings.toml',
 };
 const appliedHandlers: ((a: Applied) => void)[] = [];
 // JSON, not structuredClone: the page passes Svelte state proxies, which cannot be cloned.

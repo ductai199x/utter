@@ -94,9 +94,27 @@ type Speech = (Sender<Job>, Receiver<Done>);
 /// speech model elsewhere; or why it could not start.
 type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
 
-/// Which speech build a tier runs: Light's small GPU budget takes the 8-bit one.
-pub fn speech_for(tier: Tier) -> SpeechModel {
-    if tier == Tier::Light { SpeechModel::W8 } else { SpeechModel::Fp16 }
+/// Which speech build a tier runs: the 8-bit one for both. It transcribes the same as float16
+/// and takes 0.66 GB less GPU memory, for about 5 ms more a clip (Tai, 2026-10-11: cut memory
+/// as far as quality allows; small latency costs are fine).
+pub fn speech_for(_tier: Tier) -> SpeechModel {
+    SpeechModel::W8
+}
+
+/// GPU memory a tier needs free to run, speech and cleanup together: the peak measured end to
+/// end (docs/eval-results.md, 2026-10-11: 4,572 and 3,085 MiB), rounded up.
+pub fn gpu_need(tier: Tier) -> u64 {
+    match tier {
+        Tier::Quality => 4_800_000_000,
+        Tier::Light => 3_250_000_000,
+        Tier::Reference => 18_000_000_000,
+    }
+}
+
+/// The smallest graphics card a tier is offered on: what it needs, and about 1 GB more for
+/// the desktop and other apps.
+pub fn card_need(tier: Tier) -> u64 {
+    gpu_need(tier) + 1_000_000_000
 }
 
 /// The runtime components a tier needs (crates/utter-runtime/components.json): onnxruntime,
