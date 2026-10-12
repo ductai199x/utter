@@ -18,20 +18,27 @@ def main(
     folder: Path,
     only: list[str] = typer.Option(None, help="Upload only paths matching these patterns"),
     message: str = "Upload",
+    replace: list[str] = typer.Option(
+        None,
+        help="Remote files matching these patterns that the upload does not contain are deleted",
+    ),
 ) -> None:
     api = HfApi()
     api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
-    patterns = only or ["README.md", "data/**"]
+    patterns = only or ["README.md", "data/**", "extra/**"]
     api.upload_folder(
         repo_id=repo,
         repo_type="dataset",
         folder_path=folder,
         allow_patterns=patterns,
+        delete_patterns=replace or None,
         commit_message=message,
     )
     info = api.dataset_info(repo, files_metadata=True)
-    files = [s for s in info.siblings if s.rfilename.startswith("data/") or s.rfilename == "README.md"]
-    print(f"{repo}: private={info.private}, {len(files)} files, {sum(s.size or 0 for s in files) / 1e9:.2f} GB")
+    files = [s for s in info.siblings if s.rfilename != ".gitattributes"]
+    print(
+        f"{repo}: private={info.private}, {len(files)} files, {sum(s.size or 0 for s in files) / 1e9:.2f} GB"
+    )
 
 
 if __name__ == "__main__":

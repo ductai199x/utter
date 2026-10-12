@@ -14,14 +14,24 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import typer
 
-SOURCE_DATASETS = ["common-pile/stackexchange", "common-pile/arxiv_abstracts", "common-pile/ubuntu_irc",
-                   "common-pile/github_archive", "wikimedia/wikipedia"]
+SOURCE_DATASETS = [
+    "common-pile/stackexchange",
+    "common-pile/arxiv_abstracts",
+    "common-pile/ubuntu_irc",
+    "wikimedia/wikipedia",
+]
+LICENSING = (
+    "Rows from GitHub (Common Pile's github_archive) were left out: their text carries its repository's license "
+    "(MIT, Apache, BSD and the like), which requires the copyright notice and license text with every copy, and an "
+    "issue's or comment's text is not clearly under the code's license at all. What remains is CC BY-SA (2.5, 3.0, "
+    "4.0), CC0, public domain, or written for the dataset."
+)
 CATEGORIES = {
     "natural": "the passage said plainly",
     "disfluent": "with fillers, repeats and false starts",
-    "correction": "with a spoken self-correction (\"three, no, four\")",
-    "command": "with a spoken editing command (\"scratch that\")",
-    "explicit": "with spoken punctuation (\"comma\", \"new paragraph\")",
+    "correction": 'with a spoken self-correction ("three, no, four")',
+    "command": 'with a spoken editing command ("scratch that")',
+    "explicit": 'with spoken punctuation ("comma", "new paragraph")',
     "amend": "with a later edit to something said earlier",
     "list": "a list, spoken item by item",
     "grammar": "with the grammar slips of real speakers, to be corrected",
@@ -35,7 +45,9 @@ def _yaml_features(features: list[tuple[str, str]]) -> str:
         if kind == "string-list":
             out.append(f"  - name: {name}\n    list: string")
         elif kind == "messages":
-            out.append(f"  - name: {name}\n    list:\n    - name: role\n      dtype: string\n    - name: content\n      dtype: string")
+            out.append(
+                f"  - name: {name}\n    list:\n    - name: role\n      dtype: string\n    - name: content\n      dtype: string"
+            )
         elif kind == "audio":
             out.append(f"  - name: {name}\n    dtype:\n      audio:\n        sampling_rate: 16000")
         else:
@@ -56,16 +68,56 @@ def _counts(files: list[str], column: str) -> collections.Counter:
     return c
 
 
+def summarize(out: Path) -> dict:
+    """Per shard of a speech dataset folder: split, collection, rows, bytes, hours, and counts of
+    license, source, category and engine. Written to summary-<name>.json where shards live, so a
+    card can be made where only some of them are."""
+    out_files = {}
+    for f in sorted(glob.glob(str(out / "data" / "*" / "*.parquet"))):
+        t = pq.read_table(f, columns=["duration_s", "license", "source", "category", "tts_engine"])
+        out_files[f"{Path(f).parent.name}/{Path(f).name}"] = {
+            "split": Path(f).name.split("-")[0],
+            "collection": Path(f).parent.name,
+            "rows": t.num_rows,
+            "bytes": Path(f).stat().st_size,
+            "hours": sum(t.column("duration_s").to_pylist()) / 3600,
+            **{
+                c: dict(collections.Counter(t.column(c).to_pylist()))
+                for c in ("license", "source", "category", "tts_engine")
+            },
+        }
+    return out_files
+
+
+def summary(out: Path, name: str) -> None:
+    (out / f"summary-{name}.json").write_text(
+        json.dumps(summarize(out), indent=1), encoding="utf-8"
+    )
+    print(f"wrote {out / f'summary-{name}.json'}")
+
+
 def text(out: Path) -> None:
     stats = json.loads((out / "stats.json").read_text(encoding="utf-8"))
     files = sorted(glob.glob(str(out / "data" / "*.parquet")))
     licenses = _counts(files, "license")
     sources = _counts(files, "source")
     categories = _counts(files, "category")
-    nbytes = {s: sum(Path(f).stat().st_size for f in files if Path(f).name.startswith(s)) for s in stats}
-    features = [("id", "string"), ("category", "string"), ("domain", "string"), ("dictated", "string"),
-                ("final_text", "string"), ("dictionary", "string-list"), ("lists", "bool"), ("messages", "messages"),
-                ("source", "string"), ("source_url", "string"), ("license", "string")]
+    nbytes = {
+        s: sum(Path(f).stat().st_size for f in files if Path(f).name.startswith(s)) for s in stats
+    }
+    features = [
+        ("id", "string"),
+        ("category", "string"),
+        ("domain", "string"),
+        ("dictated", "string"),
+        ("final_text", "string"),
+        ("dictionary", "string-list"),
+        ("lists", "bool"),
+        ("messages", "messages"),
+        ("source", "string"),
+        ("source_url", "string"),
+        ("license", "string"),
+    ]
     total = sum(s["rows"] for s in stats.values())
     card = f"""---
 pretty_name: Dictation to Text
@@ -122,16 +174,19 @@ go, spoken self-corrections and editing commands are applied, spoken lists becom
 
 It is the training data of [Utter](https://github.com/ductai199x/utter)'s cleanup models, the corpus of the Light v1
 model (`utter-light-v1-q4_0.gguf` in [ductai199x/utter](https://huggingface.co/ductai199x/utter)); the Quality v1
-model was trained on a subset of it. Its speech counterpart, the audio these transcripts came from, is
+model was trained on 45,660 of its pairs, with Dictionary lines drawn separately. Its speech counterpart, the audio
+these transcripts came from, is
 [ductai199x/dictation-speech](https://huggingface.co/datasets/ductai199x/dictation-speech) (joined on `id` =
 `rendition_id`).
 
 ## Dataset structure
 
-| split | rows | final texts fixed (see Curation) |
-|---|---|---|
-| train | {stats["train"]["rows"]:,} | {stats["train"]["fixed"]} |
-| test | {stats["test"]["rows"]:,} | {stats["test"]["fixed"]} |
+| split | rows | final texts fixed | duplicates removed |
+|---|---|---|---|
+| train | {stats["train"]["rows"]:,} | {stats["train"]["fixed"]} | {stats["train"]["duplicates_removed"]} |
+| test | {stats["test"]["rows"]:,} | {stats["test"]["fixed"]} | {stats["test"]["duplicates_removed"]} |
+
+The fixes and the removed duplicates are described under Curation.
 
 The test split's passages are not in the training split.
 
@@ -157,14 +212,18 @@ Categories:
 
 {_table([[k, f"{v:,}"] for k, v in sources.most_common()], ["source", "rows"])}
 
-Passages from [Common Pile](https://huggingface.co/common-pile) (Stack Exchange, arXiv abstracts, Ubuntu IRC, GitHub)
+Passages from [Common Pile](https://huggingface.co/common-pile) (Stack Exchange, arXiv abstracts, Ubuntu IRC)
 and [Wikipedia](https://huggingface.co/datasets/wikimedia/wikipedia), plus everyday messages, emails and notes written
 for this dataset (`synthetic`). Every row carries its passage's license:
 
 {_table([[k, f"{v:,}"] for k, v in licenses.most_common()], ["license", "rows"])}
 
-The dataset as a whole is CC BY-SA 4.0, as most of its text requires (share-alike); rows under more permissive
-licenses keep theirs, and text written for the dataset is CC BY-SA 4.0. Attribution: each row's `source_url`.
+The dataset as a whole is CC BY-SA 4.0, as most of its text requires (share-alike; CC BY-SA 2.5 and 3.0 allow
+adaptations under later versions). Rows under CC0 or in the public domain keep that status; text written for the
+dataset is CC BY-SA 4.0. The passages were adapted (spoken renditions, corrections; see Dataset creation).
+Attribution: each row's `source_url`, the page with the passage and its author.
+
+{LICENSING} {stats["train"]["excluded_for_license"] + stats["test"]["excluded_for_license"]:,} rows were removed for this.
 
 ## Dataset creation
 
@@ -183,12 +242,18 @@ licenses keep theirs, and text written for the dataset is CC BY-SA 4.0. Attribut
 - {stats["train"]["fixed"] + stats["test"]["fixed"]} final texts had a mechanical punctuation slip from their source
   and were fixed where no reading makes them right: `?.`/`.?` after a word (not an abbreviation), `,.`, a space before
   a comma, semicolon or colon, and `..` that is not an ellipsis. Code is left as it is.
+- {stats["train"]["duplicates_removed"] + stats["test"]["duplicates_removed"]} rows were exact repeats: two renditions of one passage (most often "natural" and
+  "explicit") that the recognizer heard identically. One of each pair is kept, the `natural` one where there is one,
+  so no pair repeats and every row's category shows in its input. The Light v1 model was trained with them.
+- {stats["train"]["wrapped_prose_lists"] + stats["test"]["wrapped_prose_lists"]} rows came from "lists" that are
+  really hard-wrapped prose (a code comment or quoted paragraph split into items, so its prose version read
+  "during the. Installation."): removed.
 - Grammar-category targets are their passage with its grammar corrected.
-- Gold texts otherwise keep their writers' style, including informal punctuation.
+- Final texts otherwise keep their writers' style, including informal punctuation.
 
 ## Personal and sensitive information
 
-Public posts (Stack Exchange, IRC, GitHub) can contain usernames and the occasional personal detail their writers
+Public posts (Stack Exchange, IRC) can contain usernames and the occasional personal detail their writers
 published. Nothing was added; nothing about the people who use Utter is in this dataset.
 
 ## Bias, risks and limitations
@@ -197,6 +262,13 @@ published. Nothing was added; nothing about the people who use Utter is in this 
   accents and recognition errors are only partly represented.
 - Technical forums are overrepresented next to everyday writing.
 - Targets were produced with a language model's help and checked automatically, not by people, row by row.
+
+## Supplementary files
+
+- `extra/cleanup_checks.jsonl`: the 112 hand-written checks Utter's cleanup models were chosen on (fillers,
+  backtracking, numbers, lists, spoken formatting, dictionary words, code, questions that must be typed rather than
+  answered...): `id`, `category`, `input` (what was heard), `expected` (what should be typed), `must_not_contain`.
+  Not part of the dataset's configs.
 
 ## Use
 
@@ -219,37 +291,83 @@ def voice(out: Path) -> None:
     stats: dict[str, dict] = {}
     for f in sorted(out.glob("stats-*.json")):
         stats.update(json.loads(f.read_text(encoding="utf-8")))
-    files = sorted(glob.glob(str(out / "data" / "*" / "*.parquet")))
-    licenses = _counts(files, "license")
-    sources = _counts(files, "source")
-    categories = _counts(files, "category")
-    engines = _counts(files, "tts_engine")
-    features = [("id", "string"), ("rendition_id", "string"), ("audio", "audio"), ("duration_s", "float32"),
-                ("language", "string"), ("transcript", "string"), ("final_text", "string"), ("category", "string"),
-                ("domain", "string"), ("annotations", "string-list"), ("tts_engine", "string"), ("tts_voice", "string"),
-                ("tts_settings", "string-list"), ("collection", "string"), ("source", "string"),
-                ("source_url", "string"), ("license", "string")]
-    split_rows = collections.Counter()
-    split_bytes = collections.Counter()
-    split_hours = collections.Counter()
-    for c, s in stats.items():
-        split_rows[s["split"]] += s["rows"]
-        split_hours[s["split"]] += s["hours"]
-        split_bytes[s["split"]] += sum(Path(f).stat().st_size for f in glob.glob(str(out / "data" / c / "*.parquet")))
+    shards: dict[str, dict] = {}
+    for f in sorted(out.glob("summary-*.json")):
+        shards.update(json.loads(f.read_text(encoding="utf-8")))
+    shards.update(summarize(out))
+
+    def total(column: str) -> collections.Counter:
+        c = collections.Counter()
+        for sh in shards.values():
+            c.update(sh[column])
+        return c
+
+    licenses, sources, categories, engines = (
+        total(c) for c in ("license", "source", "category", "tts_engine")
+    )
+    features = [
+        ("id", "string"),
+        ("rendition_id", "string"),
+        ("audio", "audio"),
+        ("duration_s", "float32"),
+        ("language", "string"),
+        ("transcript", "string"),
+        ("final_text", "string"),
+        ("category", "string"),
+        ("domain", "string"),
+        ("annotations", "string-list"),
+        ("tts_engine", "string"),
+        ("tts_voice", "string"),
+        ("tts_settings", "string-list"),
+        ("collection", "string"),
+        ("source", "string"),
+        ("source_url", "string"),
+        ("license", "string"),
+    ]
+    # Per split and collection, from the shards themselves (the card cannot drift from the data).
+    split_rows: collections.Counter = collections.Counter()
+    split_bytes: collections.Counter = collections.Counter()
+    split_hours: collections.Counter = collections.Counter()
+    by_collection: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    for sh in shards.values():
+        split, c = sh["split"], sh["collection"]
+        split_rows[split] += sh["rows"]
+        split_bytes[split] += sh["bytes"]
+        split_hours[split] += sh["hours"]
+        by_collection[c][split] += sh["rows"]
+        by_collection[c]["hours"] += sh["hours"]
     configs = ["- config_name: all\n  default: true\n  data_files:"]
     for split in ("train", "test"):
         if split_rows[split]:
             configs.append(f"  - split: {split}\n    path: data/*/{split}-*.parquet")
-    for c, s in stats.items():
-        configs.append(f"- config_name: {c}\n  data_files:\n  - split: {s['split']}\n    path: data/{c}/{s['split']}-*.parquet")
+    for c in stats:
+        configs.append(f"- config_name: {c}\n  data_files:")
+        for split in ("train", "test"):
+            if by_collection[c][split]:
+                configs.append(f"  - split: {split}\n    path: data/{c}/{split}-*.parquet")
     splits_yaml = "\n".join(
-        f"  - name: {s}\n    num_bytes: {split_bytes[s]}\n    num_examples: {split_rows[s]}" for s in ("train", "test") if split_rows[s]
+        f"  - name: {s}\n    num_bytes: {split_bytes[s]}\n    num_examples: {split_rows[s]}"
+        for s in ("train", "test")
+        if split_rows[s]
     )
     total = sum(split_rows.values())
     hours = sum(split_hours.values())
     regenerated = sum(s.get("regenerated", 0) for s in stats.values())
     dropped = sum(s.get("dropped_as_in_train", 0) for s in stats.values())
-    collection_rows = [[c, s["split"], f"{s['rows']:,}", f"{s['hours']:.1f}", ", ".join(s["categories"])] for c, s in stats.items()]
+    excluded = sum(s.get("excluded_for_license", 0) for s in stats.values())
+    wrapped = sum(s.get("wrapped_prose_lists", 0) for s in stats.values())
+    unpaired = sum(s.get("no_text_pair", 0) for s in stats.values())
+    corpus_test = sum(by_collection[c]["test"] for c in stats if c.startswith("corpus"))
+    collection_rows = [
+        [
+            c,
+            f"{by_collection[c]['train']:,}" if by_collection[c]["train"] else "",
+            f"{by_collection[c]['test']:,}" if by_collection[c]["test"] else "",
+            f"{by_collection[c]['hours']:.1f}",
+            ", ".join(s["categories"]),
+        ]
+        for c, s in stats.items()
+    ]
     card = f"""---
 pretty_name: Dictation Speech
 license: cc-by-sa-4.0
@@ -292,9 +410,12 @@ false starts, self-corrections, editing commands, spoken punctuation, lists, gra
 word for word and **the text the speaker meant to type**. 16 kHz mono, stored losslessly as FLAC. All speech is
 synthetic (Kokoro-82M and Chatterbox).
 
-It is the speech side of [Utter](https://github.com/ductai199x/utter)'s data: the training split is the audio behind
-[ductai199x/dictation-to-text](https://huggingface.co/datasets/ductai199x/dictation-to-text) (join `rendition_id` to
-its `id`), and the test split is the eval sets Utter's models are measured on.
+It is the speech side of [Utter](https://github.com/ductai199x/utter)'s data:
+
+- the `corpus*` collections are the audio behind
+  [ductai199x/dictation-to-text](https://huggingface.co/datasets/ductai199x/dictation-to-text), one clip per text pair
+  (join `rendition_id` to its `id`), each in its pair's split: train, or test for the {corpus_test:,} held-out passages;
+- the other collections are the eval sets Utter's models are measured on, all test.
 
 ## Dataset structure
 
@@ -304,11 +425,14 @@ its `id`), and the test split is the eval sets Utter's models are measured on.
 
 Configs: `all` (the default: every collection, train and test) and one per collection:
 
-{_table(collection_rows, ["collection", "split", "clips", "hours", "categories"])}
+{_table(collection_rows, ["collection", "train", "test", "hours", "categories"])}
 
 The same rendition can be in more than one test collection (spoken by both engines, or in a focused set and the main
-one); `id` is unique, `rendition_id` is shared. No rendition is in both splits: {dropped} test clips that were also in
-the training data were left out.
+one); `id` is unique, `rendition_id` is shared. No rendition and no passage is in both splits: {dropped} eval clips
+that were also training data were left out. Left out as well: {excluded:,} clips for licensing (see Sources and
+licensing), {wrapped:,} of "lists" that are really hard-wrapped prose (a code comment split into items), and {unpaired:,}
+training clips whose rendition has no pair in dictation-to-text (most are one of two renditions the recognizer heard
+identically, a repeat removed there; the rest were filtered when the training pairs were made).
 
 | column | type | meaning |
 |---|---|---|
@@ -340,15 +464,19 @@ Categories:
 
 {_table([[k, f"{v:,}"] for k, v in licenses.most_common()], ["license", "clips"])}
 
-The dataset is CC BY-SA 4.0, as most of its text requires; each row keeps its passage's license and source URL. The
-synthetic speech: Kokoro-82M is Apache-2.0; Chatterbox (MIT) was conditioned on reference voices donated for this use.
+The dataset is CC BY-SA 4.0, as most of its text requires; each row keeps its passage's license and source URL (the
+page with the passage and its author). {LICENSING} {excluded:,} clips were removed for this.
+
+The speech: Kokoro-82M is Apache-2.0, and its output is unrestricted; Chatterbox (MIT) cloned voices from
+[kyutai/tts-voices](https://huggingface.co/kyutai/tts-voices) (`voice-donations`, CC0: recordings people donated
+to the public domain).
 
 ## Dataset creation
 
 1. Passages (Common Pile, Wikipedia, and everyday messages written for the dataset), rewritten as spoken renditions
    by a language model (Gemma 4 26B) in the categories above.
 2. Spoken by Kokoro-82M (twelve English voices, rate 0.9-1.1, chosen per rendition by a hash of its id) or Chatterbox
-   (voice-cloned from donated references, `exaggeration` varied), resampled to 16 kHz, with 0.25 s of silence around.
+   (voice-cloned from Kyutai's CC0 donated voices, `exaggeration` varied), resampled to 16 kHz, with 0.25 s of silence around.
 3. {regenerated:,} training clips whose original audio was lost were spoken again with their recorded text, voice and
    speed (`audio=regenerated`). Kokoro is not bit-exact across runs: they match their originals in content and length
    to within a few hundredths of a second, not sample for sample, so the transcripts in dictation-to-text came from
@@ -358,8 +486,9 @@ synthetic speech: Kokoro-82M is Apache-2.0; Chatterbox (MIT) was conditioned on 
 
 ## Personal and sensitive information
 
-All speech is synthetic; no recording of a real person is included. The Chatterbox voices imitate donated reference
-recordings: they are numbered, not named, and must not be used to identify or impersonate the donors. Passage text
+All speech is synthetic; no recording of a real person is included. The Chatterbox voices imitate recordings people
+donated to the public domain (kyutai/tts-voices); they are numbered here, not named, and must not be used to identify
+or impersonate the donors. Passage text
 from public posts can contain the usernames their writers published.
 
 ## Bias, risks and limitations
@@ -368,6 +497,12 @@ from public posts can contain the usernames their writers published.
   microphones are not represented. Use it for dictation formatting and cleanup, and as an ASR stress test, not as a
   substitute for real speech.
 - Technical forums are overrepresented next to everyday writing.
+
+## Supplementary files
+
+- `extra/dictionary-terms/<collection>-terms<N>-s0.txt`: the dictionaries used for the dictionary evals on those test
+  collections, one term per line: N distinct terms (product names, acronyms, paths: `GitHub`, `TF32`, `LTS`) sampled
+  with seed 0 from the collection's final texts, as a person's dictionary would hold them.
 
 ## Use
 
@@ -390,6 +525,7 @@ Built by `tools/publish/voice.py` in the Utter repository. Card authors: Tai Duc
 app = typer.Typer()
 app.command("text")(text)
 app.command("voice")(voice)
+app.command("summary")(summary)
 
 if __name__ == "__main__":
     app()
