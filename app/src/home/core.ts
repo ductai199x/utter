@@ -25,6 +25,7 @@ export interface Settings {
   model: Model;
   keep_history: KeepHistory;
   debug_log: boolean;
+  keep_logs: boolean;
   paste: PasteOverride[];
 }
 
@@ -63,6 +64,7 @@ const mock: HomeState = {
     model: 'quality',
     keep_history: 'forever',
     debug_log: false,
+    keep_logs: true,
     paste: [],
   },
   error: null,
@@ -90,7 +92,7 @@ export const saveSettings = (settings: Settings) => {
   mock.settings = clone(settings);
   return Promise.resolve(clone(settings));
 };
-export const openPath = (which: 'settings' | 'data') =>
+export const openPath = (which: 'settings' | 'data' | 'logs') =>
   inTauri ? invoke<void>('open_path', { which }) : Promise.resolve();
 
 export const onState = (f: (s: HomeState) => void): Promise<UnlistenFn> =>

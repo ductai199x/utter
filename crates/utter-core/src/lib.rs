@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod logs;
+
 /// Utter's data folder: `UTTER_DATA_DIR` if set, else the platform's place for per-user app
 /// data, in a folder of its own for an installed copy and a sibling for development (
 /// 2026-10-11):

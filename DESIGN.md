@@ -108,8 +108,8 @@ idle ──key down──► listening ──key up──► finishing ──►
                    cancelled
 ```
 
-1. **Key down.** The hook thread records the time and signals the pipeline. Nothing else
-   happens inside the hook callback. The mic stream is already open and recording into the
+1. **Key down.** The listener thread records the time and signals the pipeline. Nothing else
+   happens on that thread. The mic stream is already open and recording into the
    ring buffer: Utter keeps a pre-roll of about 300 ms so the first word is never cut off.
    The Bar appears within one frame. The recognizer starts a warm-up pass at once: an idle
    GPU drops its clocks, and a cold pass takes about 5 times as long as a warm one
@@ -239,7 +239,7 @@ directly.
 
 | Trait | Windows | Linux (GNOME, Wayland) | macOS |
 |---|---|---|---|
-| `Hotkey` | `SetWindowsHookEx` low-level keyboard and mouse hooks on a dedicated thread. Sided modifiers (Right Ctrl and so on), auto-repeat collapsed, mouse side buttons. | xdg-desktop-portal GlobalShortcuts; evdev when the user is in the `input` group (needed for hold-to-talk) | `CGEventTap` |
+| `Hotkey` | Raw Input (`RIDEV_INPUTSINK`) to a message-only window on a dedicated thread; not a `WH_KEYBOARD_LL` hook, which Windows stops calling while a Chromium/WebView2 window has focus. Sided modifiers (Right Ctrl and so on), auto-repeat collapsed, mouse side buttons. | xdg-desktop-portal GlobalShortcuts; evdev when the user is in the `input` group (needed for hold-to-talk) | `CGEventTap` |
 | `Insert` | Clipboard plus `SendInput` Ctrl+V. Fallback: `SendInput` Unicode keystrokes. | Portal RemoteDesktop or uinput; `wl-clipboard` | Pasteboard plus `CGEvent` Cmd+V |
 | `Context` | UI Automation: app, window title, text near the caret, selection | AT-SPI | Accessibility API (`AXUIElement`) |
 | `Focus` | Foreground window handle and process | Limited on Wayland: portal plus AT-SPI | `NSWorkspace` plus AX |

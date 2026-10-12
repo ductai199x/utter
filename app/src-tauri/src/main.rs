@@ -71,6 +71,9 @@ struct BarWords {
 #[derive(Clone)]
 struct Bar {
     window: WebviewWindow,
+    /// Read once, on the UI thread: asking for it from another thread waits for the UI thread,
+    /// and dictation must never wait on the UI.
+    hwnd: Option<isize>,
     generation: Arc<AtomicU64>,
     listening: Arc<AtomicBool>,
     /// The microphone's level, for the waveform; replaced when the microphone changes.
@@ -89,12 +92,14 @@ struct Applied {
 
 impl Bar {
     fn new(window: WebviewWindow) -> Self {
-        if let Ok(hwnd) = window.hwnd() {
-            overlay::make_overlay(hwnd.0 as isize);
+        let hwnd = window.hwnd().ok().map(|h| h.0 as isize);
+        if let Some(h) = hwnd {
+            overlay::make_overlay(h);
         }
         let _ = window.set_ignore_cursor_events(true);
         Self {
             window,
+            hwnd,
             generation: Arc::new(AtomicU64::new(0)),
             listening: Arc::new(AtomicBool::new(false)),
             meter: Arc::new(Mutex::new(None)),
@@ -102,7 +107,7 @@ impl Bar {
     }
 
     fn handle(&self) -> Option<isize> {
-        self.window.hwnd().ok().map(|h| h.0 as isize)
+        self.hwnd
     }
 
     fn emit_state(&self, state: BarState) {
@@ -387,10 +392,15 @@ fn run_pipeline(
         .expect("spawn the pipeline");
 }
 
+/// Sets the tray's tooltip on the UI thread without waiting for it: a tray call from another
+/// thread blocks until the UI thread has run it, and dictation must never wait on the UI.
 fn set_tray_status(app: &AppHandle, text: &str) {
-    if let Some(tray) = app.tray_by_id("main") {
-        let _ = tray.set_tooltip(Some(text));
-    }
+    let (handle, text) = (app.clone(), text.to_owned());
+    let _ = app.run_on_main_thread(move || {
+        if let Some(tray) = handle.tray_by_id("main") {
+            let _ = tray.set_tooltip(Some(text));
+        }
+    });
 }
 
 /// When the process started: startup is measured from here, the wait a person sees.
@@ -460,6 +470,7 @@ fn main() {
         })
         .setup(|app| {
             tracing::info!("setup at {:.2} s", since_launch());
+            watch_ui_thread(app.handle().clone());
             let open = MenuItem::with_id(app, "open", "Open Utter", true, None::<&str>)?;
             // Their shortcuts are shown beside them (docs/ux/insertion.md).
             let paste = MenuItem::with_id(app, "paste-last", "Paste last dictation", true, Some("Alt+Shift+Z"))?;
@@ -536,9 +547,58 @@ fn main() {
         .expect("run Utter");
 }
 
+/// Logs to stderr (a development build's console) and to the rotating `logs/utter.log`
+/// (utter_core::logs), which settings.toml `keep_logs` turns off. Read before anything logs, so
+/// a person who turned logs off never gets one.
 fn tracing_subscriber_init() {
-    use tracing_subscriber::EnvFilter;
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,ort=warn")))
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{EnvFilter, fmt};
+    let keep = Settings::load_or_create(&Settings::path()).map_or(true, |s| s.keep_logs);
+    utter_core::logs::set_enabled(keep);
+    let filter = || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,ort=warn"));
+    let file = Mutex::new(utter_core::logs::RotatingFile::new("utter.log"));
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr).with_filter(filter()))
+        .with(fmt::layer().with_ansi(false).with_writer(file).with_filter(filter()))
         .init();
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "Utter starts");
+}
+
+/// Logs when the UI thread is slow to answer. Nothing in dictation waits on it, but a stuck UI
+/// thread delays the Bar and the windows, and this says when and for how long.
+fn watch_ui_thread(app: AppHandle) {
+    /// When the pending check was sent (ms since launch), 0 when none is pending.
+    static PENDING: AtomicU64 = AtomicU64::new(0);
+    let ms = || (since_launch() * 1000.0) as u64 + 1;
+    let spawned = std::thread::Builder::new().name("utter-ui-watch".into()).spawn(move || {
+        let mut warned = 0;
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let sent = PENDING.load(Ordering::Relaxed);
+            if sent != 0 {
+                let late = (ms() - sent) / 1000;
+                if late >= 2 && late >= warned + 5 {
+                    warned = late;
+                    tracing::warn!("the UI thread has not answered for {late} s");
+                }
+                continue;
+            }
+            warned = 0;
+            let now = ms();
+            PENDING.store(now, Ordering::Relaxed);
+            let sent = app.run_on_main_thread(move || {
+                let late = ms() - now;
+                PENDING.store(0, Ordering::Relaxed);
+                if late > 250 {
+                    tracing::warn!("the UI thread answered after {late} ms");
+                }
+            });
+            if sent.is_err() {
+                return;
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!("UI watch: {e}");
+    }
 }

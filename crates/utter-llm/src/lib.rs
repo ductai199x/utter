@@ -2,18 +2,47 @@
 //! the pinned `llama-cpp` runtime component, never from another installed application.
 //!
 //! [`LlamaServer::start`] launches it on a free local port with the CUDA libraries of the
-//! `cuda-runtime` component, waits until `/health` answers, and logs its output to
-//! `<data_dir>/logs/llama-server.log`. Dropping the handle stops it. [`LlamaServer::chat`]
+//! `cuda-runtime` component, waits until `/health` answers, and logs its output to the rotating
+//! `<data_dir>/logs/llama-server.log` (utter_core::logs). Dropping the handle stops it. [`LlamaServer::chat`]
 //! sends one chat completion and returns the text with llama-server's own timings.
 //! [`cleanup`] builds the cleanup request.
 
 pub mod cleanup;
 
-use std::fs::{self, File};
+use std::io::{BufRead, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
+
+/// llama-server's log, shared by every server this process runs (two overlap while a model
+/// switch loads the new one beside the old).
+const SERVER_LOG_NAME: &str = "llama-server.log";
+static SERVER_LOG: LazyLock<Mutex<utter_core::logs::RotatingFile>> =
+    LazyLock::new(|| Mutex::new(utter_core::logs::RotatingFile::new(SERVER_LOG_NAME)));
+
+fn server_log(line: &str) {
+    if let Ok(mut log) = SERVER_LOG.lock() {
+        let _ = log.write(line.as_bytes());
+        let _ = log.flush();
+    }
+}
+
+/// Copies one of the server's output streams into its log, a line at a time, until it closes.
+fn copy_to_log(stream: impl std::io::Read + Send + 'static) {
+    let spawned = std::thread::Builder::new().name("utter-llama-log".into()).spawn(move || {
+        let mut reader = std::io::BufReader::new(stream);
+        let mut line = Vec::new();
+        while reader.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+            server_log(&String::from_utf8_lossy(&line));
+            line.clear();
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!("llama-server's output will not be logged: {e}");
+    }
+}
 
 use serde::{Deserialize, Serialize};
 
@@ -137,11 +166,7 @@ impl LlamaServer {
             });
         }
         let port = free_port()?;
-        let logs = utter_core::data_dir().join("logs");
-        fs::create_dir_all(&logs).map_err(|source| LlmError::Io { path: logs.clone(), source })?;
-        let log = logs.join("llama-server.log");
-        let log_file = File::create(&log).map_err(|source| LlmError::Io { path: log.clone(), source })?;
-        let log_err = log_file.try_clone().map_err(|source| LlmError::Io { path: log.clone(), source })?;
+        let log = utter_core::logs::dir().join(SERVER_LOG_NAME);
 
         let mut cmd = Command::new(&exe);
         cmd.arg("--model").arg(&opts.model);
@@ -154,9 +179,17 @@ impl LlamaServer {
         cmd.args(&opts.extra_args);
         // The CUDA runtime comes from Utter's component, for this child only.
         cmd.env("PATH", prepend_path(&[llama.clone(), cuda]));
-        cmd.stdin(Stdio::null()).stdout(Stdio::from(log_file)).stderr(Stdio::from(log_err));
+        // Its output goes to the rotating log (utter_core::logs), or nowhere when logs are off.
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         utter_platform::process::no_console_window(&mut cmd);
-        let child = cmd.spawn().map_err(|source| LlmError::Io { path: exe.clone(), source })?;
+        let mut child = cmd.spawn().map_err(|source| LlmError::Io { path: exe.clone(), source })?;
+        server_log(&format!("--- llama-server started, model {}\n", opts.model.display()));
+        if let Some(out) = child.stdout.take() {
+            copy_to_log(out);
+        }
+        if let Some(err) = child.stderr.take() {
+            copy_to_log(err);
+        }
         // If Utter dies without running Drop, the OS ends the server, so it never keeps
         // holding the GPU's memory. Drop still stops it in the normal case.
         if let Err(e) = utter_platform::process::tie_to_this_process(&child) {
