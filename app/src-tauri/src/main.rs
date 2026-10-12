@@ -449,7 +449,20 @@ fn main() {
             if freed > 0 {
                 tracing::info!("removed superseded components: {:.1} GB", freed as f64 / 1e9);
             }
-            match setup::mode_for(&setup::missing()) {
+            let missing = setup::missing();
+            if !missing.is_empty() {
+                // A download is never started without saying what is missing and where it looked.
+                for c in &missing {
+                    tracing::warn!(
+                        id = %c.id,
+                        version = %c.version,
+                        dir = %c.dir().display(),
+                        installed = c.is_installed(),
+                        "setup needed: not installed, or a file is missing or cut short"
+                    );
+                }
+            }
+            match setup::mode_for(&missing) {
                 None => {
                     // The person started Utter: the card shows while it loads. Not at sign-in.
                     if !splash::started_at_sign_in() {
