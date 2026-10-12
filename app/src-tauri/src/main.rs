@@ -381,6 +381,7 @@ fn main() {
             history::history_count_older,
             history::history_clear,
             history::paste_rules,
+            history::open_paste_rules,
             setup::setup_check,
             setup::setup_microphones,
             setup::setup_mic_start,

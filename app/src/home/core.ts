@@ -195,16 +195,91 @@ export interface RuleRow {
   keep: PasteKeep;
   /** Utter's default for this program: [with, keep]. */
   default: [PasteWith, PasteKeep] | null;
+  /** Dictations into this program (History). */
+  dictations: number;
+}
+
+export interface AppRow {
+  exe: string;
+  name: string;
+  dictations: number;
 }
 
 export interface PasteRules {
   rules: RuleRow[];
-  openApps: { exe: string; name: string }[];
-  lastApp: { exe: string; name: string } | null;
+  openApps: AppRow[];
+  /** Apps dictated into, most used first. */
+  recentApps: AppRow[];
+  lastApp: AppRow | null;
 }
 
 export const pasteRules = (overrides: PasteOverride[]) =>
   inTauri ? invoke<PasteRules>('paste_rules', { overrides }) : Promise.resolve(mockRules(overrides));
+
+/** Opens the Paste rules window (in a browser review, the page in a new tab). */
+export const openPasteRules = () =>
+  inTauri ? invoke<void>('open_paste_rules') : Promise.resolve(void window.open('rules.html', 'rules'));
+
+export const WITH_LABELS: Record<PasteWith, string> = {
+  'ctrl-v': 'Ctrl+V',
+  'ctrl-shift-v': 'Ctrl+Shift+V',
+  'shift-insert': 'Shift+Insert',
+  type: 'Type it out',
+};
+export const KEEP_LABELS: Record<PasteKeep, string> = {
+  normal: 'Normal',
+  '3s': '3 seconds',
+  '5s': '5 seconds',
+  leave: 'Leave it there',
+};
+
+/** One row per app: programs of the same app (Remote Desktop's two) share a rule. */
+export interface RuleGroup {
+  name: string;
+  apps: string[];
+  with: PasteWith;
+  keep: PasteKeep;
+  default: [PasteWith, PasteKeep] | null;
+  dictations: number;
+}
+
+export function groupRules(rows: RuleRow[]): RuleGroup[] {
+  const out: RuleGroup[] = [];
+  for (const r of rows) {
+    const g = out.find(
+      (g) => g.name === r.name && g.with === r.with && g.keep === r.keep && `${g.default}` === `${r.default}`,
+    );
+    if (g) {
+      g.apps.push(r.app);
+      g.dictations += r.dictations;
+    } else out.push({ name: r.name, apps: [r.app], with: r.with, keep: r.keep, default: r.default, dictations: r.dictations });
+  }
+  return out;
+}
+
+/** Where a rule comes from: Utter's default as it is, a default the person changed, or theirs. */
+export function ruleSource(g: RuleGroup): 'default' | 'changed' | 'yours' {
+  if (!g.default) return 'yours';
+  return g.default[0] !== g.with || g.default[1] !== g.keep ? 'changed' : 'default';
+}
+
+const sameApp = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** The person's rules with `g` set to `rule`; back at Utter's default it has no entry, so a
+ *  better default in a later version still arrives. */
+export function withRule(paste: PasteOverride[], g: RuleGroup, rule: Pick<PasteOverride, 'with' | 'keep'>): PasteOverride[] {
+  const others = paste.filter((o) => !g.apps.some((a) => sameApp(o.app, a)));
+  const isDefault = g.default && g.default[0] === rule.with && g.default[1] === rule.keep;
+  return isDefault ? others : [...others, ...g.apps.map((app) => ({ app, ...rule }))];
+}
+
+/** The person's rules without `g`: a default goes back to Utter's, a rule of theirs goes. */
+export const withoutRule = (paste: PasteOverride[], g: RuleGroup) =>
+  paste.filter((o) => !g.apps.some((a) => sameApp(o.app, a)));
+
+/** The person's rules with a new one for `exe` (Ctrl+V, Normal until they change it). */
+export const withApp = (paste: PasteOverride[], exe: string): PasteOverride[] =>
+  paste.some((o) => sameApp(o.app, exe)) ? paste : [...paste, { app: exe, with: 'ctrl-v', keep: 'normal' }];
 
 // The stand-in core's History: a believable week of dictations, so the page can be reviewed
 // in a browser. Mock only; the app's History comes from history.rs.
@@ -335,21 +410,30 @@ function mockRules(overrides: PasteOverride[]): PasteRules {
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   const rules: RuleRow[] = MOCK_DEFAULTS.map(([app, name, w, k]) => {
     const mine = overrides.find((o) => same(o.app, app));
-    return { app, name, with: mine?.with ?? w, keep: mine?.keep ?? k, default: [w, k] };
+    return { app, name, with: mine?.with ?? w, keep: mine?.keep ?? k, default: [w, k], dictations: 0 };
   });
+  const used = (exe: string) => mockHistory.filter((e) => same(e.appExe, exe)).length;
+  rules.forEach((r) => (r.dictations = used(r.app)));
+  const named = new Map(mockHistory.map((e) => [e.appExe.toLowerCase(), e.appName]));
   for (const o of overrides) {
     if (!rules.some((r) => same(r.app, o.app))) {
-      rules.push({ app: o.app, name: o.app.replace(/\.exe$/i, ''), with: o.with, keep: o.keep, default: null });
+      const name = named.get(o.app.toLowerCase()) ?? o.app.replace(/\.exe$/i, '');
+      rules.push({ app: o.app, name, with: o.with, keep: o.keep, default: null, dictations: used(o.app) });
     }
   }
+  const recent = [...named.entries()]
+    .map(([exe, name]) => ({ exe: mockHistory.find((e) => e.appExe.toLowerCase() === exe)!.appExe, name, dictations: used(exe) }))
+    .sort((a, b) => b.dictations - a.dictations);
   return {
     rules,
     openApps: [
-      { exe: 'chrome.exe', name: 'Google Chrome' },
-      { exe: 'slack.exe', name: 'Slack' },
-      { exe: 'Code.exe', name: 'Visual Studio Code' },
-      { exe: 'WindowsTerminal.exe', name: 'Windows Terminal' },
+      { exe: 'chrome.exe', name: 'Google Chrome', dictations: used('chrome.exe') },
+      { exe: 'slack.exe', name: 'Slack', dictations: used('slack.exe') },
+      { exe: 'Code.exe', name: 'Visual Studio Code', dictations: used('Code.exe') },
+      { exe: 'WindowsTerminal.exe', name: 'Windows Terminal', dictations: used('WindowsTerminal.exe') },
+      { exe: 'Spotify.exe', name: 'Spotify', dictations: 0 },
     ],
-    lastApp: { exe: 'slack.exe', name: 'Slack' },
+    recentApps: recent,
+    lastApp: recent.find((a) => a.exe === 'slack.exe') ?? null,
   };
 }

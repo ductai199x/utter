@@ -169,6 +169,8 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
                 if let Some(e) = &s.error {
                     tracing::warn!("settings: {e}");
                 }
+                // The Paste rules window shows the same settings.
+                let _ = app.emit_to("rules", "home-state", s.clone());
                 let _ = app.emit_to("home", "home-state", s);
             }
         })
