@@ -185,3 +185,14 @@ environment (uv), and every bench and eval command.
 Windows, English. Next: context from the text around the cursor, styles per app, Command Mode,
 then Linux (GNOME) and macOS. Vietnamese, with switching between the two mid-sentence, is
 planned.
+
+## License
+
+Copyright (C) 2026 Tai Duc Nguyen.
+
+Utter's code is licensed under the [GNU Affero General Public License v3.0](LICENSE): you may use,
+study, change and share it, and if you distribute a modified version or run it as a service,
+you must publish its source under the same license.
+
+The models and datasets carry their own licenses, stated on their pages: the speech model's
+weights are CC-BY-4.0, and the datasets are CC-BY-SA with the source and license of every row.
