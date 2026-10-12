@@ -8,12 +8,10 @@ numbers are the same digits in the same order (text.numbers), so the gold stays 
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 
-from utter_tools.llm import Chat
-from utter_tools.text.numbers import spoken_digits
+from utter_tools.text import spoken_digits
 
 
 @dataclass
@@ -22,23 +20,6 @@ class Script:
     style: str
     text: str
     tags: dict[str, str] = field(default_factory=dict)
-
-
-def ask(
-    llm: Chat, system: str, user: str, schema: dict, seed: int, max_tokens: int = 400
-) -> dict | None:
-    """The LLM's proposal as data (JSON matching `schema`), or None if the reply is unreadable."""
-    out = llm.chat(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        max_tokens=max_tokens,
-        temperature=0.9,
-        seed=seed,
-        json_schema=schema,
-    )
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        return None
 
 
 _ALPHA = re.compile(r"[a-z]+")

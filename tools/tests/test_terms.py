@@ -1,5 +1,4 @@
-from utter_tools.text.dictionary import relevant_terms
-from utter_tools.text.terms import candidate_terms, lowercase_counts
+from utter_tools.text import candidate_terms, lowercase_counts, relevant_terms
 
 
 def test_relevant_terms_are_the_ones_heard():

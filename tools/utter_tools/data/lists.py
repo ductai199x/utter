@@ -3,10 +3,10 @@ recipe R3): spoken enumerations become bulleted lists, or numbered ones for step
 user turns lists off.
 
 Golds are real lists people wrote (Stack Exchange), extracted with the line that introduces them,
-and everyday lists an LLM writes (the sources are mostly technical). The spoken script is built by code from the
-list, in the ways people enumerate aloud: plainly ("eggs, milk, bread and coffee"), with cues
-("first... second...", "bullet point..."), or with "then... finally..." for steps. With lists
-off, the gold is the same content as prose, made from the same script.
+and everyday lists an LLM writes (the sources are mostly technical). The spoken script is built
+by code from the list, in the ways people enumerate aloud: plainly ("eggs, milk, bread and
+coffee"), with cues ("first... second...", "bullet point..."), or with "then... finally..." for
+steps. With lists off, the gold is the same content as prose, made from the same script.
 
 """
 
@@ -20,8 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from utter_tools import schema
-from utter_tools.data.batch import code_url, passage
+from utter_tools import common
+from utter_tools.data.batch import passage
 from utter_tools.data.passages import CODE, LATEX, SHARDS, URL, documents, english
 from utter_tools.data.script import Script
 from utter_tools.llm import Chat
@@ -159,11 +159,8 @@ def extract(per_shard: int, seed: int) -> list[dict]:
                     found.append((md, repo, url, lic))
         rng.shuffle(found)
         for md, repo, url, lic in found[:per_shard]:
-            try:
-                row = passage(schema.new_passage_id(md), "list", md, repo, url, lic)
-            except ValueError:
-                continue
-            if url:
+            row = passage("list", md, repo, url, lic)
+            if row is not None:
                 rows.append(row)
         print(f"{file}: {len(found)} lists, kept {min(per_shard, len(found))}", flush=True)
     return rows
@@ -179,13 +176,7 @@ TOPICS = (
     "steps to reset a router", "topics for a one-on-one",
 )  # fmt: skip
 
-_PROPOSE_LIST = """You help build test data for a dictation app. Write one realistic list a
-person might dictate: {topic}. Return JSON with:
-- "intro": a short line introducing it, ending with a colon ("Groceries for Saturday:"), or ""
-  for none;
-- "ordered": true for steps or a sequence, false for a set of items;
-- "items": 3 to 8 items, written the way a careful person types them: short noun phrases or
-  short sentences, consistent with each other, with quantities and names where natural."""
+_PROPOSE_LIST = common.prompt("write-list")
 
 _LIST_SCHEMA = {
     "type": "object",
@@ -198,10 +189,9 @@ _LIST_SCHEMA = {
 }
 
 
-def synth(count: int, seed: int, llm: Chat, rev: str, workers: int = 64) -> list[dict]:
+def synth(count: int, seed: int, llm: Chat, url: str, workers: int = 64) -> list[dict]:
     """`count` LLM-written everyday lists (domain "list-everyday"), seeded from `seed`: a batch
     with its own seed never repeats another's lists."""
-    url = code_url("lists", rev)
 
     def one(i: int) -> dict | None:
         topic = TOPICS[i % len(TOPICS)]
@@ -223,9 +213,7 @@ def synth(count: int, seed: int, llm: Chat, rev: str, workers: int = 64) -> list
         if intro and not intro.endswith(":"):
             intro += ":"
         md = ListPassage(intro, consistent(items), bool(p["ordered"])).markdown()
-        return passage(
-            schema.new_passage_id(md), "list-everyday", md, "synthetic", url, "generated"
-        )
+        return passage("list-everyday", md, "synthetic", url, "generated")
 
     with ThreadPoolExecutor(workers) as pool:
         return [row for row in pool.map(one, range(count)) if row]

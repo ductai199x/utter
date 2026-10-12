@@ -1,6 +1,6 @@
 import pytest
 
-from utter_tools.text.numbers import spoken_digits
+from utter_tools.text import spoken_digits
 
 
 @pytest.mark.parametrize(

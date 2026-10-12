@@ -12,20 +12,14 @@ from __future__ import annotations
 import random
 import re
 
+from utter_tools import common
 from utter_tools.data.lists import ListPassage, parse, script
-from utter_tools.data.script import Script, ask
+from utter_tools.data.script import Script
 from utter_tools.llm import Chat
 
-_PROPOSE_VALUE = """You help build test data for a dictation app. Given a passage, pick one
-concrete detail a speaker could first say wrong and fix later: a quantity, a time, a day, a date,
-a name, a place, an item. Return JSON with:
-- "target": the detail, one to five words copied EXACTLY from the passage (it must occur once);
-- "wrong": what the speaker first says instead: same kind of thing, plausible, different
-  (for "three boxes of eggs": "one box of eggs"; for "Thursday": "Tuesday")."""
+_PROPOSE_VALUE = common.prompt("propose-amend-value")
 
-_PROPOSE_EXTRA = """You help build test data for a dictation app. Given a list, propose one extra
-item the speaker might add by mistake and then remove: it fits the list, is not already in it,
-and is written like the other items. Return JSON with "extra"."""
+_PROPOSE_EXTRA = common.prompt("propose-amend-extra")
 
 _VALUE_SCHEMA = {
     "type": "object",
@@ -70,7 +64,7 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _amend_prose(passage: str, rng: random.Random, llm: Chat, seed: int) -> tuple[str, dict] | None:
-    p = ask(llm, _PROPOSE_VALUE, passage, _VALUE_SCHEMA, seed, max_tokens=200)
+    p = llm.ask(_PROPOSE_VALUE, passage, _VALUE_SCHEMA, seed, max_tokens=200)
     if not p:
         return None
     target, wrong = p.get("target", "").strip(), p.get("wrong", "").strip()
@@ -103,7 +97,7 @@ def _amend_list(
     items = list(lp.items)
     i = rng.randrange(len(items))
     if op == "delete":
-        p = ask(llm, _PROPOSE_EXTRA, lp.markdown(), _EXTRA_SCHEMA, seed, max_tokens=200)
+        p = llm.ask(_PROPOSE_EXTRA, lp.markdown(), _EXTRA_SCHEMA, seed, max_tokens=200)
         extra = (p or {}).get("extra", "").strip()
         if not extra or extra.lower() in (it.lower() for it in items):
             return None
@@ -117,7 +111,7 @@ def _amend_list(
             item=items[i].rstrip("."), prev=items[i - 1].rstrip(".")
         )
     else:
-        p = ask(llm, _PROPOSE_VALUE, items[i], _VALUE_SCHEMA, seed, max_tokens=200)
+        p = llm.ask(_PROPOSE_VALUE, items[i], _VALUE_SCHEMA, seed, max_tokens=200)
         wrong = (p or {}).get("wrong", "").strip()
         if not wrong or wrong.lower() == items[i].lower():
             return None

@@ -1,16 +1,24 @@
-"""The digits a text says, whether written as digits or spoken as words.
+"""Text logic the commands share:
 
-Used to check that a spoken rendition says the same numbers as its written script: both sides
-are reduced to the sequence of digits they contain, in order. Spoken number words become digits
-("seventy two" -> 72, "one hundred eight" -> 108, "seven point five" -> 7.5, "seven and a half"
--> 7.5, "third" -> 3); casual readings that split a number into parts give the same digit
-sequence as the number ("two forty" -> 2 40 -> "240"; "twenty twenty six" -> "2026"; "three
-fifteen" -> "315"). Digits already in the text are kept as they are ("v2.1", "4×", "TF32").
+- spoken_digits: the digits a text says, written or spoken ("seventy two" -> 72, "two forty" ->
+  "240", "seven and a half" -> 7.5), so a spoken version can be checked to say the same numbers;
+- candidate_terms: what a user would put in a dictionary from a text (acronyms, mixed-case terms,
+  names);
+- relevant_terms: the dictionary terms heard in a dictation, the mirror of gate::relevant_terms
+  in crates/utter-pipeline (the app sends only those).
 """
 
 from __future__ import annotations
 
 import re
+from collections import Counter
+from collections.abc import Iterable
+from itertools import pairwise
+
+from rapidfuzz.distance import Levenshtein
+
+# ---------------------------------------------------------------------------------------------
+# Numbers.
 
 _UNITS = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
@@ -175,3 +183,86 @@ def spoken_digits(text: str) -> str:
         out.extend(phrase.groups())
     # Leading zeros are not said ("06:25" -> "six twenty five"): drop them from every group.
     return "".join(g.lstrip("0") or "0" for g in out)
+
+
+# ---------------------------------------------------------------------------------------------
+# Dictionary terms.
+
+EDGE = ".,;:!?\"'()[]{}“”‘’…—–"
+WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:['-][A-Za-z0-9]+)*")
+
+
+def tokens(text: str) -> Counter[str]:
+    """Words as written, with surrounding punctuation stripped."""
+    return Counter(t for t in (w.strip(EDGE) for w in text.split()) if t)
+
+
+def lowercase_counts(texts: Iterable[str]) -> Counter[str]:
+    return Counter(t for text in texts for t in tokens(text) if t.islower())
+
+
+def _is_term(tok: str) -> bool:
+    """An acronym (LTS, GPU) or mixed case past the first letter (GitHub, iPhone)."""
+    letters = [c for c in tok if c.isalpha()]
+    if len(letters) < 2 or tok.isdigit():
+        return False
+    return all(c.isupper() for c in letters) or any(c.isupper() for c in tok[1:] if c.isalpha())
+
+
+def candidate_terms(text: str, lower: Counter[str], names: bool = True) -> set[str]:
+    """Terms a user would put in a dictionary from `text`: acronyms and mixed-case words, and with
+    `names` words capitalized mid-sentence. `lower` counts words written in lower case over the
+    texts the terms are drawn from, which rules out everyday words in capitals ("KEY", "ON")."""
+    out = set()
+    for prev, raw in pairwise(["."] + text.split()):
+        tok = raw.strip(EDGE)
+        if not WORD.fullmatch(tok):
+            continue
+        if (
+            _is_term(tok)
+            and lower[tok.lower()] < 3
+            or (
+                names
+                and not prev.endswith((".", "!", "?", ":"))
+                and len(tok) > 2
+                and tok[0].isupper()
+                and tok[1:].islower()
+                and lower[tok.lower()] == 0
+            )
+        ):
+            out.add(tok)
+    return out
+
+
+_SPLIT = re.compile(r"[^\w'-]+")
+
+
+def _letters(s: str) -> str:
+    return "".join(c for c in s.lower() if c.isalnum())
+
+
+def heard(term: str, words: list[str]) -> bool:
+    target = _letters(term)
+    if len(target) < 3:
+        return False
+    for n in (1, 2, 3):
+        for i in range(len(words) - n + 1):
+            joined = "".join(_letters(w) for w in words[i : i + n])
+            if not joined:
+                continue
+            # The distance is at least the difference in length: skip what cannot match.
+            if joined != target and (
+                len(target) < 5 or abs(len(joined) - len(target)) > 0.25 * len(target) + 1
+            ):
+                continue
+            d = Levenshtein.distance(joined, target)
+            # Short terms are close to too many words ("TOP" to "to"): exact only.
+            if d == 0 or (len(target) >= 5 and d / max(len(target), len(joined)) <= 0.25):
+                return True
+    return False
+
+
+def relevant_terms(text: str, dictionary: list[str]) -> list[str]:
+    # Rust splits on anything but alphanumerics, ' and -; \w adds "_", which _letters drops.
+    words = [w for w in _SPLIT.split(text.lower().replace("_", " ")) if w]
+    return [t for t in dictionary if heard(t, words)]

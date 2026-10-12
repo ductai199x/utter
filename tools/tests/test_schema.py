@@ -67,10 +67,9 @@ def test_licenses_map_to_the_datasets_ids():
     assert schema.license_id("https://creativecommons.org/licenses/by-sa/4.0/") == "cc-by-sa-4.0"
     assert schema.license_id("CC BY-SA 4.0") == "cc-by-sa-4.0"
     assert schema.license_id("generated") == schema.DATASET_LICENSE
-    with pytest.raises(ValueError):
-        schema.license_id("see repository")
+    assert schema.license_id("see repository") is None
+    assert schema.license_id("mit") is None
 
 
-def test_annotations_round_trip():
-    tags = {"scope": "word", "cue": "no wait"}
-    assert schema.from_annotations(schema.to_annotations(tags)) == tags
+def test_annotations_read_as_tags():
+    assert schema.tags(["scope=word", "cue=no wait"]) == {"scope": "word", "cue": "no wait"}

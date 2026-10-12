@@ -15,29 +15,13 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from rapidfuzz.distance import Levenshtein
+
+from utter_tools import common
 from utter_tools.data.grammar import annotator
 from utter_tools.llm import Chat
-from utter_tools.text.score import edit_distance
 
-SYSTEM = """You proofread sentences that will be the answer key for a voice-typing app, which must
-type exactly what a careful, fluent writer would. Propose fixes ONLY for clear errors:
-
-- typo: a misspelled word ("hasle" -> "hassle", "recieve" -> "receive");
-- capitalization: a proper noun, product, language or name written in lowercase ("ubuntu" ->
-  "Ubuntu", "ruby" -> "Ruby"), a sentence starting in lowercase, or a word in capitals for
-  emphasis ("you WANT this" -> "you want this"). Acronyms (GPU, LTS) and names that are
-  conventionally lowercase (feh, npm, iPhone) are not errors;
-- shorthand: chat abbreviations a speaker would say as words ("d/l" -> "download", "u" -> "you",
-  "pls" -> "please", "thx" -> "thanks").
-
-Do not touch anything else: no rewording, no grammar changes, no punctuation changes, no
-style changes. Informal tone, contractions and fragments are fine. Most sentences need nothing.
-
-If the text is not prose someone would dictate (a citation, a reference list, a table row, a
-file listing, code, a non-English passage), set "not_prose" to true.
-
-Return JSON: {"not_prose": bool, "fixes": [{"kind": ..., "wrong": exact text from the sentence,
-"right": replacement}]}."""
+SYSTEM = common.prompt("goldfix")
 
 SCHEMA = {
     "type": "object",
@@ -63,22 +47,7 @@ SCHEMA = {
 MAX_CHANGE = 0.12
 
 # The grammar pass, run on passages the proofreading pass has fixed.
-GRAMMAR_SYSTEM = """You proofread sentences that will be the answer key for a voice-typing app
-that writes correct, natural English. Propose fixes ONLY for grammar errors a careful editor
-would correct:
-
-- grammar: subject-verb agreement, tense, verb forms, articles, prepositions, noun number,
-  pronoun case, comparatives, word order, a missing word the grammar needs;
-- apostrophe: a missing or wrong apostrophe ("dont" -> "don't", "its" -> "it's", "users"
-  -> "user's" when possessive);
-- capitalization: a sentence or the pronoun "I" in lowercase ("i think" -> "I think").
-
-Keep everything else exactly: wording, tone, contractions, informal words ("gonna", "yeah"),
-fragments that read fine in writing ("Works for me."), punctuation style, British or American
-spelling. Do not rephrase correct sentences. Most sentences need nothing.
-
-Each fix is the shortest exact span from the sentence ("wrong") and its replacement ("right").
-Return JSON: {"fixes": [{"kind": ..., "wrong": ..., "right": ...}]}."""
+GRAMMAR_SYSTEM = common.prompt("goldfix-grammar")
 
 GRAMMAR_SCHEMA = {
     "type": "object",
@@ -125,7 +94,7 @@ def apply_grammar(text: str, fixes: list[dict]) -> Outcome:
         if not types or not types <= GRAMMAR_TYPES:
             continue
         text = candidate
-        changed += edit_distance(wrong, right)
+        changed += Levenshtein.distance(wrong, right)
         applied.append(f)
     if changed > MAX_CHANGE * len(text):
         return Outcome(None, applied, "too many fixes")
@@ -153,7 +122,7 @@ def apply(text: str, not_prose: bool, fixes: list[dict]) -> Outcome:
         m = where[0]
         text = text[: m.start()] + right + text[m.end() :]
         # Characters actually changed: "ubuntu" -> "Ubuntu" is one.
-        changed += edit_distance(wrong, right)
+        changed += Levenshtein.distance(wrong, right)
         applied.append(f)
     if changed > MAX_CHANGE * len(text):
         return Outcome(None, applied, "too many fixes")

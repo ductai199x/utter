@@ -8,10 +8,10 @@ How the development machine is laid out. Tai's choice (2026-10-09): downloads go
 |---|---|---|
 | Models under evaluation (Python tools) | `C:\Users\Tai\.cache\huggingface\hub` | The standard Hugging Face cache, shared with other projects. Never committed. |
 | Utter's runtime components (incl. shipped models) | `C:\Users\Tai\AppData\Local\Utter_dev\runtime\<id>-<version>\` | Installed by `utter-cli setup` from `crates/utter-runtime/components.json`. |
-| Eval sets | `C:\Users\Tai\AppData\Local\Utter_dev\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl` (`utter-eval sets` makes them from the datasets' test splits; `utter-eval bench fetch` the public ones). Override the root with `UTTER_DATA_DIR`. |
+| Eval sets | `C:\Users\Tai\AppData\Local\Utter_dev\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl` (`utter-grade` makes them from the datasets' test splits; `utter-bench fetch` the public ones). Override the root with `UTTER_DATA_DIR`. |
 | Eval results | `C:\Users\Tai\AppData\Local\Utter_dev\eval\results\` | `asr/`, `llm/`, `score/`, `judge/` per run and set, and the comparison reports. |
 | Data batches | `C:\Users\Tai\AppData\Local\Utter_dev\data\<batch>\` | `utter-data`'s working files for a batch of new data, until it is published. |
-| Training runs | `C:\Users\Tai\AppData\Local\Utter_dev\train\<run>\` | `utter-train run`: the data it trained on (with its dataset revision) and the adapter and merged model. |
+| Training runs | `C:\Users\Tai\AppData\Local\Utter_dev\train\<run>\` | `utter-train`: the data it trained on (with its dataset revision) and the adapter and merged model. |
 | Local model exports | `C:\Users\Tai\AppData\Local\Utter_dev\models\<name>\` | Output of `utter-speech export`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
 | Settings | `C:\Users\Tai\AppData\Local\Utter_dev\settings.toml` | The dictionary, list formatting, microphone and cleanup model. The Home window edits it; a hand edit applies on the next dictation too. Written with every key commented when missing. |
 | Logs | `C:\Users\Tai\AppData\Local\Utter_dev\logs\` | `utter.log` and `llama-server.log`, rotated at 5 MB (three kept); the setting `keep_logs` turns them off. |
@@ -22,14 +22,15 @@ The Hugging Face account is `ductai199x`. Its terms were accepted for the gated 
 
 ## The tools
 
-`tools/` is a uv project (Python 3.12): `uv sync` in `tools/` installs it with four commands, one
+`tools/` is a uv project (Python 3.12): `uv sync` in `tools/` installs it with five commands, one
 per job, each with `--help`:
 
 | Command | Does |
 |---|---|
-| `utter-data` | grows the published datasets, a batch at a time: passages, spoken versions, speech, transcripts, text rows, then build, audit and upload |
+| `utter-data` | grows the published datasets, a batch at a time: passages, spoken versions, speech, transcripts, text rows, then build, check and upload |
 | `utter-train` | fine-tunes a cleanup model on the text dataset (at a pinned revision, with the shipped recipe) and exports its Q4_0 GGUF |
-| `utter-eval` | grades cleanup models on the datasets' test splits (`utter-eval run`), and speech models on public test sets (`utter-eval bench`) |
+| `utter-grade` | grades cleanup models on the datasets' test splits: how often each types what the speaker meant |
+| `utter-bench` | speech models on public test sets, by word error rate |
 | `utter-speech` | rebuilds the speech model Utter ships: ONNX export, 8-bit encoder, check against Transformers |
 
 The two datasets on the Hub are the standard every command reads and writes
@@ -56,11 +57,10 @@ Linux build of `utter-cli`, `UTTER_LLAMA_SERVER` at a llama-server built at the 
 
 ```
 cd tools
-uv run utter-eval run --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf   # the cleanup eval
-uv run utter-eval bench fetch                  # the public speech test sets (300 clips each)
-uv run utter-eval bench run                    # every speech model on every set it covers
-uv run utter-eval bench compare A B            # paired bootstrap of two models' WER
-uv run utter-train run quality-v3 --base e4b --gpus 2
+uv run utter-grade --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf   # the cleanup eval
+uv run utter-bench fetch                       # the public speech test sets (300 clips each)
+uv run utter-bench run                         # every speech model on every set it covers
+uv run utter-train --name quality-v3 --base e4b --gpus 2
 uv run utter-data new my-batch --collection corpus-v3 --seed 7
 uv run utter-speech export                     # export parakeet-ultra for the Rust core
 

@@ -75,6 +75,12 @@ def _strided_taps(
     return xp[..., di : di + 2 * t_out - 1 : 2, dj : dj + 2 * f_out - 1 : 2]
 
 
+def _frozen(bias: torch.Tensor | None) -> nn.Parameter:
+    """A copy of a conv's bias (every conv in the subsampling has one) that is not trained."""
+    assert bias is not None, "the subsampling convs have biases"
+    return nn.Parameter(bias.clone(), requires_grad=False)
+
+
 class SubsamplingNoConv(nn.Module):
     """ParakeetEncoderSubsamplingConv2D for 3x3 stride-2 convs with padding 1, as in
     Parakeet TDT 0.6B: [conv(1->C), ReLU, (depthwise conv, pointwise conv, ReLU) x (n - 1)]."""
@@ -85,7 +91,7 @@ class SubsamplingNoConv(nn.Module):
         convs = [layer for layer in s.layers if isinstance(layer, nn.Conv2d)]
         first = convs[0]
         self.first_w = nn.Parameter(first.weight[:, 0].clone(), requires_grad=False)  # [C, 3, 3]
-        self.first_b = nn.Parameter(first.bias.clone(), requires_grad=False)
+        self.first_b = _frozen(first.bias)
         self.dw_w, self.dw_b, self.pw_w, self.pw_b = (
             nn.ParameterList(),
             nn.ParameterList(),
@@ -96,11 +102,11 @@ class SubsamplingNoConv(nn.Module):
             self.dw_w.append(
                 nn.Parameter(dw.weight[:, 0].clone(), requires_grad=False)
             )  # [C, 3, 3]
-            self.dw_b.append(nn.Parameter(dw.bias.clone(), requires_grad=False))
+            self.dw_b.append(_frozen(dw.bias))
             self.pw_w.append(
                 nn.Parameter(pw.weight[:, :, 0, 0].clone(), requires_grad=False)
             )  # [C, C]
-            self.pw_b.append(nn.Parameter(pw.bias.clone(), requires_grad=False))
+            self.pw_b.append(_frozen(pw.bias))
         self.linear = s.linear
 
     @staticmethod

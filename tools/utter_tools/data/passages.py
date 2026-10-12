@@ -25,7 +25,6 @@ import re
 from collections.abc import Iterator
 from pathlib import Path
 
-from utter_tools import schema
 from utter_tools.data.batch import passage
 
 # (domain, repo, file, kind of document)
@@ -62,7 +61,8 @@ SHARDS = [
 
 URL = re.compile(r"https?://|www\.|\.(com|org|net|io)/\S", re.IGNORECASE)
 CODE = re.compile(
-    r"`|\{|\}|=>|->|::|==|!=|&&|\|\||</?\w+>|\$\w|\\[a-zA-Z]|;\s*$|\(\)|\w\(\w*\)|\[\d+\]|^\s*[#>*\-+] "
+    r"`|\{|\}|=>|->|::|==|!=|&&|\|\||</?\w+>|\$\w|\\[a-zA-Z]|;\s*$"
+    r"|\(\)|\w\(\w*\)|\[\d+\]|^\s*[#>*\-+] "
 )
 LATEX = re.compile(r"\$|\\\w+")
 # Pasted program output: shell prompts, bracketed version strings, installer progress, error codes.
@@ -219,8 +219,8 @@ def candidates(path: Path, kind: str) -> Iterator[tuple[str, str, str, str]]:
 
 def collect(per_domain: int, seed: int) -> list[dict]:
     """`per_domain` passages from each domain, sampled with `seed` from up to MAX_PER_SHARD
-    candidates per shard; documents under a license the datasets do not publish (license_id
-    raises) or without a URL to credit are skipped."""
+    candidates per shard; documents under a license the datasets do not publish, or without a
+    URL to credit, are skipped."""
     from huggingface_hub import hf_hub_download
 
     rng = random.Random(seed)
@@ -233,11 +233,8 @@ def collect(per_domain: int, seed: int) -> list[dict]:
             if text in seen:
                 continue
             seen.add(text)
-            try:
-                row = passage(schema.new_passage_id(text), domain, text, repo, url, lic)
-            except ValueError:
-                continue
-            if not url:
+            row = passage(domain, text, repo, url, lic)
+            if row is None:
                 continue
             pools.setdefault(domain, []).append(row)
             n += 1

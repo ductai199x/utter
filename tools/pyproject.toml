@@ -16,10 +16,11 @@ dependencies = [
 ]
 
 [project.scripts]
-utter-data = "utter_tools.data.cli:app"
-utter-eval = "utter_tools.eval.cli:app"
-utter-speech = "utter_tools.speech.cli:app"
-utter-train = "utter_tools.train.cli:app"
+utter-grade = "utter_tools.grade:cli"
+utter-train = "utter_tools.train:cli"
+utter-data = "utter_tools.data.cli:cli"
+utter-bench = "utter_tools.bench:cli"
+utter-speech = "utter_tools.speech:cli"
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -63,7 +64,7 @@ grammar = [
 ]
 
 [tool.uv]
-default-groups = ["dev", "runtime", "models"]
+default-groups = ["dev", "runtime", "models", "grammar"]
 # onnx-asr depends on the CPU-only `onnxruntime`, which would shadow onnxruntime-gpu (same
 # import name). The GPU build provides the CPU provider too.
 override-dependencies = ["onnxruntime ; sys_platform == 'never'"]
@@ -87,6 +88,8 @@ en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/dow
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# The dataset card templates render to the published cards exactly: their code stays as written.
+extend-exclude = ["utter_tools/templates"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Typer declares CLI parameters as call defaults by design.

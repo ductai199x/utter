@@ -27,12 +27,11 @@ from collections.abc import Iterable
 from rapidfuzz import process
 from rapidfuzz.distance import Levenshtein
 
-from utter_tools import config, schema
+from utter_tools import common, schema
 from utter_tools.data.lists import parse, prose_gold
-from utter_tools.text.dictionary import relevant_terms
-from utter_tools.text.terms import candidate_terms, lowercase_counts
+from utter_tools.text import candidate_terms, lowercase_counts, relevant_terms
 
-SYSTEM_PROMPT = config.REPO / "crates" / "utter-llm" / "prompts" / "cleanup-ft.md"
+SYSTEM_PROMPT = common.REPO / "crates" / "utter-llm" / "prompts" / "cleanup-ft.md"
 
 
 def user_message(transcript: str, dictionary: list[str], lists_off: bool = False) -> str:
@@ -131,7 +130,7 @@ def build(
             lp = parse(final)
             if lp is not None:
                 final, lists = (
-                    prose_gold(lp, schema.from_annotations(clip["annotations"])["variant"]),
+                    prose_gold(lp, schema.tags(clip["annotations"])["variant"]),
                     False,
                 )
         if (hyp, final) in pairs:

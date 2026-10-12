@@ -1,0 +1,273 @@
+"""utter-grade: how often each cleanup model types what the speaker meant, ready to send.
+
+The sets are the datasets' test splits at one revision: the text test split (the transcripts the
+dataset records) and every speech eval collection (recognized here by Utter's own recognizer);
+the two sets with a user's dictionary are also run with it, boosted in the recognizer and sent to
+cleanup. Every model runs through utter-cli, the app's own client, prompt and server settings.
+
+A dictation is ready to send if the output is the final text (spacing aside) or if the grader
+(Gemma 4 26B, prompts/grade.md, calibrated on Tai's review) finds only equally valid choices
+differ. Every step resumes: what is on disk is not redone.
+
+    utter-grade --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf [--llm-url URL]
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import soundfile as sf
+import typer
+
+from utter_tools import common, llm, schema
+from utter_tools.text import relevant_terms
+
+TEXT_SET = "text-test"
+ASR = "parakeet"
+DICTIONARIES = Path(__file__).parent / "dictionaries"
+# Sets also run with a user's dictionary (sampled from the set's own terms).
+DICTIONARY_SETS = {
+    "kokoro-real": DICTIONARIES / "kokoro-real-300.txt",
+    "kokoro-directed": DICTIONARIES / "kokoro-directed-231.txt",
+}
+FINE_TUNED_PROMPT = common.REPO / "crates" / "utter-llm" / "prompts" / "cleanup-ft.md"
+# The app's cleanup server settings (crates/utter-llm/src/cleanup.rs).
+SERVER_ARGS = [
+    "--swa-full",
+    "-ub",
+    "128",
+    "--spec-type",
+    "ngram-simple",
+    "--spec-ngram-simple-size-n",
+    "3",
+    "--spec-ngram-simple-size-m",
+    "6",
+]
+CAUSES = [
+    "style",
+    "recognition",
+    "punctuation",
+    "capitalization",
+    "grammar",
+    "correction",
+    "list",
+    "numbers-symbols",
+    "words",
+    "other",
+]
+VERDICT = {
+    "type": "object",
+    "properties": {
+        "differences": {"type": "array", "items": {"type": "string"}},
+        "verdict": {"enum": ["acceptable", "needs_edit"]},
+        "cause": {"enum": CAUSES},
+        "note": {"type": "string"},
+    },
+    "required": ["differences", "verdict", "cause", "note"],
+}
+
+
+def results(kind: str, run: str, eval_set: str) -> Path:
+    return common.eval_dir() / "results" / kind / run / f"{eval_set}.jsonl"
+
+
+def manifest(eval_set: str) -> list[dict]:
+    return common.read_jsonl(common.eval_dir() / eval_set / "manifest.jsonl")
+
+
+# ---------------------------------------------------------------------------------------------
+# The sets.
+
+
+def _made_from(folder: Path, source: dict) -> bool:
+    marker = folder / "source.json"
+    return marker.is_file() and json.loads(marker.read_text()) == source
+
+
+def make_sets(text_ref: str | None, speech_ref: str | None) -> list[str]:
+    """The eval sets from the datasets at those revisions (default: main), as `utter-cli bench`
+    reads them: a manifest of dataset rows and, for speech, a WAV per clip. Returns their names."""
+    text_rev = common.revision(common.TEXT_REPO, text_ref)
+    speech_rev = common.revision(common.SPEECH_REPO, speech_ref)
+    folder = common.eval_dir() / TEXT_SET
+    source = {"repo": common.TEXT_REPO, "revision": text_rev}
+    if not _made_from(folder, source):
+        columns = [c for c in schema.TEXT.names if c != "messages"]
+        rows = common.text_rows(text_rev, "test", columns)
+        common.write_jsonl(folder / "manifest.jsonl", rows)
+        common.write_jsonl(
+            results("asr", "dictated", TEXT_SET),
+            [{"id": r["id"], "hyp": r["dictated"]} for r in rows],
+        )
+        (folder / "source.json").write_text(json.dumps(source))
+    names = [TEXT_SET]
+    # The corpus's test clips are the text test split's rows, which text-test covers.
+    for collection in common.speech_collections(speech_rev):
+        if collection.startswith(schema.CORPUS):
+            continue
+        names.append(collection)
+        folder = common.eval_dir() / collection
+        source = {"repo": common.SPEECH_REPO, "revision": speech_rev}
+        if _made_from(folder, source):
+            continue
+        folder.mkdir(parents=True, exist_ok=True)
+        rows = []
+        for r in common.speech_rows(speech_rev, collection, "test"):
+            audio, rate = sf.read(io.BytesIO(r["audio"]["bytes"]), dtype="int16")
+            wav = f"{r['rendition_id']}.wav"
+            sf.write(folder / wav, audio, rate, subtype="PCM_16")
+            rows.append({**r, "audio": wav})
+        common.write_jsonl(folder / "manifest.jsonl", rows)
+        (folder / "source.json").write_text(json.dumps(source))
+    return names
+
+
+# ---------------------------------------------------------------------------------------------
+# Recognition and cleanup, through utter-cli.
+
+
+def _done(path: Path, eval_set: str, field: str) -> bool:
+    have = {r["id"] for r in common.read_jsonl(path) if field in r}
+    return have >= {r["id"] for r in manifest(eval_set)}
+
+
+def recognize(eval_set: str, run: str, dictionary: Path | None = None) -> None:
+    if _done(results("asr", run, eval_set), eval_set, "hyp"):
+        return
+    cmd = [common.utter_cli(), "bench", "--sets", eval_set, "--name", run]
+    if dictionary:
+        cmd += ["--phrases", str(dictionary)]
+    subprocess.run(cmd, check=True)
+
+
+def clean(eval_set: str, run: str, gguf: Path, asr_run: str, dictionary: Path | None) -> None:
+    """The model's output for every dictation, with what the app sends with it: the dictionary
+    terms heard (a text row's own, or those of `dictionary`) and the lists setting."""
+    out = results("llm", run, eval_set)
+    if _done(out, eval_set, "output"):
+        return
+    rows = {r["id"]: r for r in manifest(eval_set)}
+    lines = dictionary.read_text(encoding="utf-8").splitlines() if dictionary else []
+    terms = [t.strip() for t in lines if t.strip()]
+    cases = []
+    for h in common.read_jsonl(results("asr", asr_run, eval_set)):
+        row = rows[h["id"]]
+        case = {"id": h["id"], "input": h["hyp"]}
+        heard = row.get("dictionary") or relevant_terms(h["hyp"], terms)
+        if heard:
+            case["dictionary"] = heard
+        if row.get("lists") is False:
+            case["lists_off"] = True
+        cases.append(case)
+    # llm-bench writes its outputs over its cases file.
+    common.write_jsonl(out, cases)
+    cmd = [common.utter_cli(), "llm-bench", "--gguf", str(gguf), "--name", run, "--cases", str(out)]
+    cmd += ["--prompt", str(FINE_TUNED_PROMPT)] + [f"--server-arg={a}" for a in SERVER_ARGS]
+    subprocess.run(cmd, check=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Ready to send.
+
+
+def _same(a: str, b: str) -> bool:
+    return " ".join(a.split()) == " ".join(b.split())
+
+
+def judge(eval_set: str, run: str, chat: llm.Chat, grader: str, workers: int) -> dict:
+    """Grades the outputs not graded yet; returns ready-to-send share, count and causes."""
+    gold = {r["id"]: r["final_text"] for r in manifest(eval_set)}
+    outputs = common.read_jsonl(results("llm", run, eval_set))
+    path = results("judge", f"{run}--{grader}", eval_set)
+    verdicts = {v["id"]: v for v in common.read_jsonl(path)}
+    todo = [o for o in outputs if o["id"] not in verdicts and not _same(o["output"], gold[o["id"]])]
+    system = common.prompt("grade")
+
+    def grade_one(o: dict) -> dict:
+        user = f"Heard: {o['input']}\n\nMeant: {gold[o['id']]}\n\nTyped: {o['output']}"
+        reply = chat.ask(system, user, VERDICT, seed=0, max_tokens=600)
+        return {
+            "id": o["id"],
+            **(reply or {"verdict": "needs_edit", "cause": "other", "note": "unreadable"}),
+        }
+
+    with ThreadPoolExecutor(workers) as pool:
+        for v in pool.map(grade_one, todo):
+            common.write_jsonl(path, [v], append=True)
+            verdicts[v["id"]] = v
+    ready = sum(
+        _same(o["output"], gold[o["id"]]) or verdicts[o["id"]]["verdict"] == "acceptable"
+        for o in outputs
+    )
+    causes: dict[str, int] = {}
+    for v in verdicts.values():
+        if v["verdict"] == "needs_edit":
+            causes[v["cause"]] = causes.get(v["cause"], 0) + 1
+    return {"ready_pct": 100 * ready / max(1, len(outputs)), "n": len(outputs), "causes": causes}
+
+
+# ---------------------------------------------------------------------------------------------
+# The command.
+
+
+def _models(specs: list[str]) -> dict[str, Path]:
+    models = {}
+    for spec in specs:
+        name, _, path = spec.partition("=")
+        if not path or not Path(path).is_file():
+            raise typer.BadParameter(f"{spec}: expected NAME=PATH to a .gguf file")
+        models[name] = Path(path)
+    return models
+
+
+def main(
+    model: list[str] = typer.Option(..., help="NAME=PATH.gguf, repeatable: the models to compare."),
+    llm_url: str = typer.Option(
+        "", help="The grader: an OpenAI-style server (vLLM); else the local 26B."
+    ),
+    grader: str = typer.Option(
+        "", help="The grader's name in results (default: vllm-26b or local-26b)."
+    ),
+    workers: int = typer.Option(8, help="Grading requests at once (64 suits vLLM)."),
+    text_ref: str = typer.Option(None, help="dictation-to-text revision (default: main)."),
+    speech_ref: str = typer.Option(None, help="dictation-speech revision (default: main)."),
+) -> None:
+    """How often each cleanup model types what the speaker meant, on the datasets' test splits."""
+    models = _models(model)
+    grader = grader or ("vllm-26b" if llm_url else "local-26b")
+    sets = make_sets(text_ref, speech_ref)
+    # (set, recognizer run, run suffix, dictionary) for every column of the table.
+    runs: list[tuple[str, str, str, Path | None]] = [(TEXT_SET, "dictated", "", None)]
+    for s in sets[1:]:
+        recognize(s, ASR)
+        runs.append((s, ASR, "", None))
+        if s in DICTIONARY_SETS:
+            recognize(s, f"{ASR}-dict", DICTIONARY_SETS[s])
+            runs.append((s, f"{ASR}-dict", "-dict", DICTIONARY_SETS[s]))
+    for name, gguf in models.items():
+        for s, asr_run, suffix, dictionary in runs:
+            clean(s, name + suffix, gguf, asr_run, dictionary)
+
+    lines = ["| Set | n | " + " | ".join(models) + " |", "|---|---|" + "---|" * len(models)]
+    with llm.connect(llm_url, slots=workers) as chat:
+        for s, _, suffix, dictionary in runs:
+            cells, n = [], 0
+            for name in models:
+                result = judge(s, name + suffix, chat, grader, workers)
+                cells.append(f"{result['ready_pct']:.1f}")
+                n = result["n"]
+            label = f"{s} + dictionary" if dictionary else s
+            lines.append(f"| {label} | {n} | " + " | ".join(cells) + " |")
+    table = "Ready to send %:\n\n" + "\n".join(lines) + "\n"
+    out = common.eval_dir() / "results" / f"grade--{'--'.join(models)}--{grader}.md"
+    out.write_text(table, encoding="utf-8", newline="\n")
+    print(table)
+    print(f"written to {out}")
+
+
+def cli() -> None:
+    typer.run(main)
