@@ -5,7 +5,7 @@ members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime",
 [workspace.package]
 version = "0.1.1"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0-only"
 authors = ["Tai Duc Nguyen"]
 rust-version = "1.98"
 
