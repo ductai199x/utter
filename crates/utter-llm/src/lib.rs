@@ -156,9 +156,17 @@ pub struct Completion {
 
 impl LlamaServer {
     pub fn start(opts: &ServerOptions) -> Result<Self, LlmError> {
-        let llama = utter_runtime::component("llama-cpp")?.installed_dir()?;
-        let cuda = utter_runtime::component("cuda-runtime")?.installed_dir()?;
-        let exe = llama.join(SERVER_EXE);
+        // Development only: a llama-server built elsewhere (the eval on Linux, where Utter has no
+        // runtime component yet), with the system's CUDA. The app never sets it.
+        let (exe, path) = match std::env::var_os("UTTER_LLAMA_SERVER") {
+            Some(exe) => (PathBuf::from(exe), None),
+            None => {
+                let llama = utter_runtime::component("llama-cpp")?.installed_dir()?;
+                let cuda = utter_runtime::component("cuda-runtime")?.installed_dir()?;
+                // The CUDA runtime comes from Utter's component, for this child only.
+                (llama.join(SERVER_EXE), Some(prepend_path(&[llama, cuda])))
+            }
+        };
         if !opts.model.is_file() {
             return Err(LlmError::Io {
                 path: opts.model.clone(),
@@ -177,8 +185,9 @@ impl LlamaServer {
         cmd.args(["--parallel", "1", "--no-webui", "--jinja", "--no-warmup"]);
         cmd.args(["--flash-attn", if opts.flash_attention { "on" } else { "off" }]);
         cmd.args(&opts.extra_args);
-        // The CUDA runtime comes from Utter's component, for this child only.
-        cmd.env("PATH", prepend_path(&[llama.clone(), cuda]));
+        if let Some(path) = path {
+            cmd.env("PATH", path);
+        }
         // Its output goes to the rotating log (utter_core::logs), or nowhere when logs are off.
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         utter_platform::process::no_console_window(&mut cmd);
