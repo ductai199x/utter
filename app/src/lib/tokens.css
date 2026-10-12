@@ -7,6 +7,8 @@
   --dur-resize: 180ms;
   --dur-check: 400ms;
   --dur-word: 120ms;
+  /* The selection rule gliding between rows (docs/ux/history.md). */
+  --dur-glide: 220ms;
 
   --bar-bg: rgba(18, 18, 20, 0.92);
   --bar-border: rgba(255, 255, 255, 0.08);
@@ -20,43 +22,55 @@
 
   --bar-text-size: 14px;
   --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
 
-  /* The Home window (docs/ux/home.md): follows the OS theme. */
+  /* Utter's windows (Home, first run): the splash's inked blues, on paper in the light theme
+     and on ink in the dark one, with the mark's accent. They follow the OS theme. */
   --dur-flash: 600ms;
-  --home-bg: #f9f9fb;
-  --home-sidebar: #f0f0f3;
+  --home-bg: #f6f7fb;
+  --home-rail: #eceef7;
+  --home-sidebar: var(--home-rail);
   --home-surface: #ffffff;
-  --home-text: #1b1b1f;
-  --home-muted: #6b6b74;
-  --home-border: rgba(0, 0, 0, 0.09);
-  --home-hover: rgba(0, 0, 0, 0.045);
-  --home-selected: rgba(0, 0, 0, 0.07);
-  --home-accent: #3a64f0;
+  /* The selected dictation, set like a page. */
+  --home-page: #fcfcfe;
+  --home-text: #161a2c;
+  --home-muted: #5f6582;
+  --home-faint: #9297b0;
+  --home-border: rgba(30, 40, 110, 0.1);
+  --home-hover: rgba(40, 55, 160, 0.05);
+  --home-selected: rgba(58, 80, 240, 0.09);
+  --home-accent: #4a5cf0;
   --home-accent-text: #ffffff;
-  --home-accent-soft: rgba(58, 100, 240, 0.2);
+  --home-accent-soft: rgba(74, 92, 240, 0.14);
+  --home-glint: rgba(74, 92, 240, 0.45);
   --home-ok: #1a7f37;
   --home-ok-soft: rgba(26, 127, 55, 0.12);
-  --home-error: #b25e00;
+  --home-error: #a85a00;
   --home-error-bg: rgba(255, 179, 64, 0.16);
   --home-focus: 0 0 0 2px var(--home-bg), 0 0 0 4px var(--home-accent);
+  --home-shadow: 0 12px 32px rgba(20, 30, 90, 0.14), 0 2px 6px rgba(20, 30, 90, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --home-bg: #1c1c1f;
-    --home-sidebar: #161618;
-    --home-surface: #242428;
-    --home-text: #ececf0;
-    --home-muted: #9a9aa3;
-    --home-border: rgba(255, 255, 255, 0.09);
-    --home-hover: rgba(255, 255, 255, 0.05);
-    --home-selected: rgba(255, 255, 255, 0.08);
-    --home-accent: #6b8cff;
-    --home-accent-text: #0e0e10;
-    --home-accent-soft: rgba(107, 140, 255, 0.22);
+    --home-bg: #10131f;
+    --home-rail: #0b0e18;
+    --home-surface: #171b2b;
+    --home-page: #131726;
+    --home-text: #e8ebf7;
+    --home-muted: #8a90ad;
+    --home-faint: #5d6383;
+    --home-border: rgba(150, 165, 255, 0.1);
+    --home-hover: rgba(150, 165, 255, 0.06);
+    --home-selected: rgba(120, 140, 255, 0.12);
+    --home-accent: #7f8fff;
+    --home-accent-text: #0b0e1a;
+    --home-accent-soft: rgba(127, 143, 255, 0.18);
+    --home-glint: rgba(190, 200, 255, 0.7);
     --home-ok: #4ac26b;
     --home-ok-soft: rgba(74, 194, 107, 0.14);
     --home-error: #ffb340;
     --home-error-bg: rgba(255, 179, 64, 0.12);
+    --home-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
   }
 }

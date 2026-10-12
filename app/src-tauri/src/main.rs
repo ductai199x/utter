@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use utter_pipeline::{Event, Pipeline, PipelineConfig, Settings};
 use utter_platform::overlay;
 
+mod history;
 mod home;
 mod problem;
 mod setup;
@@ -135,6 +136,8 @@ impl Bar {
             }
             Event::Done(d) => {
                 self.listening.store(false, Ordering::Relaxed);
+                // History shows it at once (docs/ux/history.md, "Live").
+                let _ = self.window.emit_to("home", "history-changed", ());
                 match (&d.inserted, d.text.trim().is_empty()) {
                     (_, true) => self.leave_with_error("Didn't catch that"),
                     (Err(e), false) => {
@@ -369,6 +372,15 @@ fn main() {
             home::home_state,
             home::save_settings,
             home::open_path,
+            history::history_query,
+            history::history_favorite,
+            history::history_delete,
+            history::history_restore,
+            history::history_copy,
+            history::history_changes,
+            history::history_count_older,
+            history::history_clear,
+            history::paste_rules,
             setup::setup_check,
             setup::setup_microphones,
             setup::setup_mic_start,
