@@ -7,7 +7,7 @@
 //! - on the CPU, [`ParakeetTdt::greedy_per_frame`] calls the joint once per frame, where
 //!   scoring all remaining frames each time would cost more than it saves.
 //!
-//! The graphs come from `tools/export/export_parakeet.py`; `tools/export/check_parakeet.py`
+//! The graphs come from `utter-speech export`; `utter-speech check`
 //! checks them, and the per-frame loop in Python, against Transformers token for token.
 
 use std::path::Path;

@@ -30,7 +30,7 @@ impl Vocab {
     }
 
     /// Joins the pieces and turns each "▁" into a space, trimming the ends. Checked against
-    /// Transformers' decode on the eval clips (`tools/export/check_parakeet.py`).
+    /// Transformers' decode on the eval clips (`utter-speech check`).
     pub fn decode(&self, ids: &[u32]) -> String {
         let mut text = String::new();
         for &id in ids {

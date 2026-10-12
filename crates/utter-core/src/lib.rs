@@ -14,7 +14,7 @@ pub mod logs;
 /// | development | `%LOCALAPPDATA%\Utter_dev` | `~/.local/share/utter_dev` | `.../Utter_dev` |
 ///
 /// Development means a build running from a cargo `target` folder; the Python tools resolve
-/// the development folder too (`tools/eval/paths.py`). The two never share state, so a model
+/// the development folder too (`tools/utter_tools/config.py`). The two never share state, so a model
 /// or setting under development cannot reach the installed app. `docs/local-setup.md`
 /// describes the layout.
 pub fn data_dir() -> PathBuf {

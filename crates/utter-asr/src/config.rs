@@ -1,4 +1,4 @@
-//! The exported model's `config.json` (written by `tools/export/export_parakeet.py`).
+//! The exported model's `config.json` (written by `utter-speech export`).
 
 use std::path::Path;
 

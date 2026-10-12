@@ -15,6 +15,8 @@ __pycache__/
 # Models, recordings and local data are never committed
 models/
 data/
+# ...except the data generator's code (tools/utter_tools/data, utter-data).
+!tools/utter_tools/data/
 *.gguf
 *.onnx
 *.wav

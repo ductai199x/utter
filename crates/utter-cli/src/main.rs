@@ -3,9 +3,9 @@
 //! - `setup`: download, verify and install the runtime components.
 //! - `doctor`: show what is installed.
 //! - `transcribe <wav>...`: print each file's transcript and per-stage timings.
-//! - `bench`: run the core's recognizer over the eval sets that `tools/eval/fetch_sets.py`
-//!   fetched, and write results in the format `tools/eval/asr_bench.py report|compare`
-//!   scores, so the Rust runtime is measured by the same yardstick as the Python candidates.
+//! - `bench`: run the core's recognizer over eval sets (`utter-eval sets`, `utter-eval bench
+//!   fetch`), and write results in the format `utter-eval` scores, so the Rust runtime is
+//!   measured by the same yardstick as the Python candidates.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -25,7 +25,7 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
     /// A local export folder to use instead of the installed speech model component
-    /// (e.g. a fresh tools/export output under <data_dir>/models/).
+    /// (e.g. a fresh utter-speech export under <data_dir>/models/).
     #[arg(long, global = true)]
     model_dir: Option<PathBuf>,
     /// Where the encoder runs: the GPU (as both tiers do), or the CPU, for comparison.
@@ -176,8 +176,8 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
-    /// Run the cleanup cases through Utter's llama-server on a GGUF model and write the outputs
-    /// for tools/eval/cleanup_score.py.
+    /// Run cleanup cases through Utter's llama-server on a GGUF model and write the outputs
+    /// (utter-eval clean writes the cases and scores the outputs).
     LlmBench {
         /// The GGUF model file.
         #[arg(long)]
@@ -241,7 +241,7 @@ enum Command {
     },
     /// Transcribe 16 kHz mono WAV files.
     Transcribe { files: Vec<PathBuf> },
-    /// Transcribe eval sets and write results for tools/eval/asr_bench.py.
+    /// Transcribe eval sets and write results for utter-eval.
     Bench {
         /// Comma-separated set names (default: every English set).
         #[arg(long, default_value = "")]
@@ -277,10 +277,14 @@ enum Command {
 }
 
 #[derive(Deserialize)]
+/// A clip of an eval set: the public sets' manifests (text, lang), or rows of the speech dataset
+/// (dictation-speech: transcript, language), as the tools write them.
 struct ManifestRow {
     id: String,
     audio: String,
+    #[serde(alias = "transcript")]
     text: String,
+    #[serde(alias = "language")]
     lang: String,
     duration_s: f64,
 }
@@ -952,7 +956,7 @@ fn bench(asr: &mut ParakeetTdt, sets: &str, limit: usize, name: &str, pacing: Pa
         sets.split(',').map(str::to_owned).collect()
     };
     if set_names.is_empty() {
-        bail!("no eval sets under {}: run tools/eval/fetch_sets.py", eval.display());
+        bail!("no eval sets under {}: run utter-eval sets or utter-eval bench fetch", eval.display());
     }
     let out_dir = eval.join("results").join("asr").join(name);
     std::fs::create_dir_all(&out_dir)?;
