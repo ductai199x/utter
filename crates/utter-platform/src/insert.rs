@@ -1,8 +1,9 @@
-//! Putting text into the focused app (DESIGN.md section 4, step 8).
+//! Putting text into the focused app (DESIGN.md section 4, step 8; docs/ux/insertion.md).
 //!
-//! [`paste`]: save the clipboard, put the text on it, send Ctrl+V, and restore the clipboard
-//! once the app has had time to read it. Rules:
+//! [`paste`]: save the clipboard, put the text on it, press the app's paste keys, and restore
+//! the clipboard once the app has had time to read it. Rules:
 //! - nothing is typed unless the window captured at key down still has the focus;
+//! - no keys go to a window the OS would drop them for (an administrator app, focus.rs);
 //! - every clipboard format held in global memory is saved and put back (formats that are GDI
 //!   handles, such as CF_BITMAP, cannot be copied; their memory-based equivalents, such as
 //!   CF_DIB, are kept);
@@ -10,7 +11,9 @@
 //!   the user makes in the meantime is never overwritten;
 //! - the dictated text is marked to stay out of Windows' clipboard history and cloud clipboard.
 //!
-//! [`type_text`] is the fallback: the text as Unicode key strokes, for apps that do not paste.
+//! How an app pastes, and how long it needs the text on the clipboard, is its [`PasteRule`]:
+//! this platform's defaults ([`default_rules`]) with the person's changes over them.
+//! [`copy`] leaves text on the clipboard: the fallback when it cannot go in.
 
 use std::time::Duration;
 
@@ -20,39 +23,99 @@ use crate::focus::{self, Window};
 pub enum InsertError {
     #[error("the focus moved away from \"{0}\"; nothing was typed")]
     FocusChanged(String),
+    #[error("\"{0}\" runs as administrator; Windows drops keys sent to it")]
+    Refused(String),
     #[error("clipboard: {0}")]
     Clipboard(String),
     #[error("sending keys: {0}")]
     Input(String),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct PasteOptions {
-    /// How long the app gets to read the clipboard before it is restored.
-    pub restore_after: Duration,
+/// The keys that paste in an app, or typing the text out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteKeys {
+    /// Ctrl+V (Cmd+V on macOS): nearly every app.
+    Primary,
+    /// Ctrl+Shift+V: Linux terminals and some Windows ones.
+    CtrlShiftV,
+    /// Shift+Insert: old terminals, PuTTY, mintty.
+    ShiftInsert,
+    /// The text as key strokes, for apps that block pasting. A line break is an Enter key.
+    Type,
 }
 
-impl Default for PasteOptions {
+/// How long the dictation stays on the clipboard before the old contents come back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keep {
+    /// 0.5 s: enough for apps that read the clipboard at once.
+    Normal,
+    /// For apps that read it late (Word, Outlook).
+    Seconds3,
+    /// For remote desktops, which sync it over the network.
+    Seconds5,
+    /// The old clipboard is not restored.
+    Leave,
+}
+
+impl Keep {
+    /// When to restore the old clipboard; `None`: never.
+    pub fn restore_after(self) -> Option<Duration> {
+        match self {
+            Keep::Normal => Some(Duration::from_millis(500)),
+            Keep::Seconds3 => Some(Duration::from_secs(3)),
+            Keep::Seconds5 => Some(Duration::from_secs(5)),
+            Keep::Leave => None,
+        }
+    }
+}
+
+/// How one app pastes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PasteRule {
+    pub keys: PasteKeys,
+    pub keep: Keep,
+}
+
+impl Default for PasteRule {
     fn default() -> Self {
-        Self { restore_after: Duration::from_millis(250) }
+        Self { keys: PasteKeys::Primary, keep: Keep::Normal }
     }
 }
 
-/// Pastes `text` into `target`. Returns once the paste is sent; the clipboard is restored on a
-/// background thread after `opts.restore_after`.
-pub fn paste(target: &Window, text: &str, opts: PasteOptions) -> Result<(), InsertError> {
-    if !focus::is_foreground(target) {
-        return Err(InsertError::FocusChanged(target.title.clone()));
-    }
-    imp::paste(text, opts)
+/// A default paste rule: the program's file name, what people call it, and the rule.
+pub type DefaultRule = (&'static str, &'static str, PasteRule);
+
+/// This platform's paste rules for apps that do not paste with the primary keys at once
+/// (docs/ux/insertion.md, "Utter's defaults"). Every other app: [`PasteRule::default`].
+pub fn default_rules() -> &'static [DefaultRule] {
+    imp::DEFAULT_RULES
 }
 
-/// Types `text` as Unicode key strokes into `target` (line breaks as Enter).
-pub fn type_text(target: &Window, text: &str) -> Result<(), InsertError> {
+/// The primary paste keys as this platform writes them, for messages: "Ctrl+V" ("Cmd+V" on
+/// macOS).
+pub fn primary_keys() -> &'static str {
+    if cfg!(target_os = "macos") { "Cmd+V" } else { "Ctrl+V" }
+}
+
+/// Pastes `text` into `target` by `rule`. Returns once the keys are sent; the clipboard is
+/// restored on a background thread when the rule says.
+pub fn paste(target: &Window, text: &str, rule: PasteRule) -> Result<(), InsertError> {
     if !focus::is_foreground(target) {
         return Err(InsertError::FocusChanged(target.title.clone()));
     }
-    imp::type_text(text)
+    if focus::refuses_input(target) {
+        return Err(InsertError::Refused(target.app.name.clone()));
+    }
+    match rule.keys {
+        PasteKeys::Type => imp::type_text(text),
+        keys => imp::paste(text, keys, rule.keep.restore_after()),
+    }
+}
+
+/// Puts `text` on the clipboard and leaves it there (marked to stay out of clipboard history,
+/// as a paste is): for a dictation that could not go in, and for "Copy" in History.
+pub fn copy(text: &str) -> Result<(), InsertError> {
+    imp::put_text(text).map(|_| ())
 }
 
 #[cfg(windows)]
@@ -70,11 +133,33 @@ mod imp {
         CF_OWNERDISPLAY, CF_PALETTE, CF_UNICODETEXT,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VK_CONTROL,
-        VK_RETURN,
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+        SendInput, VK_CONTROL, VK_INSERT, VK_RETURN, VK_SHIFT,
     };
 
-    use super::{InsertError, PasteOptions};
+    use super::{DefaultRule, InsertError, Keep, PasteKeys, PasteRule};
+
+    const fn rule(keys: PasteKeys, keep: Keep) -> PasteRule {
+        PasteRule { keys, keep }
+    }
+
+    /// docs/ux/insertion.md, "Utter's defaults (Windows)".
+    pub const DEFAULT_RULES: &[DefaultRule] = &[
+        ("mintty.exe", "Git Bash (mintty)", rule(PasteKeys::ShiftInsert, Keep::Normal)),
+        ("putty.exe", "PuTTY", rule(PasteKeys::ShiftInsert, Keep::Normal)),
+        ("alacritty.exe", "Alacritty", rule(PasteKeys::CtrlShiftV, Keep::Normal)),
+        ("wezterm-gui.exe", "WezTerm", rule(PasteKeys::CtrlShiftV, Keep::Normal)),
+        ("WINWORD.EXE", "Microsoft Word", rule(PasteKeys::Primary, Keep::Seconds3)),
+        ("OUTLOOK.EXE", "Outlook (classic)", rule(PasteKeys::Primary, Keep::Seconds3)),
+        ("olk.exe", "Outlook", rule(PasteKeys::Primary, Keep::Seconds3)),
+        ("WhatsApp.exe", "WhatsApp", rule(PasteKeys::Primary, Keep::Seconds3)),
+        ("mstsc.exe", "Remote Desktop", rule(PasteKeys::Primary, Keep::Seconds5)),
+        ("msrdc.exe", "Remote Desktop", rule(PasteKeys::Primary, Keep::Seconds5)),
+        ("wfica32.exe", "Citrix Workspace", rule(PasteKeys::Primary, Keep::Seconds5)),
+        ("CDViewer.exe", "Citrix Workspace", rule(PasteKeys::Primary, Keep::Seconds5)),
+        ("TeamViewer.exe", "TeamViewer", rule(PasteKeys::Primary, Keep::Seconds5)),
+        ("vncviewer.exe", "VNC Viewer", rule(PasteKeys::Primary, Keep::Seconds5)),
+    ];
 
     /// Formats whose data is a GDI or other non-memory handle: they cannot be copied.
     const HANDLE_FORMATS: &[u16] = &[
@@ -182,7 +267,7 @@ mod imp {
         Ok(saved)
     }
 
-    fn put_text(text: &str) -> Result<u32, InsertError> {
+    pub fn put_text(text: &str) -> Result<u32, InsertError> {
         let _cb = Clipboard::open()?;
         // SAFETY: the clipboard is open.
         if unsafe { EmptyClipboard() } == 0 {
@@ -235,17 +320,35 @@ mod imp {
         Ok(())
     }
 
-    pub fn paste(text: &str, opts: PasteOptions) -> Result<(), InsertError> {
+    pub fn paste(text: &str, keys: PasteKeys, restore_after: Option<Duration>) -> Result<(), InsertError> {
         let saved = save_all()?;
         let our_sequence = put_text(text)?;
         const VK_V: u16 = 0x56;
-        send(&[
-            key(VK_CONTROL, 0, 0),
-            key(VK_V, 0, 0),
-            key(VK_V, 0, KEYEVENTF_KEYUP),
-            key(VK_CONTROL, 0, KEYEVENTF_KEYUP),
-        ])?;
-        let delay = opts.restore_after;
+        // Insert is an extended key: without the flag it reads as the number pad's 0.
+        let chord: &[INPUT] = &match keys {
+            PasteKeys::CtrlShiftV => vec![
+                key(VK_CONTROL, 0, 0),
+                key(VK_SHIFT, 0, 0),
+                key(VK_V, 0, 0),
+                key(VK_V, 0, KEYEVENTF_KEYUP),
+                key(VK_SHIFT, 0, KEYEVENTF_KEYUP),
+                key(VK_CONTROL, 0, KEYEVENTF_KEYUP),
+            ],
+            PasteKeys::ShiftInsert => vec![
+                key(VK_SHIFT, 0, 0),
+                key(VK_INSERT, 0, KEYEVENTF_EXTENDEDKEY),
+                key(VK_INSERT, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP),
+                key(VK_SHIFT, 0, KEYEVENTF_KEYUP),
+            ],
+            PasteKeys::Primary | PasteKeys::Type => vec![
+                key(VK_CONTROL, 0, 0),
+                key(VK_V, 0, 0),
+                key(VK_V, 0, KEYEVENTF_KEYUP),
+                key(VK_CONTROL, 0, KEYEVENTF_KEYUP),
+            ],
+        };
+        send(chord)?;
+        let Some(delay) = restore_after else { return Ok(()) };
         std::thread::Builder::new()
             .name("utter-clipboard".into())
             .spawn(move || {
@@ -273,11 +376,20 @@ mod imp {
 
 #[cfg(not(windows))]
 mod imp {
-    use super::{InsertError, PasteOptions};
+    use std::time::Duration;
+
+    use super::{DefaultRule, InsertError, PasteKeys};
+
+    /// macOS and Linux get their tables when they are built (docs/ux/insertion.md).
+    pub const DEFAULT_RULES: &[DefaultRule] = &[];
 
     /// Phase 4 (Linux): the RemoteDesktop portal or uinput, and wl-clipboard.
-    pub fn paste(_text: &str, _opts: PasteOptions) -> Result<(), InsertError> {
+    pub fn paste(_text: &str, _keys: PasteKeys, _restore_after: Option<Duration>) -> Result<(), InsertError> {
         Err(InsertError::Input("not implemented on this platform yet".into()))
+    }
+
+    pub fn put_text(_text: &str) -> Result<u32, InsertError> {
+        Err(InsertError::Clipboard("not implemented on this platform yet".into()))
     }
 
     pub fn type_text(_text: &str) -> Result<(), InsertError> {

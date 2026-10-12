@@ -9,6 +9,7 @@
 
 mod clean;
 pub mod gate;
+pub mod history;
 pub mod log;
 pub mod settings;
 
@@ -25,11 +26,14 @@ use utter_llm::cleanup::{self, Tier};
 use utter_llm::{ChatParams, LlamaServer};
 use utter_platform::focus::{self, Window};
 use utter_platform::hotkey::{self, Action, HotkeyConfig};
-use utter_platform::insert::{self, PasteOptions};
+use utter_platform::insert::{self, InsertError};
+use utter_platform::shortcut::{self, Shortcut};
 use utter_runtime::gpu::GpuWarmer;
 
 use crate::clean::Cleaner;
+use crate::history::History;
 use crate::log::{DictationLog, Entry, Finished, LogConfig, Timings};
+use crate::settings::{KeepHistory, PasteOverride};
 
 /// How often the pipeline reads the microphone while listening.
 pub const POLL: Duration = Duration::from_millis(30);
@@ -69,6 +73,9 @@ pub struct PipelineConfig {
     /// The cleanup system prompt (None: the product's, prompts/cleanup.md).
     pub prompt: Option<String>,
     pub log: LogConfig,
+    /// The person's paste rules over the platform's defaults (docs/ux/insertion.md).
+    pub paste: Vec<PasteOverride>,
+    pub keep_history: KeepHistory,
 }
 
 impl Default for PipelineConfig {
@@ -83,6 +90,8 @@ impl Default for PipelineConfig {
             always_clean: true,
             prompt: None,
             log: LogConfig::default(),
+            paste: Vec::new(),
+            keep_history: KeepHistory::Forever,
         }
     }
 }
@@ -176,7 +185,9 @@ pub struct Dictation {
     pub audio_s: f64,
     pub segments: usize,
     pub gate: Option<&'static str>,
-    pub inserted: Result<(), String>,
+    pub inserted: Result<(), NotInserted>,
+    /// It did not go in and was left on the clipboard instead.
+    pub copied: bool,
     /// Key up -> every segment transcribed.
     pub asr_ms: f64,
     /// Cleanup request time (0 when the gate skipped it).
@@ -219,7 +230,109 @@ pub enum Event {
     ModelLoading,
     /// The microphone changed: its level meter replaces the old one's.
     Microphone(utter_audio::LevelMeter),
+    /// A word for the Bar outside a dictation: what paste or copy last did ("Pasted",
+    /// "Copied: press Ctrl+V to paste"). `ok`: it did what was asked.
+    Notice {
+        text: String,
+        ok: bool,
+    },
 }
+
+/// Why a dictation did not go in (docs/ux/insertion.md, "When it cannot go in").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotInserted {
+    /// Nothing was heard.
+    Nothing,
+    NoWindow,
+    /// The focus moved to another window before the text was ready.
+    FocusMoved,
+    /// The app runs as administrator: the OS drops keys Utter sends it.
+    Refused,
+    Failed(String),
+    /// A replayed recording (the bench): insertion is off.
+    Replay,
+}
+
+impl NotInserted {
+    /// The reason as History stores it.
+    pub fn code(&self) -> &'static str {
+        match self {
+            NotInserted::Nothing => "nothing",
+            NotInserted::NoWindow => "no-window",
+            NotInserted::FocusMoved => "focus-moved",
+            NotInserted::Refused => "refused",
+            NotInserted::Failed(_) => "failed",
+            NotInserted::Replay => "replay",
+        }
+    }
+
+    /// Whether the text should be left on the clipboard instead.
+    fn copy_instead(&self) -> bool {
+        matches!(self, NotInserted::NoWindow | NotInserted::FocusMoved | NotInserted::Refused | NotInserted::Failed(_))
+    }
+
+    /// What the Bar says (`copied`: the text is on the clipboard).
+    pub fn message(&self, copied: bool) -> String {
+        let keys = insert::primary_keys();
+        match (self, copied) {
+            (NotInserted::Nothing, _) => "Didn't catch that".to_owned(),
+            (NotInserted::Refused, true) => format!("Copied: this app runs as administrator. Press {keys}"),
+            (_, true) => format!("Copied: press {keys} to paste"),
+            (_, false) => "Couldn't paste or copy it: it is in History".to_owned(),
+        }
+    }
+}
+
+impl std::fmt::Display for NotInserted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotInserted::Nothing => write!(f, "nothing was heard"),
+            NotInserted::NoWindow => write!(f, "no window had the focus"),
+            NotInserted::FocusMoved => write!(f, "the focus moved to another window"),
+            NotInserted::Refused => write!(f, "the app runs as administrator"),
+            NotInserted::Failed(e) => write!(f, "{e}"),
+            NotInserted::Replay => write!(f, "insertion off (replay)"),
+        }
+    }
+}
+
+impl From<InsertError> for NotInserted {
+    fn from(e: InsertError) -> Self {
+        match e {
+            InsertError::FocusChanged(_) => NotInserted::FocusMoved,
+            InsertError::Refused(_) => NotInserted::Refused,
+            other => NotInserted::Failed(other.to_string()),
+        }
+    }
+}
+
+/// What the person can ask for outside a dictation: the tray items and their shortcuts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    PasteLast,
+    CopyLast,
+}
+
+/// Everything the idle pipeline waits for, on one channel: the hotkey, the shortcuts, the tray.
+enum Input {
+    Key(Action, Instant),
+    Command(Command),
+}
+
+/// Where the app sends [`Command`]s (the tray menu).
+#[derive(Clone)]
+pub struct Commands(Sender<Input>);
+
+impl Commands {
+    pub fn send(&self, c: Command) {
+        let _ = self.0.send(Input::Command(c));
+    }
+}
+
+/// How long paste last waits for the shortcut's keys to be let go.
+const MODIFIER_WAIT: Duration = Duration::from_secs(1);
+/// How often History's retention is applied while Utter runs.
+const PRUNE_EVERY: Duration = Duration::from_secs(3600);
 
 enum Job {
     /// From now on, boost these phrases (the user's dictionary).
@@ -258,6 +371,38 @@ impl Done {
             DoneKind::Preview => ("preview", None),
         };
         Entry::Recognized { pass, index, audio_s: self.audio_s, ms: self.ms, text: self.text.clone() }
+    }
+}
+
+/// What History keeps of a dictation (its id and time are given as it is added).
+fn history_entry(d: &Dictation) -> history::Entry {
+    let app = d.target.as_ref().map(|w| w.app.clone()).unwrap_or_default();
+    history::Entry {
+        id: 0,
+        at: 0,
+        app_exe: app.exe,
+        app_name: app.name,
+        text: d.text.clone(),
+        heard: d.raw.clone(),
+        inserted: d.inserted.is_ok(),
+        not_inserted: d.inserted.as_ref().err().map(|e| e.code().to_owned()),
+        words: d.text.split_whitespace().count(),
+        speech_s: d.audio_s,
+        ready_ms: d.total_ms,
+        favorite: false,
+    }
+}
+
+/// The next hotkey action within `timeout`; commands that arrive during a dictation are
+/// dropped (paste last while dictating has nothing sensible to do).
+fn next_key(input: &Receiver<Input>, timeout: Duration) -> Option<(Action, Instant)> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match input.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(Input::Key(action, at)) => return Some((action, at)),
+            Ok(Input::Command(c)) => tracing::debug!("{c:?} during a dictation: ignored"),
+            Err(_) => return None,
+        }
     }
 }
 
@@ -388,6 +533,10 @@ pub struct Pipeline {
     settings_rx: Receiver<Settings>,
     /// A cleanup model loading for a model change, with the settings that asked for it.
     loading: Option<(Settings, Receiver<ModelLoad>)>,
+    input_tx: Sender<Input>,
+    input_rx: Receiver<Input>,
+    /// When History's retention was last applied.
+    pruned: Option<Instant>,
 }
 
 /// Everything but the microphone: voice activity detection, the speech worker, the cleanup
@@ -401,6 +550,8 @@ struct Engine {
     generation: u64,
     /// Holds the GPU at full clocks from key down to key up (see utter_runtime::gpu).
     gpu: GpuWarmer,
+    /// The newest dictation's text, for paste last when History is off.
+    last_text: Option<String>,
 }
 
 impl Pipeline {
@@ -429,12 +580,25 @@ impl Pipeline {
             other => other?,
         };
         let (settings_tx, settings_rx) = mpsc::channel();
+        let (input_tx, input_rx) = mpsc::channel();
         Ok(Self {
             mic,
-            engine: Engine { cfg, vad, jobs: job_tx, done: done_rx, cleaner, generation: 0, gpu: GpuWarmer::new() },
+            engine: Engine {
+                cfg,
+                vad,
+                jobs: job_tx,
+                done: done_rx,
+                cleaner,
+                generation: 0,
+                gpu: GpuWarmer::new(),
+                last_text: None,
+            },
             settings_tx,
             settings_rx,
             loading: None,
+            input_tx,
+            input_rx,
+            pruned: None,
         })
     }
 
@@ -448,19 +612,77 @@ impl Pipeline {
         self.settings_tx.clone()
     }
 
+    /// Where to send [`Command`]s: paste or copy the last dictation (the tray menu).
+    pub fn commands(&self) -> Commands {
+        Commands(self.input_tx.clone())
+    }
+
     /// Runs dictations until the hotkey listener ends; `on_event` sees everything that
-    /// happens, from the key going down to the paste.
+    /// happens, from the key going down to the paste. Between dictations it applies settings,
+    /// History's retention, and paste or copy last.
     pub fn run(&mut self, mut on_event: impl FnMut(Event)) -> Result<(), PipelineError> {
         let listener = hotkey::listen(self.engine.cfg.hotkey)?;
+        let keys = self.input_tx.clone();
+        std::thread::Builder::new()
+            .name("utter-keys".into())
+            .spawn(move || {
+                // Owns the listener: when the pipeline is gone the send fails, and dropping the
+                // listener removes the hook.
+                loop {
+                    if let Some((action, at)) = listener.recv_timeout(Duration::from_secs(1))
+                        && keys.send(Input::Key(action, at)).is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .map_err(|e| hotkey::HotkeyError(e.to_string()))?;
+        let commands = self.input_tx.clone();
+        let _shortcuts = match shortcut::register(move |s| {
+            let c = match s {
+                Shortcut::PasteLast => Command::PasteLast,
+                Shortcut::CopyLast => Command::CopyLast,
+            };
+            let _ = commands.send(Input::Command(c));
+        }) {
+            Ok(s) => {
+                for t in &s.taken {
+                    tracing::warn!("{} is taken by another program; the tray item still works", t.keys());
+                }
+                Some(s)
+            }
+            Err(e) => {
+                tracing::warn!("{e}");
+                None
+            }
+        };
         loop {
             self.apply_settings(&mut on_event);
-            let Some((action, _at)) = listener.recv_timeout(SETTINGS_POLL) else { continue };
-            if action != Action::Start {
-                continue;
+            self.prune_history(false);
+            match self.input_rx.recv_timeout(SETTINGS_POLL) {
+                Ok(Input::Key(Action::Start, _)) => {
+                    let target = focus::foreground();
+                    let mut source = MicSource(&self.mic);
+                    let input = &self.input_rx;
+                    self.engine.dictate(&mut source, |t| next_key(input, t), target, true, &mut on_event)?;
+                }
+                Ok(Input::Command(c)) => self.engine.command(c, &mut on_event),
+                Ok(Input::Key(..)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
             }
-            let target = focus::foreground();
-            let mut source = MicSource(&self.mic);
-            self.engine.dictate(&mut source, |t| listener.recv_timeout(t), target, true, &mut on_event)?;
+        }
+    }
+
+    /// Applies History's retention when Utter starts, every hour, and when it changes (`now`).
+    fn prune_history(&mut self, now: bool) {
+        if !now && self.pruned.is_some_and(|t| t.elapsed() < PRUNE_EVERY) {
+            return;
+        }
+        self.pruned = Some(Instant::now());
+        match History::global().prune(self.engine.cfg.keep_history.max_age()) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("history: {n} entries past their keep time deleted"),
+            Err(e) => tracing::warn!("history: {e}"),
         }
     }
 
@@ -495,6 +717,14 @@ impl Pipeline {
             }
         }
         let Some(s) = self.settings_rx.try_iter().last() else { return };
+        let mut wanted = self.engine.cfg.clone();
+        s.apply(&mut wanted);
+        self.engine.cfg.paste = wanted.paste;
+        self.engine.cfg.log = wanted.log;
+        if wanted.keep_history != self.engine.cfg.keep_history {
+            self.engine.cfg.keep_history = wanted.keep_history;
+            self.prune_history(true);
+        }
         let cfg = &mut self.engine.cfg;
         if s.dictionary != cfg.dictionary || s.lists != cfg.lists {
             let what = if s.dictionary != cfg.dictionary { "dictionary" } else { "lists" };
@@ -571,6 +801,40 @@ impl Pipeline {
 }
 
 impl Engine {
+    /// Paste or copy the last dictation (docs/ux/insertion.md).
+    fn command(&mut self, c: Command, on_event: &mut impl FnMut(Event)) {
+        let text = self.last_text.clone().or_else(|| History::global().last_text());
+        let Some(text) = text else {
+            on_event(Event::Notice { text: "Nothing to paste yet".into(), ok: false });
+            return;
+        };
+        let copy = |on_event: &mut dyn FnMut(Event), why: Option<NotInserted>| {
+            let copied = insert::copy(&text).inspect_err(|e| tracing::warn!("copy: {e}")).is_ok();
+            let text = match (&why, copied) {
+                (None, true) => "Copied".to_owned(),
+                (Some(why), _) => why.message(copied),
+                (None, false) => "Couldn't copy it".to_owned(),
+            };
+            on_event(Event::Notice { text, ok: copied && why.is_none() });
+        };
+        match c {
+            Command::CopyLast => copy(on_event, None),
+            Command::PasteLast => {
+                // The shortcut fires with its keys down; paste keys sent now would reach the
+                // app with them.
+                shortcut::wait_for_modifiers_released(MODIFIER_WAIT);
+                // From the tray, the taskbar has the focus: nothing to paste into.
+                let target = focus::foreground()
+                    .filter(|w| !(w.title.is_empty() && w.app.exe.eq_ignore_ascii_case("explorer.exe")));
+                let Some(w) = target else { return copy(on_event, Some(NotInserted::NoWindow)) };
+                match insert::paste(&w, &text, settings::paste_rule(&self.cfg.paste, &w.app.exe)) {
+                    Ok(()) => on_event(Event::Notice { text: "Pasted".into(), ok: true }),
+                    Err(e) => copy(on_event, Some(e.into())),
+                }
+            }
+        }
+    }
+
     /// Whether this dictation's text goes through the cleanup model.
     fn should_clean(&self, raw: &str) -> bool {
         self.cfg.always_clean || gate::reason(raw, &self.cfg.dictionary).is_some()
@@ -847,15 +1111,20 @@ impl Engine {
         log.push(Entry::Bar { committed: text.clone(), preview: String::new(), is_final: true });
         on_event(Event::Final { text: text.clone() });
         let inserted = match (&target, text.is_empty()) {
-            (_, true) => Err("nothing was heard".to_owned()),
-            (None, false) => Err("no window had the focus".to_owned()),
-            (Some(w), false) if do_insert => {
-                insert::paste(w, &text, PasteOptions::default()).map_err(|e| e.to_string())
+            (_, true) => Err(NotInserted::Nothing),
+            (_, false) if !do_insert => Err(NotInserted::Replay),
+            (None, false) => Err(NotInserted::NoWindow),
+            (Some(w), false) => {
+                insert::paste(w, &text, settings::paste_rule(&self.cfg.paste, &w.app.exe)).map_err(NotInserted::from)
             }
-            (Some(_), false) => Err("insertion off (replay)".to_owned()),
+        };
+        // A dictation is never lost: what could not go in is left on the clipboard.
+        let copied = match &inserted {
+            Err(e) if e.copy_instead() => insert::copy(&text).inspect_err(|c| tracing::warn!("copy: {c}")).is_ok(),
+            _ => false,
         };
         let total_ms = key_up.elapsed().as_secs_f64() * 1e3;
-        log.push(Entry::Inserted { ok: inserted.is_ok(), error: inserted.as_ref().err().cloned() });
+        log.push(Entry::Inserted { ok: inserted.is_ok(), error: inserted.as_ref().err().map(ToString::to_string) });
         let dictation = Dictation {
             raw,
             text,
@@ -864,10 +1133,19 @@ impl Engine {
             segments: sent,
             gate,
             inserted,
+            copied,
             asr_ms,
             cleanup_ms,
             total_ms,
         };
+        if do_insert && !dictation.text.trim().is_empty() {
+            self.last_text = Some(dictation.text.clone());
+            if self.cfg.keep_history != KeepHistory::Off
+                && let Err(e) = History::global().add(history_entry(&dictation))
+            {
+                tracing::warn!("history: {e}");
+            }
+        }
         on_event(Event::Done(Box::new(dictation.clone())));
         // The audio is not needed past here: it moves into the log, uncopied.
         log.finish(Finished {
