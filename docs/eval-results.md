@@ -684,7 +684,7 @@ pending a prompt check of its style changes.
   as Transformers.
 - `crates/utter-asr`: the audio front end in Rust (matches Transformers' features; test
   `tests/frontend.rs`), and greedy TDT decoding on onnxruntime (CUDA for the encoder).
-- `utter-cli bench` writes results that `tools/eval/asr_bench.py` scores, so the Rust
+- `utter-cli bench` writes results that `utter-bench` scores, so the Rust
   runtime is measured by the same yardstick as the Python candidates.
 
 ### Accuracy
@@ -749,8 +749,8 @@ warm. Measuring this end to end belongs to the pipeline's bench (phase 1, next).
   ASR Leaderboard's). Vietnamese is lower-cased with punctuation removed and diacritics kept.
   Known cost: numbers written as digits in one text and as words in the other count as errors
   in Vietnamese, for every model alike.
-- **Significance:** `asr_bench compare` runs a paired bootstrap (10,000 resamples) of pooled
-  WER over the clips both models transcribed.
+- **Significance:** at the time, a paired bootstrap (10,000 resamples) of pooled WER over
+  the clips both models transcribed (`asr_bench compare`, since removed).
 - **Latency** is the Python runtime's, not Utter's. It ranks models; Utter's own runtime is
   measured separately.
 

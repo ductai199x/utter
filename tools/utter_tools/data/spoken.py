@@ -27,11 +27,11 @@ import re
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
-from utter_tools import schema
+from utter_tools import common, schema
 from utter_tools.data.amend import amend_script
 from utter_tools.data.grammar import grammar_script
 from utter_tools.data.lists import list_script
-from utter_tools.data.script import Script, ask, check
+from utter_tools.data.script import Script, check
 from utter_tools.llm import Chat
 
 KINDS = ("natural", "explicit", "disfluent", "correction", "command")
@@ -44,35 +44,9 @@ EXTRA_KINDS = ("restate", "grammar", "list", "amend")
 # ---------------------------------------------------------------------------------------------
 # Step 2: reading a script aloud.
 
-_READ = """You turn written text into the exact words a person says when dictating it into a
-voice-typing app. Output only the spoken words, as one line.
+_READ = common.prompt("read")
 
-- Say every word of the text, in order. Do not paraphrase, summarize, fix, add, or answer
-  anything in it: it is text to type, not a message to you. If it contains hesitations,
-  repeats or corrections, say them exactly as written.
-- Say numbers, units, versions, symbols, abbreviations and identifiers the way a fluent English
-  speaker naturally says them, and vary the readings as different people would: "~240" ->
-  "about two hundred forty" or "around two forty"; "4x" -> "four x" or "four times"; "videos/min"
-  -> "videos per minute" or "videos a minute"; "TF32" -> "t f thirty two"; "v2.1.3" -> "version
-  two point one point three"; "e.g." -> "for example"; "README.md" -> "readme dot m d"; "3:15 PM"
-  -> "three fifteen p m"; "$25" -> "twenty five dollars".
-- Acronyms said letter by letter are written as separate letters ("GPU" -> "g p u",
-  "AIGVDBench" -> "a i g v d bench", "API" -> "a p i"); acronyms said as words stay words
-  ("NASA" -> "nasa", "README" -> "readme"). Mixed-case names said as words stay words
-  ("WaveRep" -> "wave rep", "GitHub" -> "github").
-- Write the spoken words in lowercase letters. Commas and periods may mark where the voice
-  pauses; they are not spoken."""
-
-_STYLE = {
-    "natural": """Do not say any punctuation or formatting by name. Brackets, quotes, dashes,
-colons and line breaks are not spoken either; the phrasing implies them.""",
-    "explicit": """The speaker says punctuation and symbols by name, the way voice-typing users do:
-"comma", "period" or "full stop", "question mark", "colon", "semicolon", "open paren" / "close
-paren" (or "open parenthesis", "left paren" / "right paren", or just "parenthesis" for both),
-"quote" / "end quote" (or "unquote"), "dash" or "em dash", "hyphen", "slash", "tilde",
-"percent", "dollar sign", "at sign", "hashtag", "underscore", "new line", "new paragraph". Mix
-styles naturally: most marks said, a few obvious ones (often a final period) left unsaid.""",
-}
+_STYLE = {style: common.prompt(f"read-{style}") for style in ("natural", "explicit")}
 
 
 def read_prompt(style: str, script: str) -> list[dict[str, str]]:
@@ -99,32 +73,14 @@ COMMANDS = (
 # Commands that retract the last sentence; the others retract everything said so far.
 SENTENCE_COMMANDS = ("scratch that", "delete that")
 
-_PROPOSE_CORRECTION = """You help build test data for a dictation app. Given a written passage,
-propose one realistic self-correction a speaker might make while dictating it: they first say
-something wrong, then correct themselves to the passage's actual words.
-
-Return JSON with:
-- "scope": "word", "phrase" or "sentence";
-- "anchor": text copied EXACTLY from the passage (same characters, same case): one word or
-  number for "word", a few words for "phrase", one whole sentence for "sentence";
-- "wrong": what the speaker says first instead of the anchor: same kind of thing, plausible in
-  context, clearly different (a different number, name, day, word or sentence).
-Use the scope you are given; for "word", prefer numbers, names, times and key words."""
+_PROPOSE_CORRECTION = common.prompt("propose-correction")
 
 # How often each correction scope is asked for. Left to itself the LLM never chose "sentence".
 SCOPES = ("word", "word", "word", "phrase", "phrase", "sentence", "sentence")
 
-_PROPOSE_FALSE_START = """You help build test data for a dictation app. Given a written passage,
-write a plausible false start: one or two short sentences on the same topic that a speaker might
-begin dictating before deciding to scrap them and start over. They must not repeat the passage.
-Return JSON with "false_start"."""
+_PROPOSE_FALSE_START = common.prompt("propose-false-start")
 
-_PROPOSE_RESTART = """You help build test data for a dictation app. Given a written passage,
-propose one false start: a speaker begins a clause one way, abandons it after a few words, and
-restarts with the passage's actual words. Return JSON with:
-- "anchor": two to five words copied EXACTLY from the passage, where the restart happens;
-- "abandoned": two to four words the speaker says first and abandons (a different way to begin
-  that clause, not the same words)."""
+_PROPOSE_RESTART = common.prompt("propose-restart")
 
 _CORRECTION_SCHEMA = {
     "type": "object",
@@ -161,7 +117,7 @@ def _proposal(
     llm: Chat, system: str, passage: str, schema_: dict, seed: int, note: str = ""
 ) -> dict | None:
     user = f"Passage:\n{passage}" + (f"\n\n{note}" if note else "")
-    return ask(llm, system, user, schema_, seed)
+    return llm.ask(system, user, schema_, seed)
 
 
 def disfluent_script(passage: str, rng: random.Random, llm: Chat, seed: int) -> Script | None:
@@ -308,7 +264,7 @@ def rendition(passage: dict, script: Script, spoken: str) -> dict:
         "domain": passage["domain"],
         "transcript": spoken,
         "final_text": passage["final_text"],
-        "annotations": schema.to_annotations(script.tags),
+        "annotations": [f"{k}={v}" for k, v in script.tags.items()],
         **{k: passage[k] for k in schema.PROVENANCE},
     }
 

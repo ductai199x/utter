@@ -10,7 +10,6 @@ For clips from the English eval sets it compares:
 It also writes the front-end fixture the Rust tests compare against (`--fixture`): a
 synthetic clip and Transformers' features for it.
 
-Run: utter-speech check [--clips 60] [--fixture ../crates/utter-asr/tests/fixtures]
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ import soundfile as sf
 import torch
 from rich.console import Console
 
-from utter_tools.config import data_dir, eval_dir
+from utter_tools.common import data_dir, eval_dir
 
 console = Console()
 
@@ -89,14 +88,14 @@ def write_fixture(proc, folder: Path) -> None:
     console.print(f"fixture: {n} samples -> {valid} frames, in {folder}")
 
 
-def main(
+def check(
     name: str = "parakeet-ultra",
     weights: str = "moondream/parakeet-ultra",
     clips: int = 60,
     fixture: Path | None = None,
 ) -> None:
     """Checks the export <data_dir>/models/<name> against Transformers on `clips` clips spread over
-    the public English sets (utter-eval bench fetch); with `fixture`, also writes the front-end
+    the public English sets (utter-bench fetch); with `fixture`, also writes the front-end
     fixture the Rust tests compare against there."""
     from transformers import AutoProcessor, GenerationConfig, ParakeetForTDT
 
@@ -107,7 +106,9 @@ def main(
     if fixture:
         write_fixture(proc, fixture)
 
-    model = ParakeetForTDT.from_pretrained(weights, dtype=torch.float32).cuda().eval()
+    model = ParakeetForTDT.from_pretrained(weights, dtype=torch.float32)
+    # Transformers' typing of the model's .cuda() is wrong (it runs fine).
+    model = model.cuda().eval()  # pyright: ignore[reportCallIssue]
     model.generation_config = GenerationConfig.from_pretrained(cfg["front_end"])
     ort.preload_dlls()
     providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -136,7 +137,8 @@ def main(
             ref_text = proc.batch_decode(seq, skip_special_tokens=True)[0].strip()
 
             feats = x["input_features"][:, :valid].cpu().numpy()
-            enc = enc_sess.run(None, {"features": feats})[0][0]
+            enc = np.asarray(enc_sess.run(None, {"features": feats})[0])[0]
+            assert ref.pooler_output is not None
             ref_enc = ref.pooler_output[0].cpu().numpy()
             ref_valid = (
                 int(ref.attention_mask[0].sum())
@@ -144,9 +146,8 @@ def main(
                 else ref_enc.shape[0]
             )
             if enc.shape[0] != ref_valid:
-                console.print(
-                    f"[red]{s}/{r['id']}: {enc.shape[0]} encoder frames, reference {ref_valid}[/red]"
-                )
+                frames = f"{enc.shape[0]} encoder frames, reference {ref_valid}"
+                console.print(f"[red]{s}/{r['id']}: {frames}[/red]")
             n = min(enc.shape[0], ref_valid)
             worst_enc = max(worst_enc, float(np.abs(enc[:n] - ref_enc[:n]).max()))
 

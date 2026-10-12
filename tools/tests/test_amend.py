@@ -3,10 +3,12 @@ import random
 
 from utter_tools.data.amend import amend_script
 from utter_tools.data.lists import ListPassage
+from utter_tools.llm import Chat
 
 
-class FakeLLM:
+class FakeLLM(Chat):
     def __init__(self, reply: dict) -> None:
+        super().__init__("http://fake")
         self.reply = json.dumps(reply)
 
     def chat(self, *args, **kwargs) -> str:
