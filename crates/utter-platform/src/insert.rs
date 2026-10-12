@@ -344,22 +344,27 @@ mod imp {
         retrying(BUDGET, || put_text_once(text))
     }
 
+    /// Puts `text` on the clipboard; returns the sequence number it leaves, read after the
+    /// clipboard is closed (it changes on close: read while open it is one behind, and the
+    /// restore would take the paste itself for the person's copy and never put anything back).
     fn put_text_once(text: &str) -> Result<u32, InsertError> {
-        let _cb = Clipboard::open()?;
-        // SAFETY: the clipboard is open.
-        if unsafe { EmptyClipboard() } == 0 {
-            return Err(InsertError::Clipboard(format!("empty: {}", std::io::Error::last_os_error())));
+        {
+            let _cb = Clipboard::open()?;
+            // SAFETY: the clipboard is open.
+            if unsafe { EmptyClipboard() } == 0 {
+                return Err(InsertError::Clipboard(format!("empty: {}", std::io::Error::last_os_error())));
+            }
+            let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+            let bytes: Vec<u8> = wide.iter().flat_map(|u| u.to_le_bytes()).collect();
+            if !set_bytes(CF_UNICODETEXT as u32, &bytes) {
+                return Err(InsertError::Clipboard("could not set the text".into()));
+            }
+            // Keep dictations out of clipboard history, cloud clipboard and clipboard monitors.
+            set_bytes(register("ExcludeClipboardContentFromMonitorProcessing"), &[0]);
+            set_bytes(register("CanIncludeInClipboardHistory"), &0u32.to_le_bytes());
+            set_bytes(register("CanUploadToCloudClipboard"), &0u32.to_le_bytes());
         }
-        let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
-        let bytes: Vec<u8> = wide.iter().flat_map(|u| u.to_le_bytes()).collect();
-        if !set_bytes(CF_UNICODETEXT as u32, &bytes) {
-            return Err(InsertError::Clipboard("could not set the text".into()));
-        }
-        // Keep dictations out of clipboard history, cloud clipboard and clipboard monitors.
-        set_bytes(register("ExcludeClipboardContentFromMonitorProcessing"), &[0]);
-        set_bytes(register("CanIncludeInClipboardHistory"), &0u32.to_le_bytes());
-        set_bytes(register("CanUploadToCloudClipboard"), &0u32.to_le_bytes());
-        // SAFETY: no arguments.
+        // SAFETY: no arguments (the clipboard is closed again).
         Ok(unsafe { GetClipboardSequenceNumber() })
     }
 
@@ -403,14 +408,14 @@ mod imp {
         }
     }
 
-    fn key(vk: u16, scan: u16, flags: u32) -> INPUT {
+    pub(super) fn key(vk: u16, scan: u16, flags: u32) -> INPUT {
         INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
         }
     }
 
-    fn send(inputs: &[INPUT]) -> Result<(), InsertError> {
+    pub(super) fn send(inputs: &[INPUT]) -> Result<(), InsertError> {
         // SAFETY: a valid slice of INPUT structs and their size.
         let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) };
         if sent as usize != inputs.len() {
@@ -580,7 +585,7 @@ mod live {
                 SendInput(2, taps.as_ptr(), size_of::<INPUT>() as i32);
                 SetForegroundWindow(self.0);
             }
-            pump(Duration::from_millis(250));
+            pump(Duration::from_millis(400));
             // SAFETY: no arguments.
             assert_eq!(unsafe { GetForegroundWindow() }, self.0, "the test window did not come to the front");
         }
@@ -666,6 +671,41 @@ mod live {
         assert_eq!(lost, 0, "the clipboard did not come back {lost} times in 30");
     }
 
+    /// How often a paste goes missing when the keys follow the clipboard write at once, and with
+    /// a short settle after it: 20 pastes per delay into a real window.
+    #[test]
+    #[ignore]
+    fn paste_misses_by_settle() {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_CONTROL, KEYEVENTF_KEYUP as UP};
+        let saved = imp::save_all().expect("read the clipboard");
+        let w = TestWindow::open("Utter paste reliability", 200);
+        w.clear();
+        w.focus();
+        for settle in [0u64, 10, 25, 50] {
+            let mut missed = 0;
+            for i in 0..20 {
+                w.clear();
+                pump(Duration::from_millis(30));
+                let text = format!("paste {settle}-{i}");
+                imp::put_text(&text).unwrap();
+                while clipboard_text().as_deref() != Some(text.as_str()) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                std::thread::sleep(Duration::from_millis(settle));
+                imp::send(&[imp::key(VK_CONTROL, 0, 0), imp::key(0x56, 0, 0), imp::key(0x56, 0, UP), imp::key(VK_CONTROL, 0, UP)])
+                    .unwrap();
+                pump(Duration::from_millis(120));
+                if w.text() != text {
+                    missed += 1;
+                }
+            }
+            println!("settle {settle} ms: {missed} of 20 missed");
+        }
+        drop(w);
+        // SAFETY: no arguments.
+        imp::restore(saved, unsafe { GetClipboardSequenceNumber() });
+    }
+
     #[test]
     #[ignore]
     fn pastes_into_a_real_window() {
@@ -688,10 +728,10 @@ mod live {
         w.clear();
         copy("OLD").unwrap();
         paste(&target, "Hello from Utter.", rule(PasteKeys::Primary, Keep::Normal)).unwrap();
+        assert_eq!(clipboard_text().as_deref(), Some("Hello from Utter."), "held during the paste");
         pump(Duration::from_millis(150));
         assert_eq!(w.text(), "Hello from Utter.");
-        assert_eq!(clipboard_text().as_deref(), Some("Hello from Utter."), "held during the paste");
-        pump(Duration::from_millis(600));
+        pump(Duration::from_millis(450));
         assert!(clipboard_becomes("OLD"), "restored after 0.5 s");
         println!("ctrl+v, normal: inserted, clipboard restored");
 
