@@ -112,6 +112,11 @@ pub fn paste(target: &Window, text: &str, rule: PasteRule) -> Result<(), InsertE
     }
 }
 
+/// The clipboard's text, if it holds any.
+pub fn clipboard_text() -> Option<String> {
+    imp::clipboard_text()
+}
+
 /// Puts `text` on the clipboard and leaves it there (marked to stay out of clipboard history,
 /// as a paste is): for a dictation that could not go in, and for "Copy" in History.
 pub fn copy(text: &str) -> Result<(), InsertError> {
@@ -176,18 +181,39 @@ mod imp {
     struct Clipboard;
 
     impl Clipboard {
-        /// Opens the clipboard, retrying briefly: another app may hold it for a moment.
         fn open() -> Result<Self, InsertError> {
-            for _ in 0..20 {
-                // SAFETY: null owner window; paired with CloseClipboard in Drop.
-                if unsafe { OpenClipboard(std::ptr::null_mut()) } != 0 {
-                    return Ok(Clipboard);
-                }
-                std::thread::sleep(Duration::from_millis(5));
+            // SAFETY: null owner window; paired with CloseClipboard in Drop.
+            if unsafe { OpenClipboard(std::ptr::null_mut()) } != 0 {
+                Ok(Clipboard)
+            } else {
+                Err(InsertError::Clipboard(format!("busy: {}", std::io::Error::last_os_error())))
             }
-            Err(InsertError::Clipboard(format!("busy: {}", std::io::Error::last_os_error())))
         }
     }
+
+    /// Runs a whole clipboard operation (open, act, close) until it works or `budget` runs out.
+    /// Clipboard managers (Windows' own history, third-party ones) open the clipboard on every
+    /// change to read it, so an operation right after a change can find it held, or lose it
+    /// mid-way (EmptyClipboard: "Thread does not have a clipboard open"): both pass in moments.
+    fn retrying<T>(budget: Duration, mut op: impl FnMut() -> Result<T, InsertError>) -> Result<T, InsertError> {
+        let start = std::time::Instant::now();
+        let mut wait = Duration::from_millis(5);
+        loop {
+            match op() {
+                Ok(v) => return Ok(v),
+                Err(e) if start.elapsed() + wait > budget => return Err(e),
+                Err(_) => {
+                    std::thread::sleep(wait);
+                    wait = (wait * 2).min(Duration::from_millis(50));
+                }
+            }
+        }
+    }
+
+    /// How long a paste's clipboard work may wait for another app to let go.
+    const BUDGET: Duration = Duration::from_millis(600);
+    /// The restore runs after the paste, in the background: it can wait longer.
+    const RESTORE_BUDGET: Duration = Duration::from_millis(1500);
 
     impl Drop for Clipboard {
         fn drop(&mut self) {
@@ -241,7 +267,33 @@ mod imp {
         }
     }
 
-    fn save_all() -> Result<Vec<(u32, Vec<u8>)>, InsertError> {
+    /// Everything on the clipboard, to put back after the paste. Contents can show up a moment
+    /// after a change (measured: none at once, the text listed but unreadable at 20 ms, all of
+    /// it by 100 ms, with a clipboard manager running): a format listed but not readable yet is
+    /// waited for, and a clipboard that looks empty is looked at again briefly before it is
+    /// believed, so a fresh copy is not saved as nothing and then wiped by the restore.
+    pub(super) fn save_all() -> Result<Vec<(u32, Vec<u8>)>, InsertError> {
+        let start = std::time::Instant::now();
+        loop {
+            // A format that never becomes readable (its app has closed) must not stop the
+            // paste: after the wait, what can be read is saved.
+            let saved = retrying(BUDGET, || save_all_once(true)).or_else(|_| save_all_once(false))?;
+            if !saved.is_empty() || start.elapsed() >= EMPTY_SETTLE {
+                return Ok(saved);
+            }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+    }
+
+    /// The longest a paste waits for the dictation to read back from the clipboard.
+    const READBACK: Duration = Duration::from_millis(200);
+
+    /// How long an empty-looking clipboard is watched before it counts as empty.
+    const EMPTY_SETTLE: Duration = Duration::from_millis(150);
+
+    /// One pass over the formats. `strict`: a format listed but not readable yet fails the pass,
+    /// to be tried again; otherwise it is left out.
+    fn save_all_once(strict: bool) -> Result<Vec<(u32, Vec<u8>)>, InsertError> {
         let _cb = Clipboard::open()?;
         let mut saved = Vec::new();
         let mut format = 0u32;
@@ -257,6 +309,10 @@ mod imp {
             // SAFETY: the clipboard is open and `format` is on it.
             let handle = unsafe { GetClipboardData(format) };
             if handle.is_null() {
+                if strict {
+                    return Err(InsertError::Clipboard(format!("format {format} is not ready")));
+                }
+                tracing::debug!("clipboard format {format} could not be read; it will not be put back");
                 continue;
             }
             // SAFETY: every format not in HANDLE_FORMATS holds global memory.
@@ -267,7 +323,28 @@ mod imp {
         Ok(saved)
     }
 
+    pub fn clipboard_text() -> Option<String> {
+        retrying(BUDGET, || {
+            let _cb = Clipboard::open()?;
+            // SAFETY: the clipboard is open; CF_UNICODETEXT holds global memory.
+            let handle = unsafe { GetClipboardData(CF_UNICODETEXT as u32) };
+            if handle.is_null() {
+                return Ok(None);
+            }
+            // SAFETY: a clipboard data handle in global memory.
+            let Some(bytes) = (unsafe { read_global(handle) }) else { return Ok(None) };
+            let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            Ok(Some(String::from_utf16_lossy(&units).trim_end_matches('\0').to_owned()))
+        })
+        .ok()
+        .flatten()
+    }
+
     pub fn put_text(text: &str) -> Result<u32, InsertError> {
+        retrying(BUDGET, || put_text_once(text))
+    }
+
+    fn put_text_once(text: &str) -> Result<u32, InsertError> {
         let _cb = Clipboard::open()?;
         // SAFETY: the clipboard is open.
         if unsafe { EmptyClipboard() } == 0 {
@@ -286,17 +363,43 @@ mod imp {
         Ok(unsafe { GetClipboardSequenceNumber() })
     }
 
-    fn restore(saved: Vec<(u32, Vec<u8>)>, our_sequence: u32) {
-        // SAFETY: no arguments.
-        if unsafe { GetClipboardSequenceNumber() } != our_sequence {
-            tracing::debug!("clipboard changed since the paste; not restored");
-            return;
-        }
-        let Ok(_cb) = Clipboard::open() else { return };
-        // SAFETY: the clipboard is open.
-        unsafe { EmptyClipboard() };
-        for (format, bytes) in saved {
-            set_bytes(format, &bytes);
+    pub(super) fn restore(saved: Vec<(u32, Vec<u8>)>, our_sequence: u32) {
+        // The clipboard as Utter last left it: a try that fails after emptying it changes the
+        // sequence number itself, and the next try must not take that for the person's copy.
+        let mut ours = our_sequence;
+        let result = retrying(RESTORE_BUDGET, || {
+            // Checked on every try: a copy the person makes meanwhile is never overwritten.
+            // SAFETY: no arguments.
+            if unsafe { GetClipboardSequenceNumber() } != ours {
+                return Ok(false);
+            }
+            let attempt = (|| {
+                let _cb = Clipboard::open()?;
+                // SAFETY: the clipboard is open.
+                if unsafe { EmptyClipboard() } == 0 {
+                    return Err(InsertError::Clipboard(format!("empty: {}", std::io::Error::last_os_error())));
+                }
+                // Every format that can go back does; one that cannot (a format only its app can
+                // write) is not worth losing the rest for, and trying again would not change it.
+                let failed: Vec<u32> = saved.iter().filter(|(f, b)| !set_bytes(*f, b)).map(|(f, _)| *f).collect();
+                if !saved.is_empty() && failed.len() == saved.len() {
+                    return Err(InsertError::Clipboard("nothing could be put back".into()));
+                }
+                if !failed.is_empty() {
+                    tracing::debug!("clipboard formats {failed:?} could not be put back");
+                }
+                Ok(true)
+            })();
+            if attempt.is_err() {
+                // SAFETY: no arguments (the clipboard is closed again here).
+                ours = unsafe { GetClipboardSequenceNumber() };
+            }
+            attempt
+        });
+        match result {
+            Ok(true) => {}
+            Ok(false) => tracing::debug!("clipboard changed since the paste; not restored"),
+            Err(e) => tracing::warn!("the clipboard could not be put back: {e}"),
         }
     }
 
@@ -323,6 +426,17 @@ mod imp {
     pub fn paste(text: &str, keys: PasteKeys, restore_after: Option<Duration>) -> Result<(), InsertError> {
         let saved = save_all()?;
         let our_sequence = put_text(text)?;
+        // The app reads the clipboard the moment the keys arrive, and what was just written can
+        // take a moment to show (save_all): paste only once it reads back as the text. Usually
+        // at once; never more than READBACK.
+        let start = std::time::Instant::now();
+        while clipboard_text().as_deref() != Some(text) {
+            if start.elapsed() >= READBACK {
+                tracing::warn!("the clipboard did not show the dictation within {READBACK:?}; pasting anyway");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
         const VK_V: u16 = 0x56;
         // Insert is an extended key: without the flag it reads as the number pad's 0.
         let chord: &[INPUT] = &match keys {
@@ -388,11 +502,240 @@ mod imp {
         Err(InsertError::Input("not implemented on this platform yet".into()))
     }
 
+    pub fn clipboard_text() -> Option<String> {
+        None
+    }
+
     pub fn put_text(_text: &str) -> Result<u32, InsertError> {
         Err(InsertError::Clipboard("not implemented on this platform yet".into()))
     }
 
     pub fn type_text(_text: &str) -> Result<(), InsertError> {
         Err(InsertError::Input("not implemented on this platform yet".into()))
+    }
+}
+
+/// Pastes into a real window and reads back what arrived (docs/ux/insertion.md, acceptance
+/// checks). It opens its own text window for a few seconds, never another app's, and puts the
+/// clipboard back when done. Run by hand:
+/// cargo test -p utter-platform pastes_into_a_real_window -- --ignored --nocapture
+#[cfg(all(test, windows))]
+mod live {
+    use std::time::{Duration, Instant};
+
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_SHIFT,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, DispatchMessageW, ES_MULTILINE, ES_WANTRETURN, GetForegroundWindow,
+        MSG, PM_REMOVE, PeekMessageW, SendMessageW, SetForegroundWindow, TranslateMessage, WM_GETTEXT,
+        WM_GETTEXTLENGTH, WM_SETTEXT, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    };
+
+    use super::{Keep, PasteKeys, PasteRule, clipboard_text, copy, imp, paste};
+    use crate::focus;
+
+    /// A plain text window of this process, gone when dropped.
+    struct TestWindow(HWND);
+
+    impl TestWindow {
+        fn open(title: &str, x: i32) -> Self {
+            let class: Vec<u16> = "EDIT\0".encode_utf16().collect();
+            let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
+            let style = WS_OVERLAPPEDWINDOW | WS_VISIBLE | (ES_MULTILINE | ES_WANTRETURN) as u32;
+            // SAFETY: a top-level window of the system EDIT class; the strings outlive the call.
+            let hwnd = unsafe {
+                CreateWindowExW(
+                    0,
+                    class.as_ptr(),
+                    title.as_ptr(),
+                    style,
+                    x,
+                    120,
+                    420,
+                    220,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            };
+            assert!(!hwnd.is_null(), "could not create the test window");
+            Self(hwnd)
+        }
+
+        /// Brings it to the front. Windows lets a background process do that right after it
+        /// sends input, so a Shift tap comes first (not Alt: an Alt tap opens a window's menu
+        /// mode, a modal loop that waits for the menu to close).
+        fn focus(&self) {
+            let shift = |flags| INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_SHIFT, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+            };
+            let taps = [shift(0), shift(KEYEVENTF_KEYUP)];
+            // SAFETY: two keyboard inputs; then a window handle this process owns.
+            unsafe {
+                SendInput(2, taps.as_ptr(), size_of::<INPUT>() as i32);
+                SetForegroundWindow(self.0);
+            }
+            pump(Duration::from_millis(250));
+            // SAFETY: no arguments.
+            assert_eq!(unsafe { GetForegroundWindow() }, self.0, "the test window did not come to the front");
+        }
+
+        fn text(&self) -> String {
+            // SAFETY: WM_GETTEXT into a buffer of the size asked for, on our own window.
+            unsafe {
+                let n = SendMessageW(self.0, WM_GETTEXTLENGTH, 0, 0) as usize;
+                let mut buf = vec![0u16; n + 1];
+                let got = SendMessageW(self.0, WM_GETTEXT, buf.len() as WPARAM, buf.as_mut_ptr() as LPARAM) as usize;
+                String::from_utf16_lossy(&buf[..got])
+            }
+        }
+
+        fn clear(&self) {
+            let empty = [0u16];
+            // SAFETY: an empty NUL-terminated string to our own window.
+            unsafe { SendMessageW(self.0, WM_SETTEXT, 0, empty.as_ptr() as LPARAM) };
+        }
+    }
+
+    impl Drop for TestWindow {
+        fn drop(&mut self) {
+            // SAFETY: a window this process created.
+            unsafe { DestroyWindow(self.0) };
+        }
+    }
+
+    /// Runs this thread's messages for `d`: the window needs them to take the keys.
+    fn pump(d: Duration) {
+        let end = Instant::now() + d;
+        while Instant::now() < end {
+            // SAFETY: a standard message loop on this thread's queue. Bounded by the clock too:
+            // a message the window keeps regenerating must not hold it forever.
+            unsafe {
+                let mut msg: MSG = std::mem::zeroed();
+                while Instant::now() < end && PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Whether the clipboard holds `text` within a second: what is written shows up a moment
+    /// later, like any clipboard change (insert::imp::save_all).
+    fn clipboard_becomes(text: &str) -> bool {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            if clipboard_text().as_deref() == Some(text) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    fn rule(keys: PasteKeys, keep: Keep) -> PasteRule {
+        PasteRule { keys, keep }
+    }
+
+    #[test]
+    #[ignore]
+    fn the_clipboard_comes_back_whole() {
+        // Clipboard managers (Windows' own history, UniClipboard, ...) open the clipboard on every
+        // change to read it: each round races them, as a real paste does.
+        let mine = imp::save_all().expect("read the clipboard");
+        let mut lost = 0;
+        for round in 0..30 {
+            copy(&format!("OLD {round}")).unwrap();
+            let saved = imp::save_all().unwrap();
+            copy("SOMETHING ELSE").unwrap();
+            // SAFETY: no arguments.
+            imp::restore(saved, unsafe { GetClipboardSequenceNumber() });
+            if !clipboard_becomes(&format!("OLD {round}")) {
+                lost += 1;
+                eprintln!("round {round}: not put back, the clipboard has {:?}", clipboard_text());
+            }
+        }
+        // SAFETY: no arguments.
+        imp::restore(mine, unsafe { GetClipboardSequenceNumber() });
+        assert_eq!(lost, 0, "the clipboard did not come back {lost} times in 30");
+    }
+
+    #[test]
+    #[ignore]
+    fn pastes_into_a_real_window() {
+        let saved = imp::save_all().expect("read the clipboard");
+        let result = std::panic::catch_unwind(run);
+        // The person's clipboard comes back, whatever happened.
+        // SAFETY: no arguments.
+        imp::restore(saved, unsafe { GetClipboardSequenceNumber() });
+        if let Err(e) = result {
+            std::panic::resume_unwind(e);
+        }
+    }
+
+    fn run() {
+        let w = TestWindow::open("Utter paste test", 200);
+        w.focus();
+        let target = focus::foreground().expect("the test window has the focus");
+
+        // Ctrl+V, Normal: the text arrives, and the old clipboard is back after 0.5 s.
+        w.clear();
+        copy("OLD").unwrap();
+        paste(&target, "Hello from Utter.", rule(PasteKeys::Primary, Keep::Normal)).unwrap();
+        pump(Duration::from_millis(150));
+        assert_eq!(w.text(), "Hello from Utter.");
+        assert_eq!(clipboard_text().as_deref(), Some("Hello from Utter."), "held during the paste");
+        pump(Duration::from_millis(600));
+        assert!(clipboard_becomes("OLD"), "restored after 0.5 s");
+        println!("ctrl+v, normal: inserted, clipboard restored");
+
+        // Shift+Insert pastes too.
+        w.clear();
+        paste(&target, "Shift+Insert works.", rule(PasteKeys::ShiftInsert, Keep::Normal)).unwrap();
+        pump(Duration::from_millis(150));
+        assert_eq!(w.text(), "Shift+Insert works.");
+        println!("shift+insert: inserted");
+
+        // Typing it out: line breaks become Enter.
+        w.clear();
+        pump(Duration::from_millis(700));
+        paste(&target, "Typed\nout.", rule(PasteKeys::Type, Keep::Normal)).unwrap();
+        pump(Duration::from_millis(200));
+        assert_eq!(w.text(), "Typed\r\nout.");
+        println!("type it out: inserted, line break as Enter");
+
+        // Leave it there: the dictation stays on the clipboard.
+        w.clear();
+        copy("OLD").unwrap();
+        paste(&target, "Left on the clipboard.", rule(PasteKeys::Primary, Keep::Leave)).unwrap();
+        pump(Duration::from_millis(700));
+        assert!(clipboard_becomes("Left on the clipboard."));
+        println!("leave it there: not restored");
+
+        // A copy made during the hold is never overwritten.
+        w.clear();
+        copy("OLD").unwrap();
+        paste(&target, "Pasted.", rule(PasteKeys::Primary, Keep::Normal)).unwrap();
+        pump(Duration::from_millis(100));
+        copy("NEWER").unwrap();
+        pump(Duration::from_millis(700));
+        assert!(clipboard_becomes("NEWER"));
+        println!("a newer copy: kept");
+
+        // The focus moved: nothing is typed anywhere.
+        let other = TestWindow::open("Utter paste test, other", 680);
+        other.clear();
+        other.focus();
+        let err = paste(&target, "Must not arrive.", PasteRule::default()).unwrap_err();
+        pump(Duration::from_millis(200));
+        assert!(matches!(err, super::InsertError::FocusChanged(_)), "{err}");
+        assert_eq!(other.text(), "");
+        println!("focus moved: refused, nothing typed");
     }
 }
