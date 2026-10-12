@@ -4,17 +4,23 @@
   // the next dictation and reports back (`applied`).
   import Confirm from './Confirm.svelte';
   import {
+    KEEP_LABELS,
+    WITH_LABELS,
+    groupRules,
     historyClear,
     historyCountOlder,
     historyQuery,
+    openPasteRules,
     openPath,
     pasteRules,
+    ruleSource,
+    withRule,
+    withoutRule,
     type Applied,
     type HomeState,
     type KeepHistory,
     type Model,
     type PasteKeep,
-    type PasteOverride,
     type PasteRules,
     type PasteWith,
     type Settings,
@@ -61,70 +67,18 @@
     return bytes > 0 ? `Downloads ${(bytes / 1e9).toFixed(1)} GB` : undefined;
   }
 
-  // Paste rules ----------------------------------------------------------------------------
+  // Paste rules: here the person's own and changed ones; every rule in the Paste rules window.
 
-  const WITH: [PasteWith, string][] = [
-    ['ctrl-v', 'Ctrl+V'],
-    ['ctrl-shift-v', 'Ctrl+Shift+V'],
-    ['shift-insert', 'Shift+Insert'],
-    ['type', 'Type it out'],
-  ];
-  const KEEP: [PasteKeep, string][] = [
-    ['normal', 'Normal'],
-    ['3s', '3 seconds'],
-    ['5s', '5 seconds'],
-    ['leave', 'Leave it there'],
-  ];
+  const WITH = Object.entries(WITH_LABELS) as [PasteWith, string][];
+  const KEEP = Object.entries(KEEP_LABELS) as [PasteKeep, string][];
   let rules = $state<PasteRules | null>(null);
   $effect(() => {
     const overrides = settings?.paste ?? [];
     void pasteRules($state.snapshot(overrides)).then((r) => (rules = r));
   });
-
-  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-
-  /** One row per app: programs of the same app (Remote Desktop's two) share a rule. */
-  interface Group {
-    name: string;
-    apps: string[];
-    with: PasteWith;
-    keep: PasteKeep;
-    default: [PasteWith, PasteKeep] | null;
-  }
-  const groups = $derived.by(() => {
-    const out: Group[] = [];
-    for (const r of rules?.rules ?? []) {
-      const g = out.find(
-        (g) => g.name === r.name && g.with === r.with && g.keep === r.keep && `${g.default}` === `${r.default}`,
-      );
-      if (g) g.apps.push(r.app);
-      else out.push({ name: r.name, apps: [r.app], with: r.with, keep: r.keep, default: r.default });
-    }
-    return out;
-  });
-  const edited = (g: Group) => !!g.default && (g.default[0] !== g.with || g.default[1] !== g.keep);
-  // Utter's untouched defaults stay folded away unless asked for; the person's rules show.
-  let showDefaults = $state(false);
-  const shownGroups = $derived(groups.filter((g) => showDefaults || !g.default || edited(g)));
-  const folded = $derived(groups.length - groups.filter((g) => !g.default || edited(g)).length);
-
-  function setRule(g: Group, rule: Pick<PasteOverride, 'with' | 'keep'>) {
-    if (!settings) return;
-    const others = settings.paste.filter((o) => !g.apps.some((a) => same(o.app, a)));
-    // Back at Utter's default: no entry, so a better default in a later version still arrives.
-    const isDefault = g.default && g.default[0] === rule.with && g.default[1] === rule.keep;
-    void save({ ...settings, paste: isDefault ? others : [...others, ...g.apps.map((app) => ({ app, ...rule }))] });
-  }
-
-  function removeRule(g: Group) {
-    if (!settings) return;
-    void save({ ...settings, paste: settings.paste.filter((o) => !g.apps.some((a) => same(o.app, a))) });
-  }
-
-  function addApp(exe: string) {
-    if (!settings || !exe || rules?.rules.some((r) => same(r.app, exe))) return;
-    void save({ ...settings, paste: [...settings.paste, { app: exe, with: 'ctrl-v', keep: 'normal' }] });
-  }
+  const groups = $derived(groupRules(rules?.rules ?? []));
+  const mine = $derived(groups.filter((g) => ruleSource(g) !== 'default'));
+  const defaults = $derived(groups.length - mine.length);
 
   // History ------------------------------------------------------------------------------
 
@@ -276,71 +230,60 @@
       {#if qualityBlocked && settings.model !== 'quality'}<p class="hint">Quality: {qualityBlocked}</p>{/if}
 
       <h2>Typing</h2>
-      <p class="hint section-hint">
-        Most apps paste with Ctrl+V and read the clipboard at once. For one that doesn't, set how it pastes.
-      </p>
-      {#if rules}
-        {#if shownGroups.length}
-          <ul class="rules">
-            {#each shownGroups as g (g.apps.join())}
-              <li>
-                <div class="rule-app">
-                  <span class="rule-name">{g.name}</span>
-                  <span class="rule-exe">{g.apps.join(', ')}</span>
-                </div>
-                <select
-                  aria-label="{g.name}: paste with"
-                  value={g.with}
-                  onchange={(e) => setRule(g, { with: e.currentTarget.value as PasteWith, keep: g.keep })}
-                >
-                  {#each WITH as [v, label] (v)}<option value={v}>{label}</option>{/each}
-                </select>
-                <select
-                  aria-label="{g.name}: keep on the clipboard"
-                  value={g.keep}
-                  onchange={(e) => setRule(g, { with: g.with, keep: e.currentTarget.value as PasteKeep })}
-                >
-                  {#each KEEP as [v, label] (v)}<option value={v}>{label}</option>{/each}
-                </select>
-                <span class="rule-tail">
-                  {#if edited(g)}
-                    <button class="link" onclick={() => removeRule(g)}>Reset</button>
-                  {:else if g.default}
-                    <span class="rule-default">Default</span>
-                  {:else}
-                    <button class="remove" aria-label="Remove {g.name}" onclick={() => removeRule(g)}>
-                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
-                    </button>
-                  {/if}
-                </span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-        {#if folded > 0 || showDefaults}
-          <button class="link fold" onclick={() => (showDefaults = !showDefaults)}>
-            {showDefaults ? "Hide Utter's defaults" : `Show Utter's defaults (${folded})`}
-          </button>
-        {/if}
-        <div class="add-app">
-          <select
-            aria-label="Add an app"
-            value=""
-            onchange={(e) => {
-              addApp(e.currentTarget.value);
-              e.currentTarget.value = '';
-            }}
-          >
-            <option value="" disabled>Add an app…</option>
-            {#if rules.lastApp && !rules.rules.some((r) => same(r.app, rules!.lastApp!.exe))}
-              <option value={rules.lastApp.exe}>{rules.lastApp.name} (your last dictation)</option>
-            {/if}
-            {#each rules.openApps.filter((a) => !rules!.rules.some((r) => same(r.app, a.exe))) as a (a.exe)}
-              <option value={a.exe}>{a.name}</option>
-            {/each}
-          </select>
-          <span class="desc">Every other app: Ctrl+V, Normal.</span>
+      <div class="row">
+        <div class="label">
+          <span class="label-text">Paste rules</span>
+          <span class="desc">
+            Most apps paste with Ctrl+V and read the clipboard at once. Utter knows {defaults}
+            {defaults === 1 ? 'app' : 'apps'} that don't{mine.length ? `, and you have ${mine.length} of your own` : ''}.
+          </span>
         </div>
+        <button onclick={() => void openPasteRules()}>All paste rules…</button>
+      </div>
+      {#if mine.length}
+        <ul class="rules">
+          {#each mine as g (g.apps.join())}
+            <li>
+              <div class="rule-app">
+                <span class="rule-name">{g.name}</span>
+                <span class="rule-exe">{g.apps.join(', ')}</span>
+              </div>
+              <select
+                aria-label="{g.name}: paste with"
+                value={g.with}
+                onchange={(e) =>
+                  settings &&
+                  save({ ...settings, paste: withRule(settings.paste, g, { with: e.currentTarget.value as PasteWith, keep: g.keep }) })}
+              >
+                {#each WITH as [v, label] (v)}<option value={v}>{label}</option>{/each}
+              </select>
+              <select
+                aria-label="{g.name}: keep on the clipboard"
+                value={g.keep}
+                onchange={(e) =>
+                  settings &&
+                  save({ ...settings, paste: withRule(settings.paste, g, { with: g.with, keep: e.currentTarget.value as PasteKeep }) })}
+              >
+                {#each KEEP as [v, label] (v)}<option value={v}>{label}</option>{/each}
+              </select>
+              <span class="rule-tail">
+                {#if ruleSource(g) === 'changed'}
+                  <button class="link" onclick={() => settings && save({ ...settings, paste: withoutRule(settings.paste, g) })}
+                    >Reset</button
+                  >
+                {:else}
+                  <button
+                    class="remove"
+                    aria-label="Remove {g.name}"
+                    onclick={() => settings && save({ ...settings, paste: withoutRule(settings.paste, g) })}
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
+                  </button>
+                {/if}
+              </span>
+            </li>
+          {/each}
+        </ul>
       {/if}
 
       <h2>History</h2>
@@ -427,14 +370,10 @@
 {/if}
 
 <style>
-  .section-hint {
-    margin: 2px 0 10px;
-  }
   .rules {
     list-style: none;
     margin: 0;
     padding: 0;
-    border-top: 1px solid var(--home-border);
   }
   .rules li {
     display: grid;
@@ -477,10 +416,6 @@
     display: flex;
     justify-content: flex-end;
   }
-  .rule-default {
-    font-size: 12px;
-    color: var(--home-faint);
-  }
   .remove {
     width: 28px;
     height: 28px;
@@ -497,19 +432,5 @@
     stroke: currentColor;
     stroke-width: 1.6;
     stroke-linecap: round;
-  }
-  .fold {
-    display: block;
-    margin: 12px 0 0;
-    font-size: 13px;
-  }
-  .add-app {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-top: 12px;
-  }
-  .add-app select {
-    width: 230px;
   }
 </style>

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "home",
-  "description": "The Home window listens to settings events and calls the app's own commands (home.rs).",
-  "windows": ["home"],
+  "description": "The Home and Paste rules windows listen to settings events and call the app's own commands (home.rs).",
+  "windows": ["home", "rules"],
   "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

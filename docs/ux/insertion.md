@@ -107,17 +107,33 @@ Windows Terminal, the classic console and VS Code's terminal paste with Ctrl+V: 
 macOS and Linux get their own tables when those platforms are built (Linux terminals:
 Ctrl+Shift+V). A person only ever sees their own platform's defaults and choices.
 
-### Editing them (Settings → Typing)
+### How Utter knows the app
 
-- One row per app: its name and program(s), "Paste with" and "Keep" as two quiet dropdowns.
-  Programs of one app (Remote Desktop's `mstsc.exe` and `msrdc.exe`) share a row, and a change
-  applies to all of them.
-- Utter's defaults that the person has not touched are folded away behind "Show Utter's
-  defaults (12)"; the person's own rules and any default they edited always show.
-- A default can be changed and **Reset** (back to Utter's value), not removed: set to Ctrl+V,
-  Normal it is like any other app. The person's own rules have a remove button.
-- **Add an app**: a menu of the apps open now, by friendly name, with **"<the app you last
-  dictated into> (your last dictation)"** first, the quick path when a paste just did not work.
+At key down Utter asks the OS for the window with the keyboard focus, then the process that owns
+it, then that process's program file: its file name is what rules match on, and its version
+information gives the friendly name. A Store app's window belongs to its frame host, so Utter
+looks inside it for the app's own process. It knows the app, not the text field: every site in
+a browser is the browser, and a terminal inside VS Code is VS Code.
+
+### Editing them
+
+**Settings → Typing** says how many apps Utter's defaults cover, lists the person's own rules
+and any default they changed (editable in place), and has **All paste rules…**.
+
+**All paste rules…** opens the **Paste rules window** (880 x 620, resizable to 640 x 420):
+- A table, one row per app: its name and program(s), **Paste with** and **Keep on clipboard**
+  as quiet dropdowns edited in place, **Dictations** into it (from History), and **Source**:
+  Default, Changed (an edited default) or Yours. Programs of one app (Remote Desktop's
+  `mstsc.exe` and `msrdc.exe`) share a row, and a change applies to all of them.
+- **Search** by app or program name (Ctrl+F), with the count ("3 of 13"); **sort** by any
+  column (Dictations, most first, to start); **filter chips** for Source, Paste with and Keep.
+- A changed default has **Reset** (back to Utter's value); a default cannot be removed (set to
+  Ctrl+V, Normal it is like any other app). The person's own rules have a remove button.
+- **Add an app** opens a picker: a search field, then **the apps open right now** (asked for
+  each time it opens), then the apps dictated into (most used first), each with its program
+  name and dictation count; apps that already have a rule say so. **Choose a program…** at the
+  bottom picks any `.exe`: only its file name is kept. The new row flashes once in the table.
+- Both the Settings section and the window edit settings.toml and follow each other live.
 - Every other app: Ctrl+V, Normal.
 
 **Stored** in settings.toml as the person's changes only, not the whole table, so a later
