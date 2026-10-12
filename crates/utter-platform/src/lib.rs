@@ -3,6 +3,7 @@
 //! platforms say what they lack rather than pretend.
 
 pub mod autostart;
+pub mod caret;
 pub mod disk;
 pub mod focus;
 pub mod hotkey;

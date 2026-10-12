@@ -166,6 +166,38 @@ fn start_speech(model: SpeechModel, dictionary: &[String]) -> Result<Speech, Pip
     Ok((job_tx, done_rx))
 }
 
+/// How long the paste waits for what is before the cursor: it was asked at key down, so it is
+/// almost always there already; an app slower than this gets no space.
+const CARET_WAIT: Duration = Duration::from_millis(20);
+/// The same for paste last, which asks only when its keys are pressed.
+const CARET_WAIT_COMMAND: Duration = Duration::from_millis(150);
+
+/// `text` as it goes in after `before` (the characters before the cursor, `None` when the
+/// app does not say): with a space in front when it continues a word or a sentence, the way
+/// one types it (docs/ux/insertion.md, "Spacing").
+fn spaced(before: Option<&str>, text: &str) -> String {
+    if needs_space(before, text) { format!(" {text}") } else { text.to_owned() }
+}
+
+fn needs_space(before: Option<&str>, text: &str) -> bool {
+    let Some(before) = before else { return false };
+    let mut prev = before.chars().rev();
+    let (Some(last), Some(first)) = (prev.next(), text.chars().next()) else { return false };
+    if last.is_whitespace() || first.is_whitespace() {
+        return false;
+    }
+    // After an opening bracket, a slash or a dash joining words: no space.
+    if matches!(last, '(' | '[' | '{' | '\u{201C}' | '\u{2018}' | '/' | '-' | '\u{2013}' | '\u{2014}' | '@' | '#') {
+        return false;
+    }
+    // A straight quote opens when what is before it is a space or nothing.
+    if matches!(last, '"' | '\'') && prev.next().is_none_or(char::is_whitespace) {
+        return false;
+    }
+    // Text that starts by closing or punctuating attaches to what is before.
+    !matches!(first, '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\u{201D}' | '\u{2019}' | '%')
+}
+
 /// How often the idle pipeline looks for new settings.
 const SETTINGS_POLL: Duration = Duration::from_millis(200);
 
@@ -620,6 +652,14 @@ impl Pipeline {
     /// [`Pipeline::start`], saying which stage is loading as it goes (for the splash,
     /// docs/ux/splash.md): "speech", "cleanup", then "microphone".
     pub fn start_reporting(cfg: PipelineConfig, mut stage: impl FnMut(&'static str)) -> Result<Self, PipelineError> {
+        // Everything the loaders will read, read ahead in parallel: a cold start otherwise
+        // waits on their piecemeal reads (docs/eval-results.md, 2026-10-12).
+        let files = components_for(cfg.tier)
+            .into_iter()
+            .filter_map(|id| utter_runtime::component(id).ok())
+            .flat_map(|c| c.files_on_disk())
+            .collect();
+        utter_runtime::read_ahead(files);
         // The cleanup server is a process of its own: it loads while the speech model does,
         // so starting takes the longer of the two, not their sum.
         let cleaner_cfg = cfg.clone();
@@ -627,6 +667,8 @@ impl Pipeline {
             .name("utter-cleanup-start".into())
             .spawn(move || start_cleaner(&cleaner_cfg))
             .map_err(|_| PipelineError::WorkerGone)?;
+        // The caret reader sets itself up now, not at the first dictation.
+        utter_platform::caret::warm();
         stage("speech");
         let (job_tx, done_rx) = start_speech(speech_for(cfg.tier), &cfg.dictionary)?;
         stage("cleanup");
@@ -920,6 +962,8 @@ impl Engine {
                 let target = focus::foreground()
                     .filter(|w| !(w.title.is_empty() && w.app.exe.eq_ignore_ascii_case("explorer.exe")));
                 let Some(w) = target else { return copy(on_event, Some(NotInserted::NoWindow)) };
+                let before = utter_platform::caret::before_cursor().get(CARET_WAIT_COMMAND);
+                let text = spaced(before.as_deref(), &text);
                 match insert::paste(&w, &text, settings::paste_rule(&self.cfg.paste, &w.app.exe)) {
                     Ok(()) => on_event(Event::Notice { text: "Pasted".into(), ok: true }),
                     Err(e) => copy(on_event, Some(e.into())),
@@ -976,6 +1020,9 @@ impl Engine {
     ) -> Result<Option<Dictation>, PipelineError> {
         self.generation += 1;
         let generation = self.generation;
+        // What is before the cursor, read while the person speaks: a dictation that continues
+        // text gets a space (needs_space).
+        let caret = do_insert.then(utter_platform::caret::before_cursor);
         // Live dictations only: a replay (the bench) is not the user's.
         let mut log = DictationLog::start(LogConfig { enabled: self.cfg.log.enabled && do_insert, ..self.cfg.log });
         log.push(Entry::Listening { hands_free: false });
@@ -1211,7 +1258,10 @@ impl Engine {
             (_, false) if !do_insert => Err(NotInserted::Replay),
             (None, false) => Err(NotInserted::NoWindow),
             (Some(w), false) => {
-                insert::paste(w, &text, settings::paste_rule(&self.cfg.paste, &w.app.exe)).map_err(NotInserted::from)
+                let before = caret.as_ref().and_then(|c| c.get(CARET_WAIT));
+                let pasted = spaced(before.as_deref(), &text);
+                tracing::debug!(?before, spaced = pasted.len() != text.len(), "before the cursor");
+                insert::paste(w, &pasted, settings::paste_rule(&self.cfg.paste, &w.app.exe)).map_err(NotInserted::from)
             }
         };
         // A dictation is never lost: what could not go in is left on the clipboard.
@@ -1259,5 +1309,38 @@ impl Engine {
             timings: Some(Timings { asr: asr_ms, cleanup: cleanup_ms, insert: insert_ms, total: total_ms }),
         });
         Ok(Some(dictation))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_space;
+
+    #[test]
+    fn a_dictation_after_text_gets_a_space() {
+        assert!(needs_space(Some("s."), "There is"));
+        assert!(needs_space(Some("rd"), "and more"));
+        assert!(needs_space(Some("?\""), "Then"));
+        assert!(needs_space(Some("e)"), "next"));
+    }
+
+    #[test]
+    fn no_space_where_typing_would_not_put_one() {
+        // Unknown, the start of the field, after a space or a line break.
+        assert!(!needs_space(None, "Hello"));
+        assert!(!needs_space(Some(""), "Hello"));
+        assert!(!needs_space(Some("o "), "Hello"));
+        assert!(!needs_space(Some(".\n"), "Hello"));
+        assert!(!needs_space(Some(".\r"), "Hello"));
+        // After an opening bracket, quote, slash or joining dash.
+        assert!(!needs_space(Some(" ("), "aside"));
+        assert!(!needs_space(Some(" \""), "quoted"));
+        assert!(!needs_space(Some("\""), "quoted"));
+        assert!(!needs_space(Some("d/"), "or"));
+        assert!(!needs_space(Some("e-"), "mail"));
+        // Text that starts with punctuation, or nothing.
+        assert!(!needs_space(Some("rd"), ", and more"));
+        assert!(!needs_space(Some("rd"), "."));
+        assert!(!needs_space(Some("rd"), ""));
     }
 }
