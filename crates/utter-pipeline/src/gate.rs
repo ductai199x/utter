@@ -309,11 +309,11 @@ mod tests {
         }
     }
 
-    /// The curated cleanup cases (tools/eval/cleanup_cases.jsonl): the gate must not skip a
+    /// The curated cleanup cases (tests/fixtures/cleanup_cases.jsonl): the gate must not skip a
     /// case whose cleanup changes words, in the categories where a skip leaves a visible error.
     #[test]
     fn curated_cases_needing_cleanup_are_not_skipped() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/eval/cleanup_cases.jsonl");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/cleanup_cases.jsonl");
         let text = std::fs::read_to_string(path).expect("cleanup cases");
         let words = |s: &str| -> Vec<String> {
             s.to_lowercase()
