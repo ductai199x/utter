@@ -30,20 +30,47 @@ fn required() -> Vec<&'static Component> {
         .collect()
 }
 
-/// The tier in the settings, or light when that one is not published yet.
+/// The model in the settings (the default when the file cannot be read).
+pub fn chosen_model() -> utter_pipeline::settings::Model {
+    Settings::load_or_create(&Settings::path()).map(|s| s.model).unwrap_or_default()
+}
+
+/// The chosen model's tier, or Quality when that one is not published yet.
 pub fn chosen_tier() -> Tier {
-    let tier: Tier = Settings::load_or_create(&Settings::path()).map(|s| s.model.into()).unwrap_or_default();
+    let tier: Tier = chosen_model().into();
     if tier.available() { tier } else { Tier::Quality }
+}
+
+/// The model to dictate with while the chosen one downloads: after first run, when the chosen
+/// model is not all here but the other one is. Utter starts on it rather than waiting (and the
+/// model download opens beside it), as a switch made while running keeps the current model.
+pub fn fallback_model() -> Option<utter_pipeline::settings::Model> {
+    use utter_pipeline::settings::Model;
+    if missing().is_empty() || !setup_complete_marker().exists() {
+        return None;
+    }
+    let chosen = chosen_model();
+    [Model::Quality, Model::Light].into_iter().find(|&m| {
+        let tier: Tier = m.into();
+        m != chosen
+            && tier.offered()
+            && utter_pipeline::components_for(tier)
+                .into_iter()
+                .all(|id| utter_runtime::component(id).is_ok_and(|c| c.is_intact()))
+    })
 }
 
 /// Which window opens at start (docs/ux/first-run.md, "When Utter starts: three paths").
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
-    /// Nothing of Utter's is installed yet: the whole first run.
+    /// First run has not finished (nothing installed yet, or it was interrupted): the whole
+    /// first run.
     First,
     /// A new version of a component to fetch: the check and the download only.
     Update,
+    /// The model chosen in Settings is not downloaded yet: the same, worded as that.
+    Model,
     /// An installed component is damaged: the same, worded as a repair.
     Repair,
     /// Dictation could not start.
@@ -55,9 +82,27 @@ impl Mode {
         match self {
             Mode::First => "first",
             Mode::Update => "update",
+            Mode::Model => "model",
             Mode::Repair => "repair",
             Mode::Problem => "problem",
         }
+    }
+}
+
+/// Written into the data folder once everything first run downloads is installed. Without it
+/// a first run that was interrupted comes back as first run, not as an update.
+fn setup_complete_marker() -> std::path::PathBuf {
+    utter_core::data_dir().join("setup-complete")
+}
+
+/// Records that setup has everything it needs (at start with nothing missing, and when a
+/// download finishes).
+pub fn mark_setup_complete() {
+    let path = setup_complete_marker();
+    if !path.exists()
+        && let Err(e) = std::fs::write(&path, "")
+    {
+        tracing::warn!("could not write {}: {e}", path.display());
     }
 }
 
@@ -66,13 +111,29 @@ pub fn mode_for(missing: &[&Component]) -> Option<Mode> {
     let required = required();
     if missing.is_empty() {
         None
-    } else if required.iter().all(|c| !c.is_installed()) {
+    } else if !setup_complete_marker().exists() || required.iter().all(|c| !c.is_installed()) {
         Some(Mode::First)
-    } else if missing.iter().any(|c| c.is_installed()) {
-        Some(Mode::Repair)
-    } else {
+    } else if missing.iter().all(|c| !c.is_installed() && older_version_installed(c)) {
+        // Every missing one replaces a version that is here: an update.
         Some(Mode::Update)
+    } else {
+        // Damaged, or gone with nothing it replaces.
+        Some(Mode::Repair)
     }
+}
+
+/// Whether another version of `c` is installed (an update then replaces it).
+fn older_version_installed(c: &Component) -> bool {
+    let current = c.dir();
+    let prefix = format!("{}-", c.id);
+    std::fs::read_dir(utter_runtime::runtime_dir()).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            let path = e.path();
+            path != current
+                && e.file_name().to_string_lossy().starts_with(&prefix)
+                && path.join("utter-component.json").is_file()
+        })
+    })
 }
 
 /// One tier as first run's "Choose your model" step shows it (docs/ux/first-run.md).
@@ -93,9 +154,8 @@ pub struct ModelCard {
     selected: bool,
 }
 
-
-/// The tiers on offer, lightest first, with the best fit for this GPU recommended: light when
-/// it fits (the measured default), else light.
+/// The tiers on offer, Quality first, with the best fit for this GPU recommended: Quality when
+/// the card has the memory for it (or Light is not published), else Light.
 #[tauri::command]
 pub fn setup_models() -> Vec<ModelCard> {
     use utter_pipeline::settings::Model;
@@ -155,24 +215,81 @@ pub fn setup_retry(app: AppHandle) {
 /// missing file, then downloads them again as a download does. When every file checks out,
 /// the runtime libraries (extracted from archives, so without per-file checksums) are the
 /// suspects and are fetched again.
+///
+/// Hashing takes seconds, so it runs on the download's thread, never the window's. A component
+/// that cannot be removed is in use (after a failed start its libraries stay loaded): Utter
+/// restarts and removes it before anything loads ([`finish_pending_repair`]).
 #[tauri::command]
 pub fn setup_repair(app: AppHandle, state: tauri::State<'_, Downloading>) {
-    if state.0.load(Ordering::Relaxed) {
+    if state.0.swap(true, Ordering::Relaxed) {
         return;
     }
-    let required = required();
-    let mut damaged: Vec<&Component> =
-        required.iter().copied().filter(|c| !c.is_intact() || !c.damaged_files().is_empty()).collect();
-    if damaged.is_empty() {
-        damaged = required.into_iter().filter(|c| matches!(c.source, utter_runtime::Source::Archive { .. })).collect();
+    std::thread::Builder::new()
+        .name("utter-setup-repair".into())
+        .spawn(move || {
+            let _ = app.emit_to("setup", "setup-progress", DownloadProgress::stage("verifying"));
+            let required = required();
+            let mut damaged: Vec<&Component> =
+                required.iter().copied().filter(|c| !c.is_intact() || !c.damaged_files().is_empty()).collect();
+            if damaged.is_empty() {
+                damaged = required
+                    .into_iter()
+                    .filter(|c| matches!(c.source, utter_runtime::Source::Archive { .. }))
+                    .collect();
+            }
+            tracing::info!(ids = ?damaged.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), "repair: fetching again");
+            remove_or_restart(&app, &damaged);
+            download(&app);
+        })
+        .expect("spawn the repair");
+}
+
+/// Lists the components to remove at the next start.
+fn pending_repair_file() -> std::path::PathBuf {
+    utter_core::data_dir().join("repair-pending")
+}
+
+/// Removes `components`. One in use cannot be: the ids are written down for the next start,
+/// and Utter restarts (this does not return then).
+fn remove_or_restart(app: &AppHandle, components: &[&Component]) {
+    let stuck: Vec<&str> = components
+        .iter()
+        .filter(|c| match c.uninstall() {
+            Ok(()) => false,
+            Err(e) => {
+                tracing::warn!("{} is in use ({e}); removing it after a restart", c.id);
+                true
+            }
+        })
+        .map(|c| c.id.as_str())
+        .collect();
+    if stuck.is_empty() {
+        return;
     }
-    for c in &damaged {
-        tracing::info!(id = %c.id, "repair: fetching again");
-        if let Err(e) = c.uninstall() {
-            tracing::warn!("repair: {e}");
+    if let Err(e) = std::fs::write(pending_repair_file(), stuck.join("\n")) {
+        tracing::error!("could not write {}: {e}", pending_repair_file().display());
+        return;
+    }
+    app.restart();
+}
+
+/// At start, before anything loads: removes what a repair could not (the components were in
+/// use then). Returns whether a repair was pending, so setup opens worded as one.
+pub fn finish_pending_repair() -> bool {
+    let path = pending_repair_file();
+    let Ok(text) = std::fs::read_to_string(&path) else { return false };
+    for id in text.lines().filter(|l| !l.trim().is_empty()) {
+        match utter_runtime::component(id.trim()) {
+            Ok(c) => match c.uninstall() {
+                Ok(()) => tracing::info!(id, "repair: removed after the restart"),
+                Err(e) => tracing::error!("repair: could not remove {id}: {e}"),
+            },
+            Err(e) => tracing::warn!("repair: {e}"),
         }
     }
-    setup_download(app, state);
+    // Removed even if a removal failed: a file that cannot go must not restart Utter forever.
+    let _ = std::fs::remove_file(&path);
+    true
 }
 
 /// What a person calls a component.
@@ -208,9 +325,27 @@ fn gb(bytes: u64) -> String {
 }
 
 #[tauri::command]
-pub fn setup_check() -> Checks {
+pub fn setup_check(before_choice: bool) -> Checks {
     let gpu = utter_runtime::gpu::probe();
-    let need: u64 = missing().iter().map(|c| c.download_size()).sum();
+    // Before first run's model step the person can still pick the smaller model: the disk
+    // must hold the smallest download on offer (the model step checks the chosen one).
+    let need: u64 = if before_choice {
+        [Tier::Quality, Tier::Light]
+            .into_iter()
+            .filter(|t| t.offered())
+            .map(|t| {
+                utter_pipeline::components_for(t)
+                    .into_iter()
+                    .filter_map(|id| utter_runtime::component(id).ok())
+                    .filter(|c| !c.is_intact())
+                    .map(|c| c.download_size())
+                    .sum::<u64>()
+            })
+            .min()
+            .unwrap_or(0)
+    } else {
+        missing().iter().map(|c| c.download_size()).sum()
+    };
     let mut checks = Vec::new();
     let no_gpu = gpu.is_err();
     match &gpu {
@@ -245,16 +380,19 @@ pub fn setup_check() -> Checks {
     let _ = std::fs::create_dir_all(&dir);
     match utter_platform::disk::free_bytes(&dir) {
         Some(free) => {
-            let ok = free >= need + SPARE_BYTES;
+            // "Needed" is the whole room the install takes, so it and "Free up" agree.
+            let room = need + SPARE_BYTES;
+            let ok = free >= room;
             checks.push(Check {
                 id: "disk",
                 ok,
-                value: format!("{} free, {} needed", gb(free), gb(need)),
-                fix: (!ok)
-                    .then(|| format!("Free up {} on the drive with {}.", gb(need + SPARE_BYTES - free), dir.display())),
+                value: format!("{} free, {} needed", gb(free), gb(room)),
+                fix: (!ok).then(|| format!("Free up {} on the drive with {}.", gb(room - free), dir.display())),
             });
         }
-        None => checks.push(Check { id: "disk", ok: true, value: format!("{} needed", gb(need)), fix: None }),
+        None => {
+            checks.push(Check { id: "disk", ok: true, value: format!("{} needed", gb(need + SPARE_BYTES)), fix: None })
+        }
     }
     Checks { checks, no_gpu, download_bytes: need }
 }
@@ -314,6 +452,13 @@ struct DownloadProgress {
     problem: Option<crate::problem::Problem>,
 }
 
+impl DownloadProgress {
+    /// A stage with no bytes to show yet.
+    fn stage(stage: &'static str) -> Self {
+        Self { done: 0, total: 0, stage, label: "", error: None, problem: None }
+    }
+}
+
 /// Whether a download is running, so a second click does not start another.
 #[derive(Default)]
 pub struct Downloading(AtomicBool);
@@ -326,55 +471,62 @@ pub fn setup_download(app: AppHandle, state: tauri::State<'_, Downloading>) {
     }
     std::thread::Builder::new()
         .name("utter-setup-download".into())
-        .spawn(move || {
-            let todo = missing();
-            let total: u64 = todo.iter().map(|c| c.download_size()).sum();
-            let emit = |p: DownloadProgress| {
-                let _ = app.emit_to("setup", "setup-progress", p);
-            };
-            let mut before = 0u64;
-            for c in todo {
-                let label = label(&c.id);
-                // Installed but not intact: removed, so it is fetched again.
-                if c.is_installed()
-                    && let Err(e) = c.uninstall()
-                {
-                    tracing::warn!("removing the damaged {}: {e}", c.id);
-                }
-                let result = utter_runtime::install(c, |p| {
-                    let (done, stage) = match p {
-                        utter_runtime::Progress::Downloading { done, .. } => (before + done, "downloading"),
-                        utter_runtime::Progress::Verifying => (before + c.download_size(), "verifying"),
-                        utter_runtime::Progress::Extracting => (before + c.download_size(), "extracting"),
-                    };
-                    emit(DownloadProgress { done, total, stage, label, error: None, problem: None });
-                });
-                if let Err(e) = result {
-                    tracing::error!("installing {}: {e}", c.id);
-                    let message = crate::problem::download_message(&e);
-                    emit(DownloadProgress {
-                        done: before,
-                        total,
-                        stage: "error",
-                        label,
-                        error: Some(message),
-                        problem: None,
-                    });
-                    app.state::<Downloading>().0.store(false, Ordering::Relaxed);
-                    return;
-                }
-                before += c.download_size();
-            }
-            emit(DownloadProgress { done: total, total, stage: "loading", label: "", error: None, problem: None });
-            app.state::<Downloading>().0.store(false, Ordering::Relaxed);
-            // Dictation not running yet: it starts, and says when it is ready. Already running
-            // (a model change from Home needed the download): it takes the settings again and
-            // switches models, and the switch reports back (main.rs, Event::Applied).
-            if !crate::start_pipeline(&app) {
-                crate::reapply_settings(&app);
-            }
-        })
+        .spawn(move || download(&app))
         .expect("spawn the download");
+}
+
+/// The download itself, on its own thread, with [`Downloading`] set; clears it when done.
+fn download(app: &AppHandle) {
+    let todo = missing();
+    let total: u64 = todo.iter().map(|c| c.download_size()).sum();
+    let emit = |p: DownloadProgress| {
+        let _ = app.emit_to("setup", "setup-progress", p);
+    };
+    // Installed but not intact: removed first, so they are fetched again.
+    let damaged: Vec<&Component> = todo.iter().copied().filter(|c| c.is_installed()).collect();
+    remove_or_restart(app, &damaged);
+    let mut before = 0u64;
+    for c in todo {
+        let label = label(&c.id);
+        // Bytes of this component downloaded so far. Verifying follows each file, so it
+        // holds the bar there: a component of several files would otherwise jump to
+        // its end after the first and fall back when the next one starts.
+        let mut got = 0u64;
+        let result = utter_runtime::install(c, |p| {
+            let (done, stage) = match p {
+                utter_runtime::Progress::Downloading { done, .. } => {
+                    got = done;
+                    (before + done, "downloading")
+                }
+                utter_runtime::Progress::Verifying => (before + got, "verifying"),
+                utter_runtime::Progress::Extracting => (before + c.download_size(), "extracting"),
+            };
+            emit(DownloadProgress { done, total, stage, label, error: None, problem: None });
+        });
+        if let Err(e) = result {
+            tracing::error!("installing {}: {e}", c.id);
+            let message = crate::problem::download_message(&e);
+            emit(DownloadProgress { done: before, total, stage: "error", label, error: Some(message), problem: None });
+            app.state::<Downloading>().0.store(false, Ordering::Relaxed);
+            return;
+        }
+        before += c.download_size();
+    }
+    mark_setup_complete();
+    emit(DownloadProgress { done: total, total, stage: "loading", label: "", error: None, problem: None });
+    app.state::<Downloading>().0.store(false, Ordering::Relaxed);
+    // Dictation not running yet: it starts, and says when it is ready. Already running
+    // (a model change from Home needed the download): it takes the settings again and
+    // switches models, and the switch reports back (main.rs, Event::Applied). Running
+    // on the chosen model already (the person chose it back meanwhile): nothing to
+    // switch, so nothing would report back; setup is done.
+    if !crate::start_pipeline(app) {
+        if app.state::<crate::home::Models>().running() == Some(chosen_model()) {
+            ready(app);
+        } else {
+            crate::reapply_settings(app);
+        }
+    }
 }
 
 /// Ends first run: the window closes, Utter stays in the tray.
@@ -423,7 +575,13 @@ pub fn failed(app: &AppHandle, problem: crate::problem::Problem) {
 
 /// Opens the setup window in `mode`.
 pub fn open(app: &AppHandle, mode: Mode) -> tauri::Result<()> {
-    let url = format!("setup.html?mode={}", mode.query());
+    open_with(app, mode, false)
+}
+
+/// [`open`]; `carry_on`: the person already asked for this (a repair that restarted Utter), so
+/// the download starts once the system check passes.
+pub fn open_with(app: &AppHandle, mode: Mode, carry_on: bool) -> tauri::Result<()> {
+    let url = format!("setup.html?mode={}{}", mode.query(), if carry_on { "&go=1" } else { "" });
     tauri::WebviewWindowBuilder::new(app, "setup", tauri::WebviewUrl::App(url.into()))
         .title("Utter")
         .inner_size(640.0, 520.0)

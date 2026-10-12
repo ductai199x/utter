@@ -79,8 +79,9 @@
               : g.dictations;
     return [...rows].sort((a, b) => {
       const [x, y] = [key(a), key(b)];
-      const c = x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name);
-      return sort.up ? c : -c;
+      const c = x < y ? -1 : x > y ? 1 : 0;
+      // Ties read A to Z whichever way the column sorts.
+      return (sort.up ? c : -c) || a.name.localeCompare(b.name);
     });
   });
   const filtering = $derived(!!search.trim() || source !== 'all' || !!withFilter || !!keepFilter);
@@ -382,7 +383,7 @@
               {#each KEEPS as [v, l] (v)}<option value={v}>{l}</option>{/each}
             </select>
           </div>
-          <div class="num" role="cell">{g.dictations || ''}</div>
+          <div class="num" role="cell">{g.dictations}</div>
           <div role="cell"><span class="source {src}">{SOURCE_LABELS[src]}</span></div>
           <div class="act" role="cell">
             {#if src === 'changed'}

@@ -74,8 +74,15 @@
     raf = requestAnimationFrame(frame);
     const offs: (() => void)[] = [];
     if (inTauri) {
+      // Loading starts before this page does: once listening, it asks where loading is, so a
+      // stage reported before it was ready (even "ready") is never missed.
       void import('@tauri-apps/api/event').then(({ listen }) =>
-        listen<{ stage: StageId }>('splash-stage', (e) => onStage(e.payload.stage)).then((off) => offs.push(off)),
+        listen<{ stage: StageId }>('splash-stage', (e) => onStage(e.payload.stage)).then(async (off) => {
+          offs.push(off);
+          const { invoke } = await import('@tauri-apps/api/core');
+          const now = await invoke<StageId | null>('splash_stage').catch(() => null);
+          if (now) onStage(now);
+        }),
       );
       void import('@tauri-apps/api/app').then(({ getVersion }) => getVersion().then((v) => (version = v)));
     } else {

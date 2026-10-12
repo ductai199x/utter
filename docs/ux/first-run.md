@@ -152,8 +152,10 @@ no hashing). Then:
 | Situation | What shows |
 |---|---|
 | Everything is installed and intact | nothing: dictation starts, the tray says it is ready |
-| Nothing of Utter's is installed yet | First run, as above |
-| Some components are missing or damaged (an update, a deleted file) | the same window in **update mode**: the system check titled "Utter needs to download an update" (or "Some of Utter's files are missing or damaged"), then the download, then it closes itself once dictation is ready. No microphone or Try it steps. |
+| First run has not finished: nothing installed yet, or it was interrupted (no `setup-complete` file in the data folder, written once everything is installed) | First run, as above; the download resumes where it stopped |
+| A component has a new version (components.json changed with an update; the old version is still here) | the same window in **update mode**: the system check titled "Utter needs to download an update", then the download, then it closes itself once dictation is ready. No microphone or Try it steps. |
+| A component is damaged, or gone with nothing it replaces | the same, titled "Some of Utter's files are missing or damaged" (**repair mode**) |
+| The model chosen in Settings is not downloaded yet, the other one is | dictation starts on the other model at once, and the window opens in **model mode**: "Utter needs to download the model you chose"; Utter switches when it is done. The same as choosing it while Utter runs. |
 | Dictation could not start | the same window in **problem mode** (below) |
 
 ## Problem mode: when dictation cannot start
@@ -166,9 +168,15 @@ and the actions that fit. Never a raw error alone; the technical detail is under
 |---|---|---|---|
 | GPU memory full: an out-of-memory error, or less free GPU memory than Utter needs | Not enough free GPU memory | "Utter needs about 6 GB free on the graphics card; 2.1 GB are free now. Close games or other apps using the GPU, then retry." | Retry, Quit |
 | No microphone at all | No microphone found | "Plug in a microphone or headset, then retry." | Retry, Quit |
-| A model file will not load (missing, damaged) | Some of Utter's files are damaged | "Repair checks every file and downloads again the ones that are damaged." | Repair, Quit |
+| A model file will not load (missing, damaged), or the GPU libraries fail (a cuDNN failure, a library that will not load) | Some of Utter's files are damaged | "Repair checks every file and downloads again the ones that are damaged." | Repair, Quit |
 | The GPU driver fails to start the models | The graphics driver could not run Utter | "Update the NVIDIA driver, restart the computer, then retry." | Retry, Quit |
 | Anything else | Utter could not start | the error in one line | Retry, Open logs, Quit |
+
+Repair hashes every file with a checksum on its own thread; when every file checks out, the
+GPU libraries (extracted from archives, without per-file checksums) are fetched again. After a
+failed start those libraries are still loaded and cannot be removed: Utter writes down which,
+restarts, removes them before anything loads, and the download starts by itself (the person
+already asked for it). One click, then about 30 s for the libraries.
 
 A saved microphone that is not connected is not a failure: dictation uses the system default,
 and the Home window's microphone row says the saved one is not connected.

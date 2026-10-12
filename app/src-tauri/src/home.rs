@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use utter_pipeline::Settings;
-use utter_pipeline::settings::clean_terms;
+use utter_pipeline::settings::{Model, clean_terms};
 
 /// How often the watcher looks at the file's modification time.
 const WATCH_EVERY: Duration = Duration::from_millis(500);
@@ -18,6 +18,52 @@ const WATCH_EVERY: Duration = Duration::from_millis(500);
 /// Where the watcher sends settings once the pipeline runs (it may start later, or not at all).
 #[derive(Clone, Default)]
 pub struct PipelineLink(pub Arc<Mutex<Option<Sender<Settings>>>>);
+
+/// The model dictation runs on, and one it failed to switch to (managed state).
+#[derive(Default)]
+pub struct Models {
+    running: Mutex<Option<Model>>,
+    failed: Mutex<Option<Model>>,
+}
+
+impl Models {
+    pub fn running(&self) -> Option<Model> {
+        *self.running.lock().expect("models lock")
+    }
+
+    /// Dictation started on `model`, or switched to it.
+    pub fn set_running(&self, model: Model) {
+        *self.running.lock().expect("models lock") = Some(model);
+        *self.failed.lock().expect("models lock") = None;
+    }
+
+    /// Dictation stopped: nothing runs until it starts again.
+    pub fn stopped(&self) {
+        *self.running.lock().expect("models lock") = None;
+    }
+
+    /// A switch to `model` failed: it is not tried again until the person chooses a model again.
+    pub fn set_failed(&self, model: Model) {
+        *self.failed.lock().expect("models lock") = Some(model);
+    }
+
+    fn clear_failed(&self) {
+        *self.failed.lock().expect("models lock") = None;
+    }
+
+    /// The settings to hand the running pipeline: as they are, except that the model stays the
+    /// running one while the chosen one is not downloaded yet or just failed to load. Everything
+    /// else (dictionary, paste rules) still applies at once.
+    pub fn for_pipeline(&self, mut settings: Settings) -> Settings {
+        let Some(running) = self.running() else { return settings };
+        let chosen = settings.model;
+        let failed = *self.failed.lock().expect("models lock") == Some(chosen);
+        if chosen != running && (failed || !crate::setup::missing().is_empty()) {
+            settings.model = running;
+        }
+        settings
+    }
+}
 
 /// What the page needs to draw: the settings, or why the file cannot be read.
 #[derive(Serialize, Clone)]
@@ -40,7 +86,6 @@ pub struct State {
     data_dir: String,
     settings_path: String,
 }
-
 
 /// The GPU's memory, asked once: it does not change while Utter runs.
 fn gpu_memory() -> Option<u64> {
@@ -74,10 +119,7 @@ fn state() -> State {
         microphones: utter_audio::input_devices(),
         light_available: utter_llm::cleanup::Tier::Light.offered(),
         quality_fits: gpu_memory().is_some_and(|m| m >= utter_pipeline::card_need(utter_llm::cleanup::Tier::Quality)),
-        download_bytes: TIERS
-            .into_iter()
-            .map(|(name, tier)| (name, to_download(tier)))
-            .collect(),
+        download_bytes: TIERS.into_iter().map(|(name, tier)| (name, to_download(tier))).collect(),
         gpu_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::gpu_need(tier))).collect(),
         card_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::card_need(tier))).collect(),
         version: env!("CARGO_PKG_VERSION"),
@@ -143,6 +185,7 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
         .spawn(move || {
             let path = Settings::path();
             let mut seen: Option<SystemTime> = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+            let mut chosen: Option<Model> = None;
             loop {
                 std::thread::sleep(WATCH_EVERY);
                 let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
@@ -153,17 +196,29 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
                 let s = state();
                 if let Some(settings) = &s.settings {
                     apply_autostart(settings);
-                    // A model whose files are not here yet: setup fetches them first, and
-                    // hands the settings over when done (setup_download).
-                    let missing = crate::setup::missing();
-                    if let Some(mode) = crate::setup::mode_for(&missing) {
-                        if app.get_webview_window("setup").is_none()
-                            && let Err(e) = crate::setup::open(&app, mode)
+                    let models = app.state::<Models>();
+                    // A model chosen again may be tried again, even one that failed.
+                    if chosen.is_some_and(|m| m != settings.model) {
+                        models.clear_failed();
+                    }
+                    chosen = Some(settings.model);
+                    // Before dictation runs, startup (first run, or the problem screen) decides
+                    // what happens; the settings reach the pipeline when it starts.
+                    if let Some(running) = models.running() {
+                        // components.json cannot change while Utter runs: what a settings change
+                        // makes missing is a newly chosen model. Setup fetches it, and hands the
+                        // model over when done (setup_download); the rest applies now. A file of
+                        // the running model gone missing is for the next start to find.
+                        if settings.model != running
+                            && !crate::setup::missing().is_empty()
+                            && app.get_webview_window("setup").is_none()
+                            && let Err(e) = crate::setup::open(&app, crate::setup::Mode::Model)
                         {
                             tracing::error!("could not open setup: {e}");
                         }
-                    } else if let Some(tx) = link.0.lock().expect("pipeline link").as_ref() {
-                        let _ = tx.send(settings.clone());
+                        if let Some(tx) = link.0.lock().expect("pipeline link").as_ref() {
+                            let _ = tx.send(models.for_pipeline(settings.clone()));
+                        }
                     }
                 }
                 if let Some(e) = &s.error {

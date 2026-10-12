@@ -150,12 +150,13 @@ impl Bar {
                     }
                 }
                 tracing::info!(
-                    "dictation: {:.1} s audio, {} segments, gate {:?}, asr {:.0} ms, cleanup {:.0} ms, total {:.0} ms",
+                    "dictation: {:.1} s audio, {} segments, gate {:?}, asr {:.0} ms, cleanup {:.0} ms, insert {:.0} ms, total {:.0} ms",
                     d.audio_s,
                     d.segments,
                     d.gate,
                     d.asr_ms,
                     d.cleanup_ms,
+                    d.insert_ms,
                     d.total_ms
                 );
             }
@@ -166,16 +167,27 @@ impl Bar {
                 self.hide_after(EXIT);
             }
             Event::Applied { what, error } => {
-                if let Some(e) = &error {
-                    tracing::warn!("{what} not applied: {e}");
+                match &error {
+                    Some(e) => tracing::warn!("{what} not applied: {e}"),
+                    None => tracing::info!("{what} applied"),
                 }
                 let status = if error.is_some() { "error" } else { "ok" };
                 // A model switch setup downloaded for: setup closes once it took, or says why not.
-                if what == "model" && self.window.app_handle().get_webview_window("setup").is_some() {
+                if what == "model" {
                     let app = self.window.app_handle();
+                    let models = app.state::<home::Models>();
+                    let chosen = setup::chosen_model();
                     match &error {
-                        None => setup::ready(app),
-                        Some(e) => setup::failed(app, problem::model_switch(e)),
+                        None => models.set_running(chosen),
+                        // Not tried again with every later save (home::Models::for_pipeline).
+                        Some(_) => models.set_failed(chosen),
+                    }
+                    // A model switch setup downloaded for: setup closes once it took, or says why not.
+                    if app.get_webview_window("setup").is_some() {
+                        match &error {
+                            None => setup::ready(app),
+                            Some(e) => setup::failed(app, problem::model_switch(e)),
+                        }
                     }
                 }
                 let _ = self.window.emit_to("home", "home-applied", Applied { what, status, error });
@@ -239,6 +251,11 @@ impl Bar {
 
 /// Feeds the microphone level to the Bar while it is listening.
 fn level_feed(bar: Bar) {
+    // One feed for the app's life: a pipeline started again (Retry) reuses it.
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::Relaxed) {
+        return;
+    }
     std::thread::Builder::new()
         .name("utter-levels".into())
         .spawn(move || {
@@ -279,7 +296,7 @@ pub fn reapply_settings(app: &AppHandle) {
     match Settings::load_or_create(&Settings::path()) {
         Ok(s) => {
             if let Some(tx) = app.state::<Core>().link.0.lock().expect("pipeline link").as_ref() {
-                let _ = tx.send(s);
+                let _ = tx.send(app.state::<home::Models>().for_pipeline(s));
             }
         }
         Err(e) => tracing::warn!("settings: {e}"),
@@ -305,18 +322,25 @@ fn run_pipeline(
         .name("utter-pipeline".into())
         .spawn(move || {
             let start = std::time::Instant::now();
+            tracing::info!("loading starts at {:.2} s", since_launch());
             let path = Settings::path();
             // A file with an error: dictation starts on the defaults, and Home opens on its
             // banner so the error gets fixed (docs/ux/home.md).
-            let settings = Settings::load_or_create(&path).unwrap_or_else(|e| {
+            let mut settings = Settings::load_or_create(&path).unwrap_or_else(|e| {
                 tracing::error!("settings: {e}");
                 home::show(&app);
                 Settings::default()
             });
+            // The chosen model still downloading: dictation starts on the one that is here.
+            if let Some(model) = setup::fallback_model() {
+                tracing::info!(?model, "the chosen model is not downloaded yet; starting on this one");
+                settings.model = model;
+            }
             tracing::info!(terms = settings.dictionary.len(), lists = settings.lists, "settings loaded");
             home::apply_autostart(&settings);
             let mut cfg = PipelineConfig::default();
             settings.apply(&mut cfg);
+            utter_pipeline::apply_test_audio(&mut cfg);
             let tier = cfg.tier;
             let reporting = app.clone();
             let mut pipeline = match Pipeline::start_reporting(cfg, |s| splash::stage(&reporting, s)) {
@@ -332,9 +356,18 @@ fn run_pipeline(
                     return;
                 }
             };
-            tracing::info!("ready in {:.1} s", start.elapsed().as_secs_f64());
+            tracing::info!(
+                "ready at {:.2} s after launch (loading {:.2} s)",
+                since_launch(),
+                start.elapsed().as_secs_f64()
+            );
+            app.state::<home::Models>().set_running(settings.model);
             set_tray_status(&app, "Utter: hold Right Ctrl to dictate");
-            setup::ready(&app);
+            // First run's or Retry's setup window learns dictation runs. One downloading the
+            // chosen model while this one stands in is not done yet: it hears from the switch.
+            if setup::fallback_model().is_none() {
+                setup::ready(&app);
+            }
             splash::stage(&app, "ready");
             *bar.meter.lock().expect("meter lock") = Some(pipeline.microphone().level_meter());
             level_feed(bar.clone());
@@ -343,6 +376,9 @@ fn run_pipeline(
             if let Err(e) = pipeline.run(|event| bar.on_event(event)) {
                 tracing::error!("dictation stopped: {e}");
                 set_tray_status(&app, "Utter: stopped");
+                *link.0.lock().expect("pipeline link") = None;
+                *commands.lock().expect("commands") = None;
+                app.state::<home::Models>().stopped();
                 drop(pipeline);
                 app.state::<Core>().started.store(false, Ordering::Relaxed);
                 setup::failed(&app, problem::diagnose(&e, tier));
@@ -357,7 +393,16 @@ fn set_tray_status(app: &AppHandle, text: &str) {
     }
 }
 
+/// When the process started: startup is measured from here, the wait a person sees.
+static LAUNCHED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Seconds since the process started.
+fn since_launch() -> f64 {
+    LAUNCHED.get().map_or(0.0, |t| t.elapsed().as_secs_f64())
+}
+
 fn main() {
+    LAUNCHED.get_or_init(std::time::Instant::now);
     tracing_subscriber_init();
     if let Some(old) = utter_core::move_legacy_data() {
         tracing::info!("moved {} to {}", old.display(), utter_core::data_dir().display());
@@ -394,6 +439,7 @@ fn main() {
             setup::setup_models,
             setup::setup_choose,
             splash::splash_close,
+            splash::splash_stage,
         ])
         .on_window_event(|window, event| {
             let tauri::WindowEvent::CloseRequested { api, .. } = event else { return };
@@ -413,6 +459,7 @@ fn main() {
             }
         })
         .setup(|app| {
+            tracing::info!("setup at {:.2} s", since_launch());
             let open = MenuItem::with_id(app, "open", "Open Utter", true, None::<&str>)?;
             // Their shortcuts are shown beside them (docs/ux/insertion.md).
             let paste = MenuItem::with_id(app, "paste-last", "Paste last dictation", true, Some("Alt+Shift+Z"))?;
@@ -436,13 +483,12 @@ fn main() {
 
             let window = app.get_webview_window("bar").expect("the bar window (tauri.conf.json)");
             let link = home::PipelineLink::default();
+            app.manage(home::Models::default());
             home::watch(app.handle().clone(), link.clone());
-            app.manage(Core {
-                bar: Bar::new(window),
-                link,
-                commands: Arc::default(),
-                started: AtomicBool::new(false),
-            });
+            app.manage(Core { bar: Bar::new(window), link, commands: Arc::default(), started: AtomicBool::new(false) });
+            // A repair that found its components in use restarted Utter to remove them now,
+            // before anything loads them.
+            let repairing = setup::finish_pending_repair();
             // What an update left behind goes first: it may be the disk space the next
             // download needs.
             let freed = utter_runtime::prune();
@@ -464,15 +510,24 @@ fn main() {
             }
             match setup::mode_for(&missing) {
                 None => {
+                    setup::mark_setup_complete();
+                    // Loading first: building the card's window takes a moment it need not wait.
+                    start_pipeline(app.handle());
                     // The person started Utter: the card shows while it loads. Not at sign-in.
                     if !splash::started_at_sign_in() {
                         splash::open(app.handle());
                     }
+                }
+                // The chosen model is not here yet but the other one is: dictation starts on that
+                // (run_pipeline), and the chosen one downloads beside it.
+                Some(_) if !repairing && setup::fallback_model().is_some() => {
                     start_pipeline(app.handle());
+                    setup::open(app.handle(), setup::Mode::Model)?;
                 }
                 Some(mode) => {
+                    let mode = if repairing && mode == setup::Mode::Update { setup::Mode::Repair } else { mode };
                     set_tray_status(app.handle(), "Utter: setting up");
-                    setup::open(app.handle(), mode)?;
+                    setup::open_with(app.handle(), mode, repairing)?;
                 }
             }
             Ok(())

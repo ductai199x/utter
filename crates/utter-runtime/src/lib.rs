@@ -339,6 +339,11 @@ pub fn install(c: &Component, mut progress: impl FnMut(Progress)) -> Result<(), 
     let receipt_path = staging.join(RECEIPT);
     fs::write(&receipt_path, serde_json::to_string_pretty(&receipt).expect("receipt serializes"))
         .map_err(io_err(&receipt_path))?;
+    // A folder left without its receipt (an install or removal cut short) would make the
+    // rename fail after the whole download: it goes first. In use, this fails with the reason.
+    if final_dir.exists() {
+        fs::remove_dir_all(&final_dir).map_err(io_err(&final_dir))?;
+    }
     fs::rename(&staging, &final_dir).map_err(io_err(&final_dir))?;
     if let Some(path) = archive_to_remove {
         fs::remove_file(&path).map_err(io_err(&path))?;
@@ -359,6 +364,11 @@ fn staging_dir(final_dir: &Path) -> PathBuf {
 /// bytes within the whole component, for progress. A `.part` left by an interrupted download
 /// is continued with a range request; a server that ignores the range sends the whole file,
 /// and it starts over.
+///
+/// A connection that goes quiet (Wi-Fi changed, the computer slept) is an error after
+/// [`STALL`], so Retry appears instead of a bar that never moves. A read cannot be
+/// interrupted, so the body is copied on a thread of its own; one given up on never writes
+/// again, and Retry continues the `.part` file.
 fn download(
     file: &RemoteFile,
     dest: &Path,
@@ -370,34 +380,75 @@ fn download(
     let fail = |message: String| RuntimeError::Download { url: file.url.clone(), message };
     let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
     let have = if have < file.size { have } else { 0 };
-    let mut request = ureq::get(&file.url);
+    let agent: ureq::Agent =
+        ureq::Agent::config_builder().timeout_connect(Some(STALL)).timeout_recv_response(Some(STALL)).build().into();
+    let mut request = agent.get(&file.url);
     if have > 0 {
         request = request.header("Range", &format!("bytes={have}-"));
     }
     let response = request.call().map_err(|e| fail(e.to_string()))?;
     let resumed = have > 0 && response.status() == 206;
     let mut body = response.into_body().into_reader();
-    let out_file = if resumed {
+    // Unbuffered: a copy given up on must not flush anything when it ends.
+    let mut out = if resumed {
         fs::OpenOptions::new().append(true).open(&part).map_err(io_err(&part))?
     } else {
         File::create(&part).map_err(io_err(&part))?
     };
-    let mut out = BufWriter::with_capacity(1 << 20, out_file);
-    let mut buf = vec![0u8; 1 << 20];
+    let given_up = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel::<Result<usize, RuntimeError>>();
+    {
+        let given_up = given_up.clone();
+        let written = part.clone();
+        let url = file.url.clone();
+        std::thread::Builder::new()
+            .name("utter-download".into())
+            .spawn(move || {
+                let mut buf = vec![0u8; 1 << 20];
+                loop {
+                    let n = match body.read(&mut buf) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            let _ = tx.send(Err(RuntimeError::Download { url, message: e.to_string() }));
+                            return;
+                        }
+                    };
+                    if given_up.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    if n > 0
+                        && let Err(e) = out.write_all(&buf[..n])
+                    {
+                        let _ = tx.send(Err(io_err(&written)(e)));
+                        return;
+                    }
+                    if tx.send(Ok(n)).is_err() || n == 0 {
+                        return;
+                    }
+                }
+            })
+            .map_err(io_err(&part))?;
+    }
     let mut done = if resumed { have } else { 0 };
     loop {
-        let n = body.read(&mut buf).map_err(|e| fail(e.to_string()))?;
-        if n == 0 {
-            break;
+        match rx.recv_timeout(STALL) {
+            Ok(Ok(0)) => break,
+            Ok(Ok(n)) => {
+                done += n as u64;
+                progress(Progress::Downloading { done: offset + done, total });
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                given_up.store(true, std::sync::atomic::Ordering::Relaxed);
+                return Err(fail(format!("no data for {} seconds", STALL.as_secs())));
+            }
         }
-        out.write_all(&buf[..n]).map_err(io_err(&part))?;
-        done += n as u64;
-        progress(Progress::Downloading { done: offset + done, total });
     }
-    out.flush().map_err(io_err(&part))?;
-    drop(out);
     fs::rename(&part, dest).map_err(io_err(dest))
 }
+
+/// How long a download may go without a byte before it is an error.
+const STALL: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn verify(id: &str, file: &RemoteFile, path: &Path, progress: &mut impl FnMut(Progress)) -> Result<(), RuntimeError> {
     progress(Progress::Verifying);

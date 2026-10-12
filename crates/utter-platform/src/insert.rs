@@ -156,13 +156,24 @@ fn wait_quiet() -> bool {
 /// against none), and clipboard monitors read every new clipboard at once anyway, so a read
 /// could not be told from a paste.
 fn paste_by_clipboard(text: &str, keys: PasteKeys, keep: Keep) -> Result<(), InsertError> {
+    let start = std::time::Instant::now();
     let saved = imp::save_all()?;
-    let ours = imp::put_text(text)?;
+    let save = start.elapsed();
+    let ours = imp::put_text(text, true)?;
+    let put = start.elapsed();
     if !wait_quiet() {
         tracing::debug!("the clipboard was not quiet within {QUIET_WAIT:?}; pasting anyway");
     }
+    let quiet = start.elapsed();
     let sent = std::time::Instant::now();
     imp::press(keys)?;
+    tracing::debug!(
+        save_ms = save.as_secs_f64() * 1e3,
+        put_ms = (put - save).as_secs_f64() * 1e3,
+        quiet_ms = (quiet - put).as_secs_f64() * 1e3,
+        press_ms = sent.elapsed().as_secs_f64() * 1e3,
+        "paste"
+    );
     let Some(delay) = keep.restore_after() else { return Ok(()) };
     std::thread::Builder::new()
         .name("utter-clipboard".into())
@@ -174,10 +185,11 @@ fn paste_by_clipboard(text: &str, keys: PasteKeys, keep: Keep) -> Result<(), Ins
     Ok(())
 }
 
-/// Puts `text` on the clipboard and leaves it there (marked to stay out of clipboard history,
-/// as a paste is): for a dictation that could not go in, and for "Copy" in History.
+/// Puts `text` on the clipboard and leaves it there, as an ordinary copy (in clipboard
+/// history, seen by clipboard managers): the person asked for it (History's Copy, copy last) or
+/// will paste it themselves (a dictation that could not go in).
 pub fn copy(text: &str) -> Result<(), InsertError> {
-    imp::put_text(text).map(|_| ())
+    imp::put_text(text, false).map(|_| ())
 }
 
 #[cfg(windows)]
@@ -342,7 +354,6 @@ mod imp {
         }
     }
 
-
     /// How long an empty-looking clipboard is watched before it counts as empty.
     const EMPTY_SETTLE: Duration = Duration::from_millis(150);
 
@@ -388,21 +399,23 @@ mod imp {
             }
             // SAFETY: a clipboard data handle in global memory.
             let Some(bytes) = (unsafe { read_global(handle) }) else { return Ok(None) };
-            let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|&c| u16::from_le_bytes(c)).collect();
             Ok(Some(String::from_utf16_lossy(&units).trim_end_matches('\0').to_owned()))
         })
         .ok()
         .flatten()
     }
 
-    pub fn put_text(text: &str) -> Result<u32, InsertError> {
-        retrying(BUDGET, || put_text_once(text))
+    /// `transient`: a paste's text, put back over within a second: kept out of clipboard
+    /// history, the cloud clipboard and clipboard monitors.
+    pub fn put_text(text: &str, transient: bool) -> Result<u32, InsertError> {
+        retrying(BUDGET, || put_text_once(text, transient))
     }
 
     /// Puts `text` on the clipboard; returns the sequence number it leaves, read after the
     /// clipboard is closed (it changes on close: read while open it is one behind, and the
     /// restore would take the paste itself for the person's copy and never put anything back).
-    fn put_text_once(text: &str) -> Result<u32, InsertError> {
+    fn put_text_once(text: &str, transient: bool) -> Result<u32, InsertError> {
         {
             let _cb = Clipboard::open()?;
             // SAFETY: the clipboard is open.
@@ -414,10 +427,11 @@ mod imp {
             if !set_bytes(CF_UNICODETEXT as u32, &bytes) {
                 return Err(InsertError::Clipboard("could not set the text".into()));
             }
-            // Keep dictations out of clipboard history, cloud clipboard and clipboard monitors.
-            set_bytes(register("ExcludeClipboardContentFromMonitorProcessing"), &[0]);
-            set_bytes(register("CanIncludeInClipboardHistory"), &0u32.to_le_bytes());
-            set_bytes(register("CanUploadToCloudClipboard"), &0u32.to_le_bytes());
+            if transient {
+                set_bytes(register("ExcludeClipboardContentFromMonitorProcessing"), &[0]);
+                set_bytes(register("CanIncludeInClipboardHistory"), &0u32.to_le_bytes());
+                set_bytes(register("CanUploadToCloudClipboard"), &0u32.to_le_bytes());
+            }
         }
         // SAFETY: no arguments (the clipboard is closed again).
         Ok(unsafe { GetClipboardSequenceNumber() })
@@ -530,7 +544,6 @@ mod imp {
     /// The clipboard as it is, to put back after a paste.
     pub type Snapshot = Vec<(u32, Vec<u8>)>;
 
-
     pub fn type_text(text: &str) -> Result<(), InsertError> {
         let mut inputs = Vec::with_capacity(text.len() * 2);
         for unit in text.encode_utf16() {
@@ -586,7 +599,7 @@ mod imp {
         None
     }
 
-    pub fn put_text(_text: &str) -> Result<u32, InsertError> {
+    pub fn put_text(_text: &str, _transient: bool) -> Result<u32, InsertError> {
         Err(InsertError::Clipboard("not implemented on this platform yet".into()))
     }
 
@@ -609,9 +622,9 @@ mod live {
         INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_SHIFT,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, DispatchMessageW, ES_MULTILINE, ES_WANTRETURN, GetForegroundWindow,
-        MSG, PM_REMOVE, PeekMessageW, SendMessageW, SetForegroundWindow, TranslateMessage, WM_GETTEXT,
-        WM_GETTEXTLENGTH, WM_SETTEXT, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        CreateWindowExW, DestroyWindow, DispatchMessageW, ES_MULTILINE, ES_WANTRETURN, GetForegroundWindow, MSG,
+        PM_REMOVE, PeekMessageW, SendMessageW, SetForegroundWindow, TranslateMessage, WM_GETTEXT, WM_GETTEXTLENGTH,
+        WM_SETTEXT, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
     };
 
     use super::{Keep, PasteKeys, PasteRule, clipboard_text, copy, imp, paste};
@@ -660,7 +673,9 @@ mod live {
         fn focus(&self) {
             let shift = |flags| INPUT {
                 r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_SHIFT, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT { wVk: VK_SHIFT, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
+                },
             };
             let taps = [shift(0), shift(KEYEVENTF_KEYUP)];
             // SAFETY: two keyboard inputs; then a window handle this process owns.
@@ -841,8 +856,7 @@ mod live {
         took.sort_unstable();
         println!(
             "60 dictations: {missed} missed, {not_restored} clipboards not put back; paste p50 {} ms, max {} ms",
-            took[30],
-            took[59]
+            took[30], took[59]
         );
         drop(w);
         // SAFETY: no arguments.

@@ -76,6 +76,10 @@ pub struct PipelineConfig {
     /// The person's paste rules over the platform's defaults (docs/ux/insertion.md).
     pub paste: Vec<PasteOverride>,
     pub keep_history: KeepHistory,
+    /// A recording (16 kHz mono) each dictation hears instead of the microphone, at real-time
+    /// pace, ending the dictation when it runs out: development builds' end-to-end tests,
+    /// with no sound played (the app's UTTER_TEST_AUDIO).
+    pub test_audio: Option<std::sync::Arc<Vec<f32>>>,
 }
 
 impl Default for PipelineConfig {
@@ -92,6 +96,7 @@ impl Default for PipelineConfig {
             log: LogConfig::default(),
             paste: Vec::new(),
             keep_history: KeepHistory::Forever,
+            test_audio: None,
         }
     }
 }
@@ -130,7 +135,15 @@ pub fn card_need(tier: Tier) -> u64 {
 /// the CUDA runtime and cuDNN that llama-server and the speech model use, voice detection,
 /// llama-server, then the tier's two models.
 pub fn components_for(tier: Tier) -> Vec<&'static str> {
-    vec!["onnxruntime-gpu", "cuda-runtime", "cudnn", "silero-vad", "llama-cpp", speech_for(tier).component(), tier.component()]
+    vec![
+        "onnxruntime-gpu",
+        "cuda-runtime",
+        "cudnn",
+        "silero-vad",
+        "llama-cpp",
+        speech_for(tier).component(),
+        tier.component(),
+    ]
 }
 
 /// Loads and warms the speech model, boosting `dictionary`, on its own worker thread.
@@ -139,8 +152,10 @@ fn start_speech(model: SpeechModel, dictionary: &[String]) -> Result<Speech, Pip
     if !dictionary.is_empty() {
         asr.set_phrases(dictionary, BoostConfig::default());
     }
-    for _ in 0..3 {
+    for i in 0..3 {
+        let t = Instant::now();
         asr.transcribe(&vec![0.0f32; 16_000])?;
+        tracing::debug!(pass = i, ms = t.elapsed().as_secs_f64() * 1e3, "speech warm-up");
     }
     let (job_tx, job_rx) = mpsc::channel();
     let (done_tx, done_rx) = mpsc::channel();
@@ -192,6 +207,8 @@ pub struct Dictation {
     pub asr_ms: f64,
     /// Cleanup request time (0 when the gate skipped it).
     pub cleanup_ms: f64,
+    /// The paste (or the copy instead) alone, from the text being ready.
+    pub insert_ms: f64,
     /// Key up -> paste sent.
     pub total_ms: f64,
 }
@@ -268,13 +285,7 @@ impl NotInserted {
 
     /// Whether the text should be left on the clipboard instead.
     fn copy_instead(&self) -> bool {
-        matches!(
-            self,
-            NotInserted::NoWindow
-                | NotInserted::FocusMoved
-                | NotInserted::Refused
-                | NotInserted::Failed(_)
-        )
+        matches!(self, NotInserted::NoWindow | NotInserted::FocusMoved | NotInserted::Refused | NotInserted::Failed(_))
     }
 
     /// What the Bar says (`copied`: the text is on the clipboard).
@@ -498,6 +509,45 @@ impl AudioSource for MicSource<'_> {
     }
 }
 
+/// Development builds only: with UTTER_TEST_AUDIO naming a 16 kHz mono WAV, every dictation
+/// hears that recording instead of the microphone, and an injected Right Ctrl starts one, so
+/// the whole app (insertion, History, the Bar) runs end to end with no sound played. Never in
+/// an installed copy: there the variable is ignored.
+pub fn apply_test_audio(cfg: &mut PipelineConfig) {
+    if !utter_core::is_development_build() {
+        return;
+    }
+    let Some(path) = std::env::var_os("UTTER_TEST_AUDIO") else { return };
+    let path = std::path::PathBuf::from(path);
+    match read_wav_16k_mono(&path) {
+        Ok(audio) => {
+            tracing::warn!(
+                path = %path.display(),
+                seconds = audio.len() as f64 / utter_audio::SAMPLE_RATE as f64,
+                "test audio: dictations hear this file, not the microphone"
+            );
+            cfg.test_audio = Some(std::sync::Arc::new(audio));
+            cfg.hotkey.accept_injected = true;
+        }
+        Err(e) => tracing::error!("UTTER_TEST_AUDIO {}: {e}", path.display()),
+    }
+}
+
+fn read_wav_16k_mono(path: &std::path::Path) -> Result<Vec<f32>, String> {
+    let mut reader = hound::WavReader::open(path).map_err(|e| e.to_string())?;
+    let spec = reader.spec();
+    if spec.sample_rate != utter_audio::SAMPLE_RATE || spec.channels != 1 {
+        return Err(format!("{} Hz, {} channels; expected 16 kHz mono", spec.sample_rate, spec.channels));
+    }
+    match (spec.sample_format, spec.bits_per_sample) {
+        (hound::SampleFormat::Int, 16) => {
+            reader.samples::<i16>().map(|s| s.map(|s| s as f32 / 32768.0).map_err(|e| e.to_string())).collect()
+        }
+        (hound::SampleFormat::Float, _) => reader.samples::<f32>().map(|s| s.map_err(|e| e.to_string())).collect(),
+        (_, bits) => Err(format!("{bits}-bit integer samples; expected 16-bit or float")),
+    }
+}
+
 /// A recording delivered at wall-clock pace, as the microphone would deliver it.
 pub struct ReplaySource<'a> {
     audio: &'a [f32],
@@ -570,12 +620,20 @@ impl Pipeline {
     /// [`Pipeline::start`], saying which stage is loading as it goes (for the splash,
     /// docs/ux/splash.md): "speech", "cleanup", then "microphone".
     pub fn start_reporting(cfg: PipelineConfig, mut stage: impl FnMut(&'static str)) -> Result<Self, PipelineError> {
+        // The cleanup server is a process of its own: it loads while the speech model does,
+        // so starting takes the longer of the two, not their sum.
+        let cleaner_cfg = cfg.clone();
+        let cleaner = std::thread::Builder::new()
+            .name("utter-cleanup-start".into())
+            .spawn(move || start_cleaner(&cleaner_cfg))
+            .map_err(|_| PipelineError::WorkerGone)?;
         stage("speech");
         let (job_tx, done_rx) = start_speech(speech_for(cfg.tier), &cfg.dictionary)?;
         stage("cleanup");
-        let cleaner = start_cleaner(&cfg)?;
-        stage("microphone");
+        // Voice detection and the microphone open while the cleanup server finishes.
+        let t = Instant::now();
         let vad = SileroVad::load_installed()?;
+        let vad_ms = t.elapsed().as_secs_f64() * 1e3;
         // A saved microphone that is not connected is no reason not to start: the system
         // default stands in (the Home window shows the saved one as not connected).
         let mic = match Microphone::open(&cfg.mic) {
@@ -585,6 +643,11 @@ impl Pipeline {
             }
             other => other?,
         };
+        let mic_ms = t.elapsed().as_secs_f64() * 1e3 - vad_ms;
+        let t = Instant::now();
+        let cleaner = cleaner.join().map_err(|_| PipelineError::WorkerGone)??;
+        tracing::info!(vad_ms, mic_ms, cleanup_wait_ms = t.elapsed().as_secs_f64() * 1e3, "started");
+        stage("microphone");
         let (settings_tx, settings_rx) = mpsc::channel();
         let (input_tx, input_rx) = mpsc::channel();
         Ok(Self {
@@ -629,13 +692,15 @@ impl Pipeline {
     pub fn run(&mut self, mut on_event: impl FnMut(Event)) -> Result<(), PipelineError> {
         let listener = hotkey::listen(self.engine.cfg.hotkey)?;
         let keys = self.input_tx.clone();
-        std::thread::Builder::new()
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop.clone();
+        let thread = std::thread::Builder::new()
             .name("utter-keys".into())
             .spawn(move || {
-                // Owns the listener: when the pipeline is gone the send fails, and dropping the
-                // listener removes the hook.
-                loop {
-                    if let Some((action, at)) = listener.recv_timeout(Duration::from_secs(1))
+                // Owns the listener; dropping it removes the hook. Only one hook can exist, so
+                // it must be gone by the time run returns (a Retry starts a new pipeline).
+                while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some((action, at)) = listener.recv_timeout(Duration::from_millis(100))
                         && keys.send(Input::Key(action, at)).is_err()
                     {
                         break;
@@ -643,6 +708,17 @@ impl Pipeline {
                 }
             })
             .map_err(|e| hotkey::HotkeyError(e.to_string()))?;
+        // However run ends (an error included), the key thread stops and the hook goes with it.
+        struct StopKeys(std::sync::Arc<std::sync::atomic::AtomicBool>, Option<std::thread::JoinHandle<()>>);
+        impl Drop for StopKeys {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Some(t) = self.1.take() {
+                    let _ = t.join();
+                }
+            }
+        }
+        let _keys = StopKeys(stop, Some(thread));
         let commands = self.input_tx.clone();
         let _shortcuts = match shortcut::register(move |s| {
             let c = match s {
@@ -667,10 +743,21 @@ impl Pipeline {
             self.prune_history(false);
             match self.input_rx.recv_timeout(SETTINGS_POLL) {
                 Ok(Input::Key(Action::Start, _)) => {
+                    let looked = Instant::now();
                     let target = focus::foreground();
-                    let mut source = MicSource(&self.mic);
+                    tracing::debug!(ms = looked.elapsed().as_secs_f64() * 1e3, "key down: the focused app");
+                    let test_audio = self.engine.cfg.test_audio.clone();
+                    let mut mic = MicSource(&self.mic);
+                    let mut replay;
+                    let source: &mut dyn AudioSource = match &test_audio {
+                        Some(audio) => {
+                            replay = ReplaySource::new(audio);
+                            &mut replay
+                        }
+                        None => &mut mic,
+                    };
                     let input = &self.input_rx;
-                    self.engine.dictate(&mut source, |t| next_key(input, t), target, true, &mut on_event)?;
+                    self.engine.dictate(source, |t| next_key(input, t), target, true, &mut on_event)?;
                 }
                 Ok(Input::Command(c)) => self.engine.command(c, &mut on_event),
                 Ok(Input::Key(..)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -1115,7 +1202,10 @@ impl Engine {
 
         // The Bar shows exactly what is pasted, as it is pasted.
         log.push(Entry::Bar { committed: text.clone(), preview: String::new(), is_final: true });
+        let shown = Instant::now();
         on_event(Event::Final { text: text.clone() });
+        tracing::debug!(ms = shown.elapsed().as_secs_f64() * 1e3, "the Bar told the final text");
+        let insert_start = Instant::now();
         let inserted = match (&target, text.is_empty()) {
             (_, true) => Err(NotInserted::Nothing),
             (_, false) if !do_insert => Err(NotInserted::Replay),
@@ -1129,8 +1219,13 @@ impl Engine {
             Err(e) if e.copy_instead() => insert::copy(&text).inspect_err(|c| tracing::warn!("copy: {c}")).is_ok(),
             _ => false,
         };
+        let insert_ms = insert_start.elapsed().as_secs_f64() * 1e3;
         let total_ms = key_up.elapsed().as_secs_f64() * 1e3;
-        log.push(Entry::Inserted { ok: inserted.is_ok(), error: inserted.as_ref().err().map(ToString::to_string) });
+        log.push(Entry::Inserted {
+            ok: inserted.is_ok(),
+            error: inserted.as_ref().err().map(ToString::to_string),
+            ms: insert_ms,
+        });
         let dictation = Dictation {
             raw,
             text,
@@ -1142,6 +1237,7 @@ impl Engine {
             copied,
             asr_ms,
             cleanup_ms,
+            insert_ms,
             total_ms,
         };
         if do_insert && !dictation.text.trim().is_empty() {
@@ -1160,7 +1256,7 @@ impl Engine {
             raw: Some(dictation.raw.clone()),
             text: Some(dictation.text.clone()),
             audio,
-            timings: Some(Timings { asr: asr_ms, cleanup: cleanup_ms, total: total_ms }),
+            timings: Some(Timings { asr: asr_ms, cleanup: cleanup_ms, insert: insert_ms, total: total_ms }),
         });
         Ok(Some(dictation))
     }
