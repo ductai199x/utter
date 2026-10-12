@@ -14,6 +14,7 @@ Run: uv run python -m eval.finaltext.report score --set en-finaltext-kokoro --as
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections import defaultdict
 from pathlib import Path
@@ -30,7 +31,8 @@ app = typer.Typer(add_completion=False)
 console = Console(width=160)
 
 REPO = Path(__file__).resolve().parents[3]
-CLI = REPO / "target" / "release" / "utter-cli.exe"
+# UTTER_CLI: another build (the eval on Linux).
+CLI = Path(os.environ.get("UTTER_CLI") or REPO / "target" / "release" / "utter-cli.exe")
 # The product's cleanup settings (crates/utter-llm/src/cleanup.rs, SERVER_ARGS).
 PRODUCT_SERVER_ARGS = [
     "--swa-full",

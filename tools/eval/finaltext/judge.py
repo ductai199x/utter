@@ -116,7 +116,9 @@ def main(
     outs = _rows(eval_dir() / "results" / "llm" / cleanup / f"{eval_set}-input.jsonl")
     cases = []
     for o in outs:
-        gold = golds.get(o["id"].rsplit("-", 1)[0])
+        # A set without passage files (dictation-to-text's test split, testsplit.py) carries
+        # each dictation's gold in its manifest.
+        gold = golds.get(o["id"].rsplit("-", 1)[0]) or manifest.get(o["id"], {}).get("set_gold")
         if gold is not None and o["id"] in manifest:
             cases.append({"id": o["id"], "heard": o["input"], "gold": gold, "typed": o["output"]})
 
