@@ -14,11 +14,6 @@ use utter_runtime::Component;
 
 /// Room left on the drive beyond the download, for extraction and logs.
 const SPARE_BYTES: u64 = 2_000_000_000;
-/// The least GPU memory Utter runs in (the quality tier with the speech model, about 6 GB).
-const MIN_QUALITY_GPU_BYTES: u64 = 7_500_000_000;
-/// The least GPU memory the light tier runs in (about 2.5 GB, on a 4 GB card the
-/// desktop takes some of).
-const MIN_LIGHT_GPU_BYTES: u64 = 3_500_000_000;
 /// The meter's level rate, the Bar's (main.rs): 60 a second.
 const LEVEL_EVERY: Duration = Duration::from_millis(16);
 
@@ -98,15 +93,6 @@ pub struct ModelCard {
     selected: bool,
 }
 
-/// GPU memory each tier needs with the speech model (DESIGN.md section 6; light per
-/// docs/eval-results.md), and the card size it is offered on.
-fn tier_gpu(tier: Tier) -> (u64, u64) {
-    match tier {
-        Tier::Light => (2_500_000_000, MIN_LIGHT_GPU_BYTES),
-        Tier::Quality => (6_000_000_000, MIN_QUALITY_GPU_BYTES),
-        Tier::Reference => (18_000_000_000, 20_000_000_000),
-    }
-}
 
 /// The tiers on offer, lightest first, with the best fit for this GPU recommended: light when
 /// it fits (the measured default), else light.
@@ -114,7 +100,7 @@ fn tier_gpu(tier: Tier) -> (u64, u64) {
 pub fn setup_models() -> Vec<ModelCard> {
     use utter_pipeline::settings::Model;
     let memory = utter_runtime::gpu::probe().map(|g| g.memory_bytes).unwrap_or(0);
-    let fits = |tier: Tier| memory >= tier_gpu(tier).1;
+    let fits = |tier: Tier| memory >= utter_pipeline::card_need(tier);
     let recommended = if fits(Tier::Quality) || !Tier::Light.available() { Tier::Quality } else { Tier::Light };
     let chosen = chosen_tier();
     [(Model::Quality, "quality"), (Model::Light, "light")]
@@ -123,8 +109,8 @@ pub fn setup_models() -> Vec<ModelCard> {
         .filter(|(tier, _)| tier.offered())
         .map(|(tier, id)| ModelCard {
             id,
-            gpu_bytes: tier_gpu(tier).0,
-            card_bytes: tier_gpu(tier).1,
+            gpu_bytes: utter_pipeline::gpu_need(tier),
+            card_bytes: utter_pipeline::card_need(tier),
             download_bytes: utter_pipeline::components_for(tier)
                 .into_iter()
                 .filter_map(|c| utter_runtime::component(c).ok())
@@ -231,7 +217,7 @@ pub fn setup_check() -> Checks {
         Ok(g) => {
             checks.push(Check { id: "gpu", ok: true, value: g.name.clone(), fix: None });
             // Enough for the smallest tier on offer: which one runs is the next step's choice.
-            let smallest = if Tier::Light.available() { MIN_LIGHT_GPU_BYTES } else { MIN_QUALITY_GPU_BYTES };
+            let smallest = utter_pipeline::card_need(if Tier::Light.available() { Tier::Light } else { Tier::Quality });
             let ok = g.memory_bytes >= smallest;
             let gib = g.memory_bytes as f64 / (1u64 << 30) as f64;
             checks.push(Check {
@@ -239,11 +225,7 @@ pub fn setup_check() -> Checks {
                 ok,
                 value: format!("{gib:.0} GB"),
                 fix: (!ok).then(|| {
-                    if Tier::Light.available() {
-                        "Utter needs a graphics card with 4 GB of memory or more.".into()
-                    } else {
-                        "Utter needs a graphics card with 8 GB of memory or more.".into()
-                    }
+                    format!("Utter needs a graphics card with {} GB of memory or more.", smallest.div_ceil(1 << 30))
                 }),
             });
             let ok = g.driver_cuda >= utter_runtime::gpu::MIN_DRIVER_CUDA;

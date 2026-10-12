@@ -21,15 +21,6 @@ pub struct Problem {
     pub actions: Vec<&'static str>,
 }
 
-/// GPU memory each cleanup tier needs free to start, with the speech model (DESIGN.md
-/// section 6: about 5.6 GB for the light tier).
-fn needed_bytes(tier: Tier) -> u64 {
-    match tier {
-        Tier::Light => 2_500_000_000,
-        Tier::Quality => 6_000_000_000,
-        Tier::Reference => 18_000_000_000,
-    }
-}
 
 const OUT_OF_MEMORY: &[&str] =
     &["out of memory", "outofmemory", "cudaerrormemoryallocation", "failed to allocate", "cuda_error_out_of_memory"];
@@ -78,7 +69,7 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
         actions,
     };
     let free = utter_runtime::gpu::probe().ok().and_then(|g| g.free_bytes);
-    let need = needed_bytes(tier);
+    let need = utter_pipeline::gpu_need(tier);
 
     if matches!(e, PipelineError::Audio(utter_audio::AudioError::NoDevice(_))) {
         return problem(
@@ -98,9 +89,9 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
                 gb(need),
                 now.unwrap_or_default(),
                 if tier == Tier::Quality && Tier::Light.offered() {
-                    " Or choose the Light model in Settings: it needs about 2.5 GB."
+                    format!(" Or choose the Light model in Settings: it needs about {}.", gb(utter_pipeline::gpu_need(Tier::Light)))
                 } else {
-                    ""
+                    String::new()
                 }
             ),
             vec!["retry", "quit"],

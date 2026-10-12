@@ -39,11 +39,11 @@ pub const MODEL_COMPONENT: &str = "parakeet-ultra-onnx-fp16";
 /// 10 longest eval clips among them, with each build's settings (docs/eval-results.md):
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpeechModel {
-    /// The encoder in float16: about 2.0 GB, 21-23 ms of encoder a clip. Quality's.
+    /// The encoder in float16: about 2.0 GB, 21-23 ms of encoder a clip. Kept for comparisons.
     #[default]
     Fp16,
     /// The encoder's weights in 8 bits, float16 activations (export/quantize_encoder.py): about
-    /// 1.3 GB, some 5 ms slower. Light's, for its small GPU budget.
+    /// 1.3 GB, some 5 ms slower, the same transcripts. What both tiers run.
     W8,
 }
 
