@@ -20,12 +20,6 @@ SOURCE_DATASETS = [
     "common-pile/ubuntu_irc",
     "wikimedia/wikipedia",
 ]
-LICENSING = (
-    "Rows from GitHub (Common Pile's github_archive) were left out: their text carries its repository's license "
-    "(MIT, Apache, BSD and the like), which requires the copyright notice and license text with every copy, and an "
-    "issue's or comment's text is not clearly under the code's license at all. What remains is CC BY-SA (2.5, 3.0, "
-    "4.0), CC0, public domain, or written for the dataset."
-)
 CATEGORIES = {
     "natural": "the passage said plainly",
     "disfluent": "with fillers, repeats and false starts",
@@ -102,8 +96,16 @@ def text(out: Path) -> None:
     licenses = _counts(files, "license")
     sources = _counts(files, "source")
     categories = _counts(files, "category")
+    shares = [
+        v
+        for aspect in stats["balance"].values()
+        for k, v in aspect.items()
+        if k != "_rows" and aspect["_rows"][k] >= 500
+    ]
+    balance_lo, balance_hi = 100 * min(shares), 100 * max(shares)
     nbytes = {
-        s: sum(Path(f).stat().st_size for f in files if Path(f).name.startswith(s)) for s in stats
+        s: sum(Path(f).stat().st_size for f in files if Path(f).name.startswith(s))
+        for s in ("train", "test")
     }
     features = [
         ("id", "string"),
@@ -118,7 +120,7 @@ def text(out: Path) -> None:
         ("source_url", "string"),
         ("license", "string"),
     ]
-    total = sum(s["rows"] for s in stats.values())
+    total = stats["train"]["rows"] + stats["test"]["rows"]
     card = f"""---
 pretty_name: Dictation to Text
 license: cc-by-sa-4.0
@@ -172,23 +174,21 @@ dataset_info:
 formatted and corrected the way a careful writer would type it, in the speaker's own words. Fillers and false starts
 go, spoken self-corrections and editing commands are applied, spoken lists become lists, grammar slips are fixed.
 
-It is the training data of [Utter](https://github.com/ductai199x/utter)'s cleanup models, the corpus of the Light v1
-model (`utter-light-v1-q4_0.gguf` in [ductai199x/utter](https://huggingface.co/ductai199x/utter)); the Quality v1
-model was trained on 45,660 of its pairs, with Dictionary lines drawn separately. Its speech counterpart, the audio
-these transcripts came from, is
-[ductai199x/dictation-speech](https://huggingface.co/datasets/ductai199x/dictation-speech) (joined on `id` =
+It is the training data of [Utter](https://github.com/ductai199x/utter)'s cleanup models
+([ductai199x/utter](https://huggingface.co/ductai199x/utter)). Its speech counterpart, the audio these transcripts came
+from, is [ductai199x/dictation-speech](https://huggingface.co/datasets/ductai199x/dictation-speech) (joined on `id` =
 `rendition_id`).
 
 ## Dataset structure
 
-| split | rows | final texts fixed | duplicates removed |
-|---|---|---|---|
-| train | {stats["train"]["rows"]:,} | {stats["train"]["fixed"]} | {stats["train"]["duplicates_removed"]} |
-| test | {stats["test"]["rows"]:,} | {stats["test"]["fixed"]} | {stats["test"]["duplicates_removed"]} |
+| split | rows |
+|---|---|
+| train | {stats["train"]["rows"]:,} |
+| test | {stats["test"]["rows"]:,} |
 
-The fixes and the removed duplicates are described under Curation.
-
-The test split's passages are not in the training split.
+The split is by passage (a passage's renditions are all in one split) and balanced: test holds {balance_lo:.1f}-{balance_hi:.1f}%
+of every category, domain, source, license, length and of the rows with a dictionary or with lists off. No pair appears
+twice.
 
 | column | type | meaning |
 |---|---|---|
@@ -223,8 +223,6 @@ adaptations under later versions). Rows under CC0 or in the public domain keep t
 dataset is CC BY-SA 4.0. The passages were adapted (spoken renditions, corrections; see Dataset creation).
 Attribution: each row's `source_url`, the page with the passage and its author.
 
-{LICENSING} {stats["train"]["excluded_for_license"] + stats["test"]["excluded_for_license"]:,} rows were removed for this.
-
 ## Dataset creation
 
 1. **Passages**: real text of the kinds people dictate (questions and answers, chat, notes, prose), filtered to
@@ -237,19 +235,11 @@ Attribution: each row's `source_url`, the page with the passage and its author.
    included, is `dictated`.
 5. **Dictionary lines** added to about a third of the rows.
 
-### Curation
+### Final texts
 
-- {stats["train"]["fixed"] + stats["test"]["fixed"]} final texts had a mechanical punctuation slip from their source
-  and were fixed where no reading makes them right: `?.`/`.?` after a word (not an abbreviation), `,.`, a space before
-  a comma, semicolon or colon, and `..` that is not an ellipsis. Code is left as it is.
-- {stats["train"]["duplicates_removed"] + stats["test"]["duplicates_removed"]} rows were exact repeats: two renditions of one passage (most often "natural" and
-  "explicit") that the recognizer heard identically. One of each pair is kept, the `natural` one where there is one,
-  so no pair repeats and every row's category shows in its input. The Light v1 model was trained with them.
-- {stats["train"]["wrapped_prose_lists"] + stats["test"]["wrapped_prose_lists"]} rows came from "lists" that are
-  really hard-wrapped prose (a code comment or quoted paragraph split into items, so its prose version read
-  "during the. Installation."): removed.
-- Grammar-category targets are their passage with its grammar corrected.
-- Final texts otherwise keep their writers' style, including informal punctuation.
+- The passage itself, as its writer wrote it, with mechanical punctuation slips fixed (`?.`, `,.`, a space before a
+  comma); grammar-category targets are their passage with its grammar corrected.
+- With `lists` false, a spoken list's target is written as prose.
 
 ## Personal and sensitive information
 
@@ -272,10 +262,17 @@ ds = load_dataset("ductai199x/dictation-to-text")
 ds["train"][0]["messages"]   # ready for chat fine-tuning
 ```
 
-## More information
+## Citation
 
-Built by `tools/publish/text.py` in the Utter repository, where the eval code and its small hand-written
-cleanup checks (`tools/eval/cleanup_cases.jsonl`) live. Card authors: Tai Duc Nguyen.
+```bibtex
+@misc{{nguyen2026dictation,
+  author       = {{Tai Duc Nguyen}},
+  title        = {{Dictation to Text}},
+  year         = {{2026}},
+  publisher    = {{Hugging Face}},
+  howpublished = {{\\url{{https://huggingface.co/datasets/ductai199x/dictation-to-text}}}}
+}}
+```
 """
     (out / "README.md").write_text(card, encoding="utf-8")
     print(f"wrote {out / 'README.md'}")
@@ -347,11 +344,6 @@ def voice(out: Path) -> None:
     total = sum(split_rows.values())
     hours = sum(split_hours.values())
     regenerated = sum(s.get("regenerated", 0) for s in stats.values())
-    dropped = sum(s.get("dropped_as_in_train", 0) for s in stats.values())
-    excluded = sum(s.get("excluded_for_license", 0) for s in stats.values())
-    wrapped = sum(s.get("wrapped_prose_lists", 0) for s in stats.values())
-    unpaired = sum(s.get("no_text_pair", 0) for s in stats.values())
-    corpus_test = sum(by_collection[c]["test"] for c in stats if c.startswith("corpus"))
     collection_rows = [
         [
             c,
@@ -408,8 +400,9 @@ It is the speech side of [Utter](https://github.com/ductai199x/utter)'s data:
 
 - the `corpus*` collections are the audio behind
   [ductai199x/dictation-to-text](https://huggingface.co/datasets/ductai199x/dictation-to-text), one clip per text pair
-  (join `rendition_id` to its `id`), each in its pair's split: train, or test for the {corpus_test:,} held-out passages;
-- the other collections are the eval sets Utter's models are measured on, all test.
+  (join `rendition_id` to its `id`), each in its pair's split;
+- the other collections are the eval sets Utter's models are measured on, all test, including voices (Chatterbox)
+  no training clip uses.
 
 ## Dataset structure
 
@@ -422,11 +415,7 @@ Configs: `all` (the default: every collection, train and test) and one per colle
 {_table(collection_rows, ["collection", "train", "test", "hours", "categories"])}
 
 The same rendition can be in more than one test collection (spoken by both engines, or in a focused set and the main
-one); `id` is unique, `rendition_id` is shared. No rendition and no passage is in both splits: {dropped} eval clips
-that were also training data were left out. Left out as well: {excluded:,} clips for licensing (see Sources and
-licensing), {wrapped:,} of "lists" that are really hard-wrapped prose (a code comment split into items), and {unpaired:,}
-training clips whose rendition has no pair in dictation-to-text (most are one of two renditions the recognizer heard
-identically, a repeat removed there; the rest were filtered when the training pairs were made).
+one); `id` is unique, `rendition_id` is shared. No rendition and no passage is in both splits.
 
 | column | type | meaning |
 |---|---|---|
@@ -459,7 +448,7 @@ Categories:
 {_table([[k, f"{v:,}"] for k, v in licenses.most_common()], ["license", "clips"])}
 
 The dataset is CC BY-SA 4.0, as most of its text requires; each row keeps its passage's license and source URL (the
-page with the passage and its author). {LICENSING} {excluded:,} clips were removed for this.
+page with the passage and its author).
 
 The speech: Kokoro-82M is Apache-2.0, and its output is unrestricted; Chatterbox (MIT) cloned voices from
 [kyutai/tts-voices](https://huggingface.co/kyutai/tts-voices) (`voice-donations`, CC0: recordings people donated
@@ -471,19 +460,17 @@ to the public domain).
    by a language model (Gemma 4 26B) in the categories above.
 2. Spoken by Kokoro-82M (twelve English voices, rate 0.9-1.1, chosen per rendition by a hash of its id) or Chatterbox
    (voice-cloned from Kyutai's CC0 donated voices, `exaggeration` varied), resampled to 16 kHz, with 0.25 s of silence around.
-3. {regenerated:,} training clips whose original audio was lost were spoken again with their recorded text, voice and
-   speed (`audio=regenerated`). Kokoro is not bit-exact across runs: they match their originals in content and length
-   to within a few hundredths of a second, not sample for sample, so the transcripts in dictation-to-text came from
-   the originals, not these.
-4. Final texts: the passage, with grammar corrected for the grammar category, and the mechanical punctuation fixes
-   described in dictation-to-text.
+3. {regenerated:,} corpus clips (`audio=regenerated`) are a second synthesis with the same text, voice and speed:
+   the same content and length to within a few hundredths of a second, not the same samples as the audio
+   dictation-to-text's transcripts were made from.
+4. Final texts: the passage, with grammar corrected for the grammar category and mechanical punctuation slips
+   fixed; the same as dictation-to-text's.
 
 ## Personal and sensitive information
 
 All speech is synthetic; no recording of a real person is included. The Chatterbox voices imitate recordings people
 donated to the public domain (kyutai/tts-voices); they are numbered here, not named, and must not be used to identify
-or impersonate the donors. Passage text
-from public posts can contain the usernames their writers published.
+or impersonate the donors. Passage text from public posts can contain the usernames their writers published.
 
 ## Bias, risks and limitations
 
@@ -502,10 +489,17 @@ amend = load_dataset("ductai199x/dictation-speech", "kokoro-amend", split="test"
 row = test[0]; row["audio"]["array"], row["transcript"], row["final_text"]
 ```
 
-## More information
+## Citation
 
-Built by `tools/publish/voice.py` in the Utter repository. The dictionaries the dictionary evals give the
-test collections are next to the eval code there (`tools/eval/dictionaries/`). Card authors: Tai Duc Nguyen.
+```bibtex
+@misc{{nguyen2026dictationspeech,
+  author       = {{Tai Duc Nguyen}},
+  title        = {{Dictation Speech}},
+  year         = {{2026}},
+  publisher    = {{Hugging Face}},
+  howpublished = {{\\url{{https://huggingface.co/datasets/ductai199x/dictation-speech}}}}
+}}
+```
 """
     (out / "README.md").write_text(card, encoding="utf-8")
     print(f"wrote {out / 'README.md'}")
