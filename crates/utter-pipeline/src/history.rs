@@ -225,6 +225,69 @@ impl History {
     }
 }
 
+/// One run of words in "what Utter heard" (docs/ux/history.md): kept, removed by cleanup, or
+/// added or changed by it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Change {
+    /// "same", "removed" or "added".
+    pub kind: &'static str,
+    pub text: String,
+}
+
+/// What cleanup did to what was heard, word by word: the typed text's words where they match
+/// (ignoring case and punctuation, which cleanup always changes), what was heard and dropped,
+/// and what was written instead. Longer texts than this compare as one replacement.
+pub fn changes(heard: &str, text: &str) -> Vec<Change> {
+    const MOST_WORDS: usize = 1500;
+    let a: Vec<&str> = heard.split_whitespace().collect();
+    let b: Vec<&str> = text.split_whitespace().collect();
+    let key = |w: &str| fold(w).chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+    let (ka, kb): (Vec<String>, Vec<String>) = (a.iter().map(|w| key(w)).collect(), b.iter().map(|w| key(w)).collect());
+    let mut out: Vec<Change> = Vec::new();
+    let mut push = |kind: &'static str, word: &str| match out.last_mut() {
+        Some(last) if last.kind == kind => {
+            last.text.push(' ');
+            last.text.push_str(word);
+        }
+        _ => out.push(Change { kind, text: word.to_owned() }),
+    };
+    if a.len() > MOST_WORDS || b.len() > MOST_WORDS {
+        a.iter().for_each(|w| push("removed", w));
+        b.iter().for_each(|w| push("added", w));
+        return out;
+    }
+    // Longest common subsequence, suffix table: lcs[i][j] for a[i..], b[j..].
+    let (n, m) = (a.len(), b.len());
+    let mut lcs = vec![vec![0u16; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[i][j] = if !ka[i].is_empty() && ka[i] == kb[j] {
+                lcs[i + 1][j + 1] + 1
+            } else {
+                lcs[i + 1][j].max(lcs[i][j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    while i < n || j < m {
+        if i < n && j < m && !ka[i].is_empty() && ka[i] == kb[j] {
+            push("same", b[j]);
+            i += 1;
+            j += 1;
+        } else if i < n && (j == m || lcs[i + 1][j] >= lcs[i][j + 1]) {
+            // What was dropped reads before what replaced it.
+            push("removed", a[i]);
+            i += 1;
+        } else {
+            // A word only punctuation ("—") that cleanup added is part of the writing, not a change.
+            push(if kb[j].is_empty() { "same" } else { "added" }, b[j]);
+            j += 1;
+        }
+    }
+    out
+}
+
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
@@ -363,6 +426,26 @@ mod tests {
         assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 1);
         h.clear().unwrap();
         assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 0);
+    }
+
+    #[test]
+    fn changes_mark_fillers_corrections_and_rewritten_numbers() {
+        let c = changes(
+            "um so the meeting is at three no actually four",
+            "So the meeting is at 4.",
+        );
+        let shown: Vec<(&str, &str)> = c.iter().map(|c| (c.kind, c.text.as_str())).collect();
+        assert_eq!(
+            shown,
+            [
+                ("removed", "um"),
+                ("same", "So the meeting is at"),
+                ("removed", "three no actually four"),
+                ("added", "4."),
+            ]
+        );
+        // Only case and punctuation changed: nothing is marked.
+        assert!(changes("hello there", "Hello, there!").iter().all(|c| c.kind == "same"));
     }
 
     #[test]

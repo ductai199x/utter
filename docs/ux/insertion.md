@@ -109,13 +109,15 @@ Ctrl+Shift+V). A person only ever sees their own platform's defaults and choices
 
 ### Editing them (Settings → Typing)
 
-- A list, one row per rule: the app's name and program, "Paste with" and "Keep" as two small
-  dropdowns. Utter's defaults are in the list from the start, marked **Default** in muted text
-  until edited.
-- An edited default shows **Reset** (back to Utter's value). Any row can be removed; removing
-  a default stores "Ctrl+V, Normal" for that app, so it stays removed after updates.
-- **Add an app**: a menu of the apps open now, by friendly name, and at its top **"<the app you
-  last dictated into>"**, the quick path when a paste just did not work.
+- One row per app: its name and program(s), "Paste with" and "Keep" as two quiet dropdowns.
+  Programs of one app (Remote Desktop's `mstsc.exe` and `msrdc.exe`) share a row, and a change
+  applies to all of them.
+- Utter's defaults that the person has not touched are folded away behind "Show Utter's
+  defaults (12)"; the person's own rules and any default they edited always show.
+- A default can be changed and **Reset** (back to Utter's value), not removed: set to Ctrl+V,
+  Normal it is like any other app. The person's own rules have a remove button.
+- **Add an app**: a menu of the apps open now, by friendly name, with **"<the app you last
+  dictated into> (your last dictation)"** first, the quick path when a paste just did not work.
 - Every other app: Ctrl+V, Normal.
 
 **Stored** in settings.toml as the person's changes only, not the whole table, so a later

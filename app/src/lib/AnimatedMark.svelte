@@ -12,7 +12,8 @@
     color = 'var(--home-accent)',
     glow = '#dfe4ff',
     intro = true,
-  }: { size?: number; color?: string; glow?: string; intro?: boolean } = $props();
+    live = true,
+  }: { size?: number; color?: string; glow?: string; intro?: boolean; live?: boolean } = $props();
 
   const INTRO_MS = 900; // the ribbon drawing itself
   const LINE_MS = 380; // each line writing in
@@ -54,20 +55,27 @@
       ribbonDraw = intro ? easeOut(t / INTRO_MS) : 1;
       lineDraw = intro ? LINE_AT.map((at) => easeOut((t - at) / LINE_MS)) : [1, 1];
       // The living part begins once the arrival has settled, easing in over a second.
-      const live = intro ? Math.max(0, t - (LINE_AT[1]! + LINE_MS + 600)) : t;
-      const ease = Math.min(1, live / 1000);
+      const alive = intro ? Math.max(0, t - (LINE_AT[1]! + LINE_MS + 600)) : t;
+      // A mark that only arrives (live = false) rests once it has: nothing more to draw.
+      if (!live && alive > 0) {
+        ribbonDraw = 1;
+        lineDraw = [1, 1];
+        heads = LINE_Y.map(() => ({ x: LINE_END, glow: 0 }));
+        return;
+      }
+      const ease = Math.min(1, alive / 1000);
       const ends = LINE_Y.map((_, i) => {
         // Full length at the start of a period, so the arrival hands over without a jump.
-        const s = swell(live / PERIOD_MS - i * CASCADE);
+        const s = swell(alive / PERIOD_MS - i * CASCADE);
         return LINE_END - (LINE_END - SHORTEST[i]!) * s * ease;
       });
       // The glow follows growth: the faster a line's end moves right, the brighter its head.
       heads = ends.map((x, i) => {
-        const ahead = LINE_END - (LINE_END - SHORTEST[i]!) * swell((live + 60) / PERIOD_MS - i * CASCADE) * ease;
+        const ahead = LINE_END - (LINE_END - SHORTEST[i]!) * swell((alive + 60) / PERIOD_MS - i * CASCADE) * ease;
         const speed = (ahead - x) / (60 / 1000); // grid units per second
         return { x, glow: Math.min(1, Math.max(0, speed / 9)) };
       });
-      const breath = Math.sin((live / BREATH_MS) * Math.PI * 2);
+      const breath = Math.sin((alive / BREATH_MS) * Math.PI * 2);
       ribbonD = ribbonPath(1 + 0.05 * breath * ease, ends[0]);
       lineD = LINE_Y.slice(1).map((y, i) => linePath(y, ends[i + 1]));
       raf = requestAnimationFrame(frame);
