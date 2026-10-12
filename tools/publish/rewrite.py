@@ -39,12 +39,16 @@ def main(out: Path, split: str = typer.Option(...), text: Path | None = typer.Op
         raise SystemExit(
             "the training split needs --text (dictation-to-text, to keep only its renditions)"
         )
+    # The corpus (split train) may have been rewritten before: its clips are then in both splits.
     old_stats_path = out / f"stats-{split}.json"
+    if split == "train" and not old_stats_path.exists():
+        old_stats_path = out / "stats-corpus.json"
     old_stats = json.loads(old_stats_path.read_text(encoding="utf-8"))
     stats = {}
     for old_name in old_stats:
         name = CORPUS_NAMES.get(old_name, old_name)
-        files = sorted(glob.glob(str(out / "data" / old_name / f"{split}-*.parquet")))
+        pattern = "*.parquet" if split == "train" else f"{split}-*.parquet"
+        files = sorted(glob.glob(str(out / "data" / old_name / pattern)))
         rows = [r for f in files for r in pq.read_table(f).to_pylist()]
         removed = collections.Counter()
         by_split: dict[str, list[dict]] = {"train": [], "test": []}
@@ -80,7 +84,8 @@ def main(out: Path, split: str = typer.Option(...), text: Path | None = typer.Op
         stats[name] = s
         print(name, dict(removed), s["split_rows"], flush=True)
     new_path = out / ("stats-corpus.json" if split == "train" else f"stats-{split}.json")
-    old_stats_path.unlink()
+    if old_stats_path != new_path:
+        old_stats_path.unlink()
     new_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
 
 
