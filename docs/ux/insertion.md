@@ -25,12 +25,31 @@ and the app's own paste keys are what works in every app (Wispr Flow does the sa
 Services Framework, the input-method layer, would avoid the clipboard; it is a later
 investigation, not this.
 
+## Spacing
+
+A dictation that continues text gets a space in front, the way one would type it: two in a
+row read "levels. There is", not "levels.There is". At key down Utter asks the focused
+control for the two characters before the cursor (caret.rs: UI Automation's text pattern on
+Windows; AXSelectedTextRange on macOS and AT-SPI's Text on Linux when those are built), on a
+thread of its own while the person speaks, so the paste does not wait for it.
+
+| Before the cursor | Space? |
+|---|---|
+| a letter, digit, or closing punctuation (`.` `?` `)` and so on) | yes |
+| nothing (the start of the field), a space or a line break | no |
+| an opening bracket or quote, `/`, `-`, a dash, `@`, `#` | no |
+| the app does not say (a terminal), or not within 20 ms of the text being ready | no, as before |
+
+Text that starts with punctuation (`, and more`) never gets one. The space goes into the paste
+only, not into History. Paste last (Alt+Shift+Z) follows the same rule. Checked in Notepad
+(2026-10-12): the start of the field, right after a dictation, and after a line break.
+
 ## When it cannot go in
 
 | Why | What Utter does | The Bar says |
 |---|---|---|
 | The focus moved to another window before the text was ready | leaves the text on the clipboard | "Copied: press Ctrl+V to paste" |
-| No window had the focus | leaves it on the clipboard | "Copied: press Ctrl+V to paste" |
+| No window had the focus, or Windows' own input overlay or lock screen did (a paste there vanishes) | leaves it on the clipboard | "Copied: press Ctrl+V to paste" |
 | The app runs as administrator (Windows drops keys Utter sends it) | leaves it on the clipboard, does not press keys | "Copied: this app runs as administrator. Press Ctrl+V" |
 | The paste keys could not be sent | leaves it on the clipboard | "Copied: press Ctrl+V to paste" |
 | Nothing was heard | nothing | "Didn't catch that" |

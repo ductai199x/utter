@@ -65,6 +65,9 @@ mod imp {
 
     use super::{App, Window};
 
+    /// Parts of Windows that can be in front without a text box to paste into.
+    const NO_TEXT: &[&str] = &["TextInputHost.exe", "LockApp.exe"];
+
     /// A Store app's windows belong to this host; the app's own process is a child window's.
     const FRAME_HOST: &str = "ApplicationFrameHost.exe";
     /// Parts of Windows itself that own visible windows but are not apps a person dictates
@@ -97,12 +100,14 @@ mod imp {
             let mut buf = [0u16; 512];
             let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32).max(0) as usize;
             let app_pid = store_app_pid(hwnd, pid).unwrap_or(pid);
-            Some(Window {
-                handle: hwnd as isize,
-                process_id: app_pid,
-                title: String::from_utf16_lossy(&buf[..n]),
-                app: app_of(app_pid),
-            })
+            let app = app_of(app_pid);
+            // Windows' own input overlay ("Windows Input Experience": the emoji, clipboard and
+            // touch-keyboard panels) or the lock screen in front: no text box to paste into,
+            // and a paste there vanishes. No window, so the text is copied instead.
+            if NO_TEXT.iter().any(|exe| app.exe.eq_ignore_ascii_case(exe)) {
+                return None;
+            }
+            Some(Window { handle: hwnd as isize, process_id: app_pid, title: String::from_utf16_lossy(&buf[..n]), app })
         }
     }
 

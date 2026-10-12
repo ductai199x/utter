@@ -6,6 +6,30 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-12: Cold starts
+
+A start right after a reboot (or with the model files long out of the file cache) reads about
+7.2 GB from the disk. Reproduced by copying the Quality components with unbuffered writes
+(robocopy /J), so nothing of them is cached; launch to ready, two runs each:
+
+| | Cold | Warm |
+|---|---|---|
+| The loaders read on their own | 7.34 s | 3.78 s |
+| One read-ahead stream per component | 6.26-6.59 s | 3.79-4.03 s |
+| 64 MB ranges, 8 threads | 5.46-6.28 s | 4.10-4.41 s (it read the cached 7 GB again) |
+| PrefetchVirtualMemory on mapped files | 7.27-7.56 s (it ran synchronously, at 1.3 GB/s) | 3.54-3.59 s |
+| **8 threads, after timing the model's first 64 MB (cached: read nothing)** | **5.59-6.01 s** | **3.54-3.57 s** |
+
+The disk gives these files under 2 GB/s whatever the method, so a cold start cannot go far
+under 4 s here; the rest is the encoder's session (2 s) and the server. A cache probe reads
+7.5-9 GB/s, the disk about 1.1 GB/s to one stream: the 4 GB/s line between them is wide.
+
+Not Windows Defender: a model file copied fresh read in 0.11 s the first time, the same as
+after, and the starts right after Repair re-downloaded the runtime took 3.3-4.2 s. The one
+22 s start seen was the machine busy at that moment (every stage slow at once).
+
+---
+
 ## 2026-10-12: Starting in under 4 seconds, and a pipeline that does not starve itself
 
 Measured in the app itself (Quality, a test instance with its own data folder), with
