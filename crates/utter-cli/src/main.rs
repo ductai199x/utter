@@ -43,12 +43,13 @@ struct Cli {
     /// Turn on onnxruntime's memory-pattern planning (off in the product).
     #[arg(long, global = true)]
     memory_pattern: bool,
-    /// Threads for graphs on the CPU (0: one per core).
-    #[arg(long, global = true, default_value_t = 0)]
+    /// Threads for graphs on the CPU (0: one per core); the app's default is 2.
+    #[arg(long, global = true, default_value_t = 2)]
     cpu_threads: usize,
-    /// Stop idle CPU worker threads from spin-waiting.
+    /// Let idle CPU worker threads spin-wait (off in the app: it starves the rest of the
+    /// pipeline, the microphone included).
     #[arg(long, global = true)]
-    no_cpu_spinning: bool,
+    cpu_spinning: bool,
     /// Keep cuDNN to a small convolution workspace.
     #[arg(long, global = true)]
     no_conv_max_workspace: bool,
@@ -355,11 +356,10 @@ fn main() -> Result<()> {
         conv_search: cli.conv_search.into(),
         memory_pattern: cli.memory_pattern,
         cpu_threads: cli.cpu_threads,
-        cpu_spinning: !cli.no_cpu_spinning,
+        cpu_spinning: cli.cpu_spinning,
         conv_max_workspace: !cli.no_conv_max_workspace,
         arena_exact: cli.arena_exact,
         weights_outside_pool: cli.weights_outside_pool,
-        ..Default::default()
     };
     let dir = match &cli.model_dir {
         Some(dir) => dir.clone(),

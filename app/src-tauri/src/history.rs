@@ -132,15 +132,19 @@ pub fn paste_rules(overrides: Vec<PasteOverride>) -> PasteRules {
             .iter()
             .map(|a| AppRow { exe: a.exe.clone(), name: a.name.clone(), dictations: a.count })
             .collect(),
-        last_app: last
-            .filter(|e| !e.app_exe.is_empty())
-            .map(|e| AppRow { dictations: used(&e.app_exe), exe: e.app_exe, name: e.app_name }),
+        last_app: last.filter(|e| !e.app_exe.is_empty()).map(|e| AppRow {
+            dictations: used(&e.app_exe),
+            exe: e.app_exe,
+            name: e.app_name,
+        }),
     }
 }
 
 /// Opens the Paste rules window (docs/ux/insertion.md), or brings it forward if it is open.
+/// Async: a window built inside a synchronous command deadlocks on Windows (Tauri's
+/// WebviewWindowBuilder::new docs).
 #[tauri::command]
-pub fn open_paste_rules(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn open_paste_rules(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
     if let Some(w) = app.get_webview_window("rules") {
         let _ = w.unminimize();

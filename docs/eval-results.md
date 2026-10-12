@@ -6,6 +6,46 @@ Every number here was measured on the development machine (RTX 3090 Ti, Windows 
 
 ---
 
+## 2026-10-12: Starting in under 4 seconds, and a pipeline that does not starve itself
+
+Measured in the app itself (Quality, a test instance with its own data folder), with
+UTTER_TEST_AUDIO feeding a 5.7 s recording through the whole pipeline in real time: the
+insertion into Notepad, History, the Bar, the person's clipboard put back. No sound is played.
+
+**Startup, launch to ready** (the splash's wait; it was measured from the pipeline thread's
+start before, which hid the launch):
+
+| | Launch to ready |
+|---|---|
+| Before: everything in turn, development build unoptimized | 7.9 s warm, 13-36 s under load |
+| Speech model and cleanup server load at once | 4.7-5.7 s |
+| Voice detection and the microphone open meanwhile; the splash window after loading starts | 4.7-5.2 s |
+| The small decoder sessions beside the encoder's (one stalled 2.1 s once) | **3.55-3.75 s** (5 runs) |
+
+What is left: the encoder's session takes about 2.0 s (graph optimization at load; lower
+optimization levels loaded slower here, 5-7.7 s, and saving the optimized graph failed in
+onnxruntime 1.31), and the cleanup server about 2.9 s (vocabulary 1.1-1.5 s, weights 1.3-1.5
+s), side by side. Under load from the other, the server's weights once took 8 s: the reason
+the CPU threads below matter.
+
+**The CPU threads**: every onnxruntime session ran one thread per core (12) with spin-waiting.
+Back to back that won the speech bench (decode 12.5 ms against 20 ms on one thread, the
+2026-10-11 section); in the app it starved everything else while the person spoke:
+
+| 3 dictations each | Mic stream gaps | Speech after key up | Cleanup | Key up to text in the app |
+|---|---|---|---|---|
+| 12 threads, spinning | 26 (audio lost) | 61-79 ms | 169-191 ms | 282-320 ms |
+| **2 threads, no spinning** | **0** | **48-71 ms** | **131-158 ms** | **231-260 ms** |
+
+The paste itself is 47-61 ms: 25-30 ms of it is the quiet wait for clipboard managers, about
+20 ms is SendInput passing each key through every keyboard hook on the machine.
+
+**The first dictation is as fast as the rest** (260 ms here). In the unoptimized development
+build it was not (the paste 667 ms the first time, speech 388 ms), which is why development
+builds are now optimized (Cargo.toml): what `npx tauri dev` shows is what ships.
+
+---
+
 ## 2026-10-11: Light on the GPU, and the speech model's memory
 
 **Light runs everything on the GPU** (Tai): the speech model on the CPU took 736 ms p50 a clip

@@ -72,6 +72,8 @@ pub enum Entry {
     Inserted {
         ok: bool,
         error: Option<String>,
+        /// The paste (or the copy instead) alone.
+        ms: f64,
     },
     Cancelled,
 }
@@ -107,6 +109,7 @@ struct Record<'a> {
 pub struct Timings {
     pub asr: f64,
     pub cleanup: f64,
+    pub insert: f64,
     pub total: f64,
 }
 
@@ -231,7 +234,7 @@ mod tests {
             raw: Some("um hello".into()),
             text: Some("Hello.".into()),
             audio: vec![0.0; 16_000],
-            timings: Some(Timings { asr: 30.0, cleanup: 90.0, total: 125.0 }),
+            timings: Some(Timings { asr: 30.0, cleanup: 90.0, insert: 5.0, total: 125.0 }),
         })
         .unwrap();
         let json: serde_json::Value =

@@ -119,7 +119,21 @@ npm run check                                  # svelte-check
 ```
 
 It loads the same components as `utter-cli dictate`; run `setup` first. Logs go to the
-console in a debug build (`RUST_LOG=debug` for more).
+console in a debug build (`RUST_LOG=debug` for more). Development builds are optimized
+(`[profile.dev]` in Cargo.toml), so timings in `tauri dev` are the product's; a full rebuild
+takes about 3 minutes, a change to Utter's crates 20-40 s.
+
+**The whole app without speaking:** `UTTER_TEST_AUDIO=<16 kHz mono WAV>` (development builds
+only) makes every dictation hear that file instead of the microphone, in real time, and lets
+an injected Right Ctrl start one, so a script can hold the key (SendInput) and check the
+paste, History and the Bar. Nothing is played. With `UTTER_DATA_DIR` pointing at a folder of
+its own it never touches the real History or settings.
+
+**Run Utter from a normal terminal, not from inside a packaged app.** The Claude desktop app
+is an MSIX package: a folder that a process started from it creates under `%LOCALAPPDATA%`
+lands in the package's private store (`AppData\Local\Packages\<package>\LocalCache\Local\`),
+which only that package sees. On 2026-10-12 the whole `Utter_dev` folder had been created
+that way, so `npx tauri dev` in a normal terminal found it empty and downloaded everything.
 
 To look at the Bar without the native app: `npm run dev` in `app/`, then open
 `http://localhost:1430/bar.html?demo`, which plays a dictation through it (dev builds only).

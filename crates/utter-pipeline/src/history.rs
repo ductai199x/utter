@@ -297,21 +297,42 @@ fn fold(s: &str) -> String {
     s.nfd().filter(|c| !unicode_normalization::char::is_combining_mark(*c)).flat_map(char::to_lowercase).collect()
 }
 
-/// Reads the file; a line that does not parse (a crash mid-append) is skipped, not fatal.
+/// Reads the file. A line that does not parse (a crash mid-append, a newer version's entry) is
+/// moved to `history.unreadable.jsonl` beside it, never lost, and the file is written again
+/// without it, so the next entry does not land on a torn line.
 fn load(path: &Path) -> Vec<Entry> {
     let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+    let mut unreadable = String::new();
     let mut entries: Vec<Entry> = text
         .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(|l| match serde_json::from_str(l) {
             Ok(e) => Some(e),
             Err(e) => {
-                tracing::warn!("history: skipping a line that does not parse: {e}");
+                tracing::warn!("history: a line that does not parse, kept aside: {e}");
+                unreadable.push_str(l);
+                unreadable.push('\n');
                 None
             }
         })
         .collect();
     entries.sort_by_key(|e| e.id);
+    if !unreadable.is_empty() {
+        let aside = path.with_extension("unreadable.jsonl");
+        let saved = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&aside)
+            .and_then(|mut f| f.write_all(unreadable.as_bytes()));
+        match saved {
+            Ok(()) => {
+                if let Err(e) = rewrite(path, &entries) {
+                    tracing::warn!("history: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("history: could not keep the unreadable lines in {}: {e}", aside.display()),
+        }
+    }
     entries
 }
 
@@ -320,7 +341,8 @@ fn append(path: &Path, entry: &Entry) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
-    let mut f = OpenOptions::new().create(true).append(true).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut f =
+        OpenOptions::new().create(true).append(true).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     writeln!(f, "{line}").map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -430,10 +452,7 @@ mod tests {
 
     #[test]
     fn changes_mark_fillers_corrections_and_rewritten_numbers() {
-        let c = changes(
-            "um so the meeting is at three no actually four",
-            "So the meeting is at 4.",
-        );
+        let c = changes("um so the meeting is at three no actually four", "So the meeting is at 4.");
         let shown: Vec<(&str, &str)> = c.iter().map(|c| (c.kind, c.text.as_str())).collect();
         assert_eq!(
             shown,
@@ -449,11 +468,18 @@ mod tests {
     }
 
     #[test]
-    fn a_torn_last_line_is_skipped() {
+    fn a_torn_last_line_is_kept_aside_and_the_next_entry_survives() {
         let h = temp("torn");
         h.add(entry("whole", "slack.exe", true)).unwrap();
         let mut f = OpenOptions::new().append(true).open(&h.path).unwrap();
         write!(f, "{{\"id\": 9, \"at\"").unwrap();
-        assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 1);
+        drop(f);
+        let reopened = History::open(h.path.clone());
+        assert_eq!(reopened.query(&Query::default()).total, 1);
+        // The next entry is appended after the torn line was dealt with, and reads back.
+        reopened.add(entry("after", "slack.exe", true)).unwrap();
+        assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 2);
+        let aside = std::fs::read_to_string(h.path.with_extension("unreadable.jsonl")).unwrap();
+        assert_eq!(aside, "{\"id\": 9, \"at\"\n");
     }
 }

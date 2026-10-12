@@ -36,7 +36,9 @@ investigation, not this.
 | Nothing was heard | nothing | "Didn't catch that" |
 
 - "Left on the clipboard" means the old clipboard is not restored: the dictation stays until
-  something else is copied. It is marked to stay out of clipboard history, as above.
+  something else is copied. It is an ordinary copy, in clipboard history and seen by clipboard
+  managers, since the person pastes it themselves; so are History's Copy and copy last. Only
+  a paste's own text, put back over within a second, is marked to stay out.
 - The message uses this platform's paste keys (Cmd+V on macOS).
 - The Bar holds an error message for 2.5 s (`ERROR_HOLD`), as today.
 - History marks the entry **Not inserted**, with the reason.

@@ -21,7 +21,6 @@ pub struct Problem {
     pub actions: Vec<&'static str>,
 }
 
-
 const OUT_OF_MEMORY: &[&str] =
     &["out of memory", "outofmemory", "cudaerrormemoryallocation", "failed to allocate", "cuda_error_out_of_memory"];
 const DRIVER: &[&str] = &[
@@ -41,6 +40,14 @@ const DAMAGED: &[&str] = &[
     "no such file",
     "cannot find the file",
     "gguf",
+    // The GPU libraries (cuDNN, CUDA, onnxruntime) failing or not loading: Utter's own pinned
+    // copies, on a card and driver the system check passed, so most likely damaged.
+    "cudnn failure",
+    "cudnn_status",
+    "loadlibrary",
+    "not a valid win32 application",
+    "could not load library",
+    "the specified module could not be found",
 ];
 
 fn gb(bytes: u64) -> String {
@@ -89,7 +96,10 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
                 gb(need),
                 now.unwrap_or_default(),
                 if tier == Tier::Quality && Tier::Light.offered() {
-                    format!(" Or choose the Light model in Settings: it needs about {}.", gb(utter_pipeline::gpu_need(Tier::Light)))
+                    format!(
+                        " Or choose the Light model in Settings: it needs about {}.",
+                        gb(utter_pipeline::gpu_need(Tier::Light))
+                    )
                 } else {
                     String::new()
                 }

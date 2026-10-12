@@ -147,7 +147,9 @@ impl LlamaServer {
         cmd.arg("--model").arg(&opts.model);
         cmd.args(["--host", "127.0.0.1", "--port", &port.to_string()]);
         cmd.args(["--ctx-size", &opts.context.to_string(), "--n-gpu-layers", &opts.gpu_layers.to_string()]);
-        cmd.args(["--parallel", "1", "--no-webui", "--jinja"]);
+        // --no-warmup: the caller's first request warms it (cleanup sends a real one), so the
+        // server's own empty pass only delays ready.
+        cmd.args(["--parallel", "1", "--no-webui", "--jinja", "--no-warmup"]);
         cmd.args(["--flash-attn", if opts.flash_attention { "on" } else { "off" }]);
         cmd.args(&opts.extra_args);
         // The CUDA runtime comes from Utter's component, for this child only.
@@ -182,7 +184,7 @@ impl LlamaServer {
             {
                 return Ok(());
             }
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(20));
         }
         Err(LlmError::StartTimeout(timeout, self.log.clone()))
     }

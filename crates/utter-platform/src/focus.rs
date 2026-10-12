@@ -59,8 +59,8 @@ mod imp {
         QueryFullProcessImageNameW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumChildWindows, EnumWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowTextLengthW,
-        GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+        EnumChildWindows, EnumWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowTextLengthW, GetWindowTextW,
+        GetWindowThreadProcessId, IsWindowVisible,
     };
 
     use super::{App, Window};
@@ -126,8 +126,7 @@ mod imp {
             // SAFETY: plain queries on a window handle the enumeration just gave.
             unsafe {
                 // An app's own windows: visible, titled, not owned by another window.
-                if IsWindowVisible(hwnd) != 0 && GetWindowTextLengthW(hwnd) > 0 && GetWindow(hwnd, GW_OWNER).is_null()
-                {
+                if IsWindowVisible(hwnd) != 0 && GetWindowTextLengthW(hwnd) > 0 && GetWindow(hwnd, GW_OWNER).is_null() {
                     let pid = window_pid(hwnd);
                     pids.push(store_app_pid(hwnd, pid).unwrap_or(pid));
                 }
