@@ -497,7 +497,11 @@ fn llm_bench(
             "gap_ms": pacing.gap_ms,
             "keepalive_ms": pacing.keepalive_ms,
             "warm_gpu": warm_gpu,
-            "llama_cpp": utter_runtime::component("llama-cpp")?.version,
+            // The component's version, or the build UTTER_LLAMA_SERVER points at (the eval on Linux).
+            "llama_cpp": match std::env::var("UTTER_LLAMA_SERVER") {
+                Ok(path) => path,
+                Err(_) => utter_runtime::component("llama-cpp")?.version.clone(),
+            },
             "prompt": bench.prompt.as_ref().map_or("crates/utter-llm/prompts/cleanup.md".to_owned(), |p| p.display().to_string()),
         }))?,
     )?;
