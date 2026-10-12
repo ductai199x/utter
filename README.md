@@ -55,7 +55,7 @@ On the development machine (RTX 3090 Ti), in the app itself. Every figure is fro
 | Dictionary terms spelled right | **97.8%** |
 | GPU memory | Quality **4.8 GB**, Light **3.2 GB** |
 
-"Ready to send" is the share of dictations a careful writer would send exactly as typed, graded
+"Ready to send" is the share of dictations a careful writer would send exactly as typed, judged
 dictation by dictation against the intended text with a rubric checked against human review.
 
 ## Install

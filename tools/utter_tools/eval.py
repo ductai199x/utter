@@ -1,15 +1,15 @@
-"""utter-grade: how often each cleanup model types what the speaker meant, ready to send.
+"""utter-eval: how often each cleanup model types what the speaker meant, ready to send.
 
 The sets are the datasets' test splits at one revision: the text test split (the transcripts the
 dataset records) and every speech eval collection (recognized here by Utter's own recognizer);
 the two sets with a user's dictionary are also run with it, boosted in the recognizer and sent to
 cleanup. Every model runs through utter-cli, the app's own client, prompt and server settings.
 
-A dictation is ready to send if the output is the final text (spacing aside) or if the grader
-(Gemma 4 26B, prompts/grade.md, calibrated on the maintainer's review) finds only equally valid choices
-differ. Every step resumes: what is on disk is not redone.
+A dictation is ready to send if the output is the final text (spacing aside) or if the judge
+(Gemma 4 26B, prompts/judge.md, calibrated on the maintainer's review) finds only equally valid choices
+differ: it reads the outputs, it writes none. Every step resumes: what is on disk is not redone.
 
-    utter-grade --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf [--llm-url URL]
+    utter-eval --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf [--judge-url URL]
 """
 
 from __future__ import annotations
@@ -178,16 +178,16 @@ def _same(a: str, b: str) -> bool:
     return " ".join(a.split()) == " ".join(b.split())
 
 
-def judge(eval_set: str, run: str, chat: llm.Chat, grader: str, workers: int) -> dict:
-    """Grades the outputs not graded yet; returns ready-to-send share, count and causes."""
+def ready_to_send(eval_set: str, run: str, chat: llm.Chat, judge: str, workers: int) -> dict:
+    """Judges the outputs not judged yet; returns ready-to-send share, count and causes."""
     gold = {r["id"]: r["final_text"] for r in manifest(eval_set)}
     outputs = common.read_jsonl(results("llm", run, eval_set))
-    path = results("judge", f"{run}--{grader}", eval_set)
+    path = results("judge", f"{run}--{judge}", eval_set)
     verdicts = {v["id"]: v for v in common.read_jsonl(path)}
     todo = [o for o in outputs if o["id"] not in verdicts and not _same(o["output"], gold[o["id"]])]
-    system = common.prompt("grade")
+    system = common.prompt("judge")
 
-    def grade_one(o: dict) -> dict:
+    def judge_one(o: dict) -> dict:
         user = f"Heard: {o['input']}\n\nMeant: {gold[o['id']]}\n\nTyped: {o['output']}"
         reply = chat.ask(system, user, VERDICT, seed=0, max_tokens=600)
         return {
@@ -196,7 +196,7 @@ def judge(eval_set: str, run: str, chat: llm.Chat, grader: str, workers: int) ->
         }
 
     with ThreadPoolExecutor(workers) as pool:
-        for v in pool.map(grade_one, todo):
+        for v in pool.map(judge_one, todo):
             common.write_jsonl(path, [v], append=True)
             verdicts[v["id"]] = v
     ready = sum(
@@ -226,19 +226,19 @@ def _models(specs: list[str]) -> dict[str, Path]:
 
 def main(
     model: list[str] = typer.Option(..., help="NAME=PATH.gguf, repeatable: the models to compare."),
-    llm_url: str = typer.Option(
-        "", help="The grader: an OpenAI-style server (vLLM); else the local 26B."
+    judge_url: str = typer.Option(
+        "", help="The judge: an OpenAI-style server (vLLM); else the local 26B."
     ),
-    grader: str = typer.Option(
-        "", help="The grader's name in results (default: vllm-26b or local-26b)."
+    judge: str = typer.Option(
+        "", help="The judge's name in results (default: vllm-26b or local-26b)."
     ),
-    workers: int = typer.Option(8, help="Grading requests at once (64 suits vLLM)."),
+    workers: int = typer.Option(8, help="Judge requests at once (64 suits vLLM)."),
     text_ref: str = typer.Option(None, help="dictation-to-text revision (default: main)."),
     speech_ref: str = typer.Option(None, help="dictation-speech revision (default: main)."),
 ) -> None:
     """How often each cleanup model types what the speaker meant, on the datasets' test splits."""
     models = _models(model)
-    grader = grader or ("vllm-26b" if llm_url else "local-26b")
+    judge = judge or ("vllm-26b" if judge_url else "local-26b")
     sets = make_sets(text_ref, speech_ref)
     # (set, recognizer run, run suffix, dictionary) for every column of the table.
     runs: list[tuple[str, str, str, Path | None]] = [(TEXT_SET, "dictated", "", None)]
@@ -253,17 +253,17 @@ def main(
             clean(s, name + suffix, gguf, asr_run, dictionary)
 
     lines = ["| Set | n | " + " | ".join(models) + " |", "|---|---|" + "---|" * len(models)]
-    with llm.connect(llm_url, slots=workers) as chat:
+    with llm.connect(judge_url, slots=workers) as chat:
         for s, _, suffix, dictionary in runs:
             cells, n = [], 0
             for name in models:
-                result = judge(s, name + suffix, chat, grader, workers)
+                result = ready_to_send(s, name + suffix, chat, judge, workers)
                 cells.append(f"{result['ready_pct']:.1f}")
                 n = result["n"]
             label = f"{s} + dictionary" if dictionary else s
             lines.append(f"| {label} | {n} | " + " | ".join(cells) + " |")
     table = "Ready to send %:\n\n" + "\n".join(lines) + "\n"
-    out = common.eval_dir() / "results" / f"grade--{'--'.join(models)}--{grader}.md"
+    out = common.eval_dir() / "results" / f"eval--{'--'.join(models)}--{judge}.md"
     out.write_text(table, encoding="utf-8", newline="\n")
     print(table)
     print(f"written to {out}")
