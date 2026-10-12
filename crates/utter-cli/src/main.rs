@@ -3,7 +3,7 @@
 //! - `setup`: download, verify and install the runtime components.
 //! - `doctor`: show what is installed.
 //! - `transcribe <wav>...`: print each file's transcript and per-stage timings.
-//! - `bench`: run the core's recognizer over eval sets (made by `utter-grade` and `utter-bench
+//! - `bench`: run the core's recognizer over eval sets (made by `utter-eval` and `utter-bench
 //!   fetch`), and write results in the format the tools score, so the Rust runtime is
 //!   measured by the same yardstick as the Python candidates.
 
@@ -177,7 +177,7 @@ enum Command {
         device: Option<String>,
     },
     /// Run cleanup cases through Utter's llama-server on a GGUF model and write the outputs
-    /// (utter-grade writes the cases and scores the outputs).
+    /// (utter-eval writes the cases and scores the outputs).
     LlmBench {
         /// The GGUF model file.
         #[arg(long)]
@@ -241,7 +241,7 @@ enum Command {
     },
     /// Transcribe 16 kHz mono WAV files.
     Transcribe { files: Vec<PathBuf> },
-    /// Transcribe eval sets and write results for utter-grade and utter-bench.
+    /// Transcribe eval sets and write results for utter-eval and utter-bench.
     Bench {
         /// Comma-separated set names (default: every English set).
         #[arg(long, default_value = "")]
@@ -956,7 +956,7 @@ fn bench(asr: &mut ParakeetTdt, sets: &str, limit: usize, name: &str, pacing: Pa
         sets.split(',').map(str::to_owned).collect()
     };
     if set_names.is_empty() {
-        bail!("no eval sets under {}: run utter-grade or utter-bench fetch", eval.display());
+        bail!("no eval sets under {}: run utter-eval or utter-bench fetch", eval.display());
     }
     let out_dir = eval.join("results").join("asr").join(name);
     std::fs::create_dir_all(&out_dir)?;

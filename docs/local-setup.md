@@ -8,7 +8,7 @@ How the development machine is laid out. Tai's choice (2026-10-09): downloads go
 |---|---|---|
 | Models under evaluation (Python tools) | `C:\Users\Tai\.cache\huggingface\hub` | The standard Hugging Face cache, shared with other projects. Never committed. |
 | Utter's runtime components (incl. shipped models) | `C:\Users\Tai\AppData\Local\Utter_dev\runtime\<id>-<version>\` | Installed by `utter-cli setup` from `crates/utter-runtime/components.json`. |
-| Eval sets | `C:\Users\Tai\AppData\Local\Utter_dev\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl` (`utter-grade` makes them from the datasets' test splits; `utter-bench fetch` the public ones). Override the root with `UTTER_DATA_DIR`. |
+| Eval sets | `C:\Users\Tai\AppData\Local\Utter_dev\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl` (`utter-eval` makes them from the datasets' test splits; `utter-bench fetch` the public ones). Override the root with `UTTER_DATA_DIR`. |
 | Eval results | `C:\Users\Tai\AppData\Local\Utter_dev\eval\results\` | `asr/`, `llm/`, `score/`, `judge/` per run and set, and the comparison reports. |
 | Data batches | `C:\Users\Tai\AppData\Local\Utter_dev\data\<batch>\` | `utter-data`'s working files for a batch of new data, until it is published. |
 | Training runs | `C:\Users\Tai\AppData\Local\Utter_dev\train\<run>\` | `utter-train`: the data it trained on (with its dataset revision) and the adapter and merged model. |
@@ -29,7 +29,7 @@ per job, each with `--help`:
 |---|---|
 | `utter-data` | grows the published datasets, a batch at a time: passages, spoken versions, speech, transcripts, text rows, then build, check and upload |
 | `utter-train` | fine-tunes a cleanup model on the text dataset (at a pinned revision, with the shipped recipe) and exports its Q4_0 GGUF |
-| `utter-grade` | grades cleanup models on the datasets' test splits: how often each types what the speaker meant |
+| `utter-eval` | evaluates cleanup models on the datasets' test splits: how often each types what the speaker meant, with Gemma 4 26B as the judge |
 | `utter-bench` | speech models on public test sets, by word error rate |
 | `utter-speech` | rebuilds the speech model Utter ships: ONNX export, 8-bit encoder, check against Transformers |
 
@@ -57,7 +57,7 @@ Linux build of `utter-cli`, `UTTER_LLAMA_SERVER` at a llama-server built at the 
 
 ```
 cd tools
-uv run utter-grade --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf   # the cleanup eval
+uv run utter-eval --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf   # the cleanup eval
 uv run utter-bench fetch                       # the public speech test sets (300 clips each)
 uv run utter-bench run                         # every speech model on every set it covers
 uv run utter-train --name quality-v3 --base e4b --gpus 2

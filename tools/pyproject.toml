@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-utter-grade = "utter_tools.grade:cli"
+utter-eval = "utter_tools.eval:cli"
 utter-train = "utter_tools.train:cli"
 utter-data = "utter_tools.data.cli:cli"
 utter-bench = "utter_tools.bench:cli"
