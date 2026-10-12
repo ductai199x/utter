@@ -361,7 +361,7 @@ Settings are in `settings.toml`, which the Home window edits and which a person 
    (in the wild, gated). Two gaps have no public data and get sets made for them: Vietnamese–English
    code-switching, and dictation itself (fillers, backtracks, spoken punctuation, Command Mode
    instructions), built as text pairs checked by code. Details: `docs/model-survey.md`.
-   `tools/eval` reports:
+   `utter-eval` reports (tools/):
    - word error rate of recognition;
    - cleanup quality: exact checks where possible (fillers gone, backtrack applied, the
      dictionary obeyed), a judge model only for what code cannot decide;

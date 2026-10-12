@@ -8,91 +8,61 @@ How the development machine is laid out. Tai's choice (2026-10-09): downloads go
 |---|---|---|
 | Models under evaluation (Python tools) | `C:\Users\Tai\.cache\huggingface\hub` | The standard Hugging Face cache, shared with other projects. Never committed. |
 | Utter's runtime components (incl. shipped models) | `C:\Users\Tai\AppData\Local\Utter_dev\runtime\<id>-<version>\` | Installed by `utter-cli setup` from `crates/utter-runtime/components.json`. |
-| Eval clips and manifests | `C:\Users\Tai\AppData\Local\Utter_dev\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl`. Override the root with `UTTER_DATA_DIR`. |
-| Eval results | `C:\Users\Tai\AppData\Local\Utter_dev\eval\results\` | One JSONL per model and set, re-scored by the report commands. |
-| Local model exports | `C:\Users\Tai\AppData\Local\Utter_dev\models\<name>\` | Output of `tools/export/export_parakeet.py`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
+| Eval sets | `C:\Users\Tai\AppData\Local\Utter_dev\eval\<set>\` | 16 kHz mono WAVs plus `manifest.jsonl` (`utter-eval sets` makes them from the datasets' test splits; `utter-eval bench fetch` the public ones). Override the root with `UTTER_DATA_DIR`. |
+| Eval results | `C:\Users\Tai\AppData\Local\Utter_dev\eval\results\` | `asr/`, `llm/`, `score/`, `judge/` per run and set, and the comparison reports. |
+| Data batches | `C:\Users\Tai\AppData\Local\Utter_dev\data\<batch>\` | `utter-data`'s working files for a batch of new data, until it is published. |
+| Training runs | `C:\Users\Tai\AppData\Local\Utter_dev\train\<run>\` | `utter-train run`: the data it trained on (with its dataset revision) and the adapter and merged model. |
+| Local model exports | `C:\Users\Tai\AppData\Local\Utter_dev\models\<name>\` | Output of `utter-speech export`. The published copy is the `parakeet-ultra-onnx` component, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx` (public, CC-BY-4.0). `utter-cli --model-dir` runs a local export instead. |
 | Settings | `C:\Users\Tai\AppData\Local\Utter_dev\settings.toml` | The dictionary, list formatting, microphone and cleanup model. The Home window edits it; a hand edit applies on the next dictation too. Written with every key commented when missing. |
-| Logs | `C:\Users\Tai\AppData\Local\Utter_dev\logs\` | `llama-server.log` |
+| Logs | `C:\Users\Tai\AppData\Local\Utter_dev\logs\` | `utter.log` and `llama-server.log`, rotated at 5 MB (three kept); the setting `keep_logs` turns them off. |
 | Dictation log | `C:\Users\Tai\AppData\Local\Utter_dev\dictations\` | One `<id>.json` per live dictation (every recognizer pass, Bar state, cleanup input and output, timings) and `<id>.wav`. Never leaves the machine. |
 
 The Hugging Face account is `ductai199x`. Its terms were accepted for the gated repos
 `speechcolab/gigaspeech2`, `linhtran92/viet_bud500` and `CohereLabs/cohere-transcribe-03-2026`.
 
-## The tools environment
+## The tools
 
-`tools/` is a uv project (Python 3.12). `uv sync` in `tools/` installs:
-- the eval tooling (Hugging Face hub, pyarrow, soundfile, soxr, jiwer);
+`tools/` is a uv project (Python 3.12): `uv sync` in `tools/` installs it with four commands, one
+per job, each with `--help`:
+
+| Command | Does |
+|---|---|
+| `utter-data` | grows the published datasets, a batch at a time: passages, spoken versions, speech, transcripts, text rows, then build, audit and upload |
+| `utter-train` | fine-tunes a cleanup model on the text dataset (at a pinned revision, with the shipped recipe) and exports its Q4_0 GGUF |
+| `utter-eval` | grades cleanup models on the datasets' test splits (`utter-eval run`), and speech models on public test sets (`utter-eval bench`) |
+| `utter-speech` | rebuilds the speech model Utter ships: ONNX export, 8-bit encoder, check against Transformers |
+
+The two datasets on the Hub are the standard every command reads and writes
+(`tools/utter_tools/schema.py`). The environment holds:
+- the tools themselves (Hugging Face hub, pyarrow, soundfile, soxr, jiwer, rapidfuzz, typer);
 - `runtime`: onnxruntime-gpu with the CUDA 13 and cuDNN 9 DLLs from the nvidia wheels, plus
   onnx-asr, the Python reference for NeMo ONNX models;
 - `models`: PyTorch (CUDA 13.0 build, from PyTorch's index) and Transformers, the official
-  runtimes of the speech models under test.
+  runtimes of the speech models the bench compares, and ONNX for the export.
 
 Set `PYTHONUTF8=1` on Windows: Vietnamese text does not survive the console's default code
 page.
 
-Speech synthesis engines and model training each have their own uv project (`tools/tts/<engine>/`,
-`tools/train/`), because they pin their own PyTorch and Transformers. Their environments live
-on C: (D: is nearly full), selected per command:
+Speech synthesis and training have their own uv projects under `tools/envs/` (`tts-kokoro`,
+`tts-chatterbox`, `train`), because they pin their own PyTorch and Transformers; the commands
+above start them (`uv run --project tools/envs/<name>`). Their environments live on C: (D: is
+nearly full): set `UV_PROJECT_ENVIRONMENT` per project when running one by hand.
 
-```
-cd tools/tts/kokoro
-UV_PROJECT_ENVIRONMENT=C:/Users/Tai/AppData/Local/Utter_dev/envs/tts-kokoro uv run python synth.py ...
-```
-
-The final-text eval (docs/plan-final-text.md) runs in order: `eval.finaltext.sources`
-(passages), `eval.finaltext.spoken` (spoken forms), `eval.finaltext.screen` (gold quality),
-`tools/tts/<engine>/synth.py` (audio), then `eval.finaltext.report asr`, `cleanup` and `score`.
-
-## The Rust core: standalone
-
-Utter depends on nothing installed on the machine except the GPU driver (Tai, 2026-10-09).
-Everything else is a runtime component pinned in `crates/utter-runtime/components.json` to a
-version, a publisher's URL and that publisher's SHA-256:
-
-| Component | Source | What for |
-|---|---|---|
-| onnxruntime-gpu 1.31.0 | Microsoft's GitHub release | The speech model |
-| cuda-runtime 13.4 (cudart, cuBLAS) | ggml-org's llama.cpp release | Both onnxruntime and llama.cpp |
-| cudnn 9.27 | NVIDIA's PyPI package | onnxruntime's convolutions |
-| llama-cpp b11535 (llama-server) | ggml-org's GitHub release | The language model, as Utter's child process |
-| parakeet-ultra-onnx-fp16 3f7de939 (1.4 GB) | Hugging Face `ductai199x/utter-parakeet-ultra-onnx`, `fp16/` | The speech model (half-precision encoder) |
-| utter-quality dc947f0c (5.2 GB) | Hugging Face `ductai199x/utter`, `utter-quality-v1-q4_0.gguf` | The cleanup model, Quality (default): Gemma 4 E4B fine-tuned (run ft6) |
-| gemma4-e4b-qat 4b4a2c1d (5.2 GB) | Hugging Face `google/gemma-4-E4B-it-qat-q4_0-gguf` | The prompted E4B, kept for evals: optional |
-| gemma4-26b-a4b-qat d1c082be (14.4 GB) | Hugging Face `google/gemma-4-26B-A4B-it-qat-q4_0-gguf` | The prompted 26B, the eval reference: optional, `utter-cli setup gemma4-26b-a4b-qat` |
-
-`utter-cli setup` downloads, verifies and installs them, and the speech model (2.6 GB, from Hugging Face `ductai199x/utter-parakeet-ultra-onnx`), into
-`C:\Users\Tai\AppData\Local\Utter_dev\runtime\` (about 8.2 GB for the default tier, most of it the two models); `utter-cli doctor` lists them. The same
-path serves development and release; nothing is loaded from `tools/.venv`, LM Studio or any
-other application. Checked by running with a PATH holding only Windows' own folders.
-
-llama-server runs as Utter's child process and is tied to it with a Windows job object: if
-Utter crashes or is killed, Windows ends the server too (checked by force-killing the CLI
-mid-request). Its log is `C:\Users\Tai\AppData\Local\Utter_dev\logs\llama-server.log`.
-
-`UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build. It is
-also how the recognizer runs on Linux before Linux components exist (FLAME, 2026-10-10;
-transcripts identical to Windows on 100 of 100 clips):
-- build: `cargo build --release -p utter-cli`. The microphone crate needs ALSA headers:
-  without root, unpack `libasound2-dev` (`curl` the .deb matching the installed libasound2
-  from archive.ubuntu.com, `dpkg -x`) into `~/sysroot`, link `libasound.so` to the system's
-  `libasound.so.2`, and build with `PKG_CONFIG_SYSROOT_DIR=~/sysroot`
-  `PKG_CONFIG_PATH=~/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig`;
-- onnxruntime and CUDA: a venv with `onnxruntime-gpu==1.31.0` and the `nvidia-*-cu12` libraries;
-  `UTTER_ORT_DYLIB=<venv>/.../onnxruntime/capi/libonnxruntime.so.1.31.0`,
-  `LD_LIBRARY_PATH` = the `nvidia/*/lib` folders;
-- models: copy the installed `parakeet-ultra-onnx-fp16-*` and `silero-vad-*` folders into
-  `$UTTER_DATA_DIR/runtime/`.
+On Linux (FLAME), where Utter has no runtime components yet: `UTTER_CLI` points the eval at a
+Linux build of `utter-cli`, `UTTER_LLAMA_SERVER` at a llama-server built at the runtime's tag
+(b11535), and `UTTER_LLAMA_BUILD` the export at that llama.cpp tree.
 
 ## Commands
 
 ```
 cd tools
-uv run python -m eval.fetch_sets               # fetch every eval set (300 clips each)
-uv run python -m eval.asr_bench run            # every Python candidate on every set it covers
-uv run python -m eval.asr_bench report         # re-score what is on disk
-uv run python -m eval.asr_bench compare A B    # paired bootstrap of two models' WER
-uv run python -m export.export_parakeet        # export parakeet-ultra for the Rust core
-uv run python -m export.check_parakeet         # check the export against Transformers
+uv run utter-eval run --model quality-v2=PATH.gguf --model quality-v1=PATH.gguf   # the cleanup eval
+uv run utter-eval bench fetch                  # the public speech test sets (300 clips each)
+uv run utter-eval bench run                    # every speech model on every set it covers
+uv run utter-eval bench compare A B            # paired bootstrap of two models' WER
+uv run utter-train run quality-v3 --base e4b --gpus 2
+uv run utter-data new my-batch --collection corpus-v3 --seed 7
+uv run utter-speech export                     # export parakeet-ultra for the Rust core
 
 cd ..
 cargo test --workspace --release
@@ -129,12 +99,10 @@ an injected Right Ctrl start one, so a script can hold the key (SendInput) and c
 paste, History and the Bar. Nothing is played. With `UTTER_DATA_DIR` pointing at a folder of
 its own it never touches the real History or settings.
 
-**The published datasets** (private on the Hub): `ductai199x/dictation-to-text`, the cleanup
-training corpus (`tools/publish/text.py`), and `ductai199x/dictation-speech`, its audio and the
-eval sets (`tools/publish/voice.py`, run where each split's audio is: the test sets here, the
-training audio on FLAME's `/workspace/tai/utter/data-utter/eval`). `publish.card` writes the
-cards, `publish.upload` uploads. Training clips whose audio was lost are spoken again by
-`tools/tts/kokoro/respeak.py`.
+**The published datasets** (public on the Hub): `ductai199x/dictation-to-text`, the cleanup
+models' training and test pairs, and `ductai199x/dictation-speech`, the speech behind them and the
+eval sets. They grow only through `utter-data`: a batch is built against the Hub's current
+revisions, audited row by row, and uploaded only after a clean audit and an explicit `--yes`.
 
 **Run Utter from a normal terminal, not from inside a packaged app.** The Claude desktop app
 is an MSIX package: a folder that a process started from it creates under `%LOCALAPPDATA%`

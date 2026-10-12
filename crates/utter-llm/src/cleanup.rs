@@ -11,9 +11,9 @@ use crate::{LlmError, Message, ServerOptions};
 /// The cleanup system prompt.
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
 
-/// The system prompt the fine-tuned cleanup model is trained with (tools/train,
-/// eval.finaltext.trainset --system): short, since the rules are in its weights. That model
-/// must be sent exactly this.
+/// The system prompt the fine-tuned cleanup models are trained with (every row of the
+/// dictation-to-text dataset; tools/utter_tools/data/pairs.py): short, since the rules are in
+/// their weights. Those models must be sent exactly this.
 pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
 
 /// Which cleanup model runs, chosen by measurement (docs/eval-results.md); all run with
@@ -138,7 +138,7 @@ pub const BEFORE_CHARS: usize = 200;
 pub const AFTER_CHARS: usize = 50;
 
 /// [`messages`] with another system prompt and a context: the one place the request format is
-/// defined (tools/eval/finaltext/trainset.py mirrors it for training).
+/// defined (tools/utter_tools/data/pairs.py mirrors it for training).
 pub fn messages_with(system: &str, transcript: &str, dictionary: &[String], ctx: &Context) -> [Message; 2] {
     let mut user = String::new();
     if let Some(app) = &ctx.app {

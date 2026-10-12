@@ -1,6 +1,6 @@
 //! The Rust front end against Transformers' ParakeetFeatureExtractor.
 //!
-//! Fixtures (`tests/fixtures/`, written by `tools/export/check_parakeet.py --fixture`): a
+//! Fixtures (`tests/fixtures/`, written by `utter-speech check --fixture`): a
 //! synthetic 1.37 s clip (chirp, tone, quiet noise; an odd length), the features Transformers
 //! computed for it, and the mel filterbank the export wrote.
 
