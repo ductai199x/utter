@@ -25,7 +25,7 @@ def main(
 ) -> None:
     api = HfApi()
     api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
-    patterns = only or ["README.md", "data/**", "extra/**"]
+    patterns = only or ["README.md", "data/**"]
     api.upload_folder(
         repo_id=repo,
         repo_type="dataset",
