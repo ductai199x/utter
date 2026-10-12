@@ -739,7 +739,7 @@ impl Pipeline {
         let thread = std::thread::Builder::new()
             .name("utter-keys".into())
             .spawn(move || {
-                // Owns the listener; dropping it removes the hook. Only one hook can exist, so
+                // Owns the listener; dropping it stops listening. Only one listener can exist, so
                 // it must be gone by the time run returns (a Retry starts a new pipeline).
                 while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
                     if let Some((action, at)) = listener.recv_timeout(Duration::from_millis(100))
@@ -750,7 +750,7 @@ impl Pipeline {
                 }
             })
             .map_err(|e| hotkey::HotkeyError(e.to_string()))?;
-        // However run ends (an error included), the key thread stops and the hook goes with it.
+        // However run ends (an error included), the key thread stops and the listener goes with it.
         struct StopKeys(std::sync::Arc<std::sync::atomic::AtomicBool>, Option<std::thread::JoinHandle<()>>);
         impl Drop for StopKeys {
             fn drop(&mut self) {
