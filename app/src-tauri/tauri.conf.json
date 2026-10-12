@@ -32,10 +32,10 @@
         "label": "home",
         "url": "home.html",
         "title": "Utter",
-        "width": 880,
-        "height": 600,
-        "minWidth": 640,
-        "minHeight": 440,
+        "width": 1040,
+        "height": 680,
+        "minWidth": 760,
+        "minHeight": 480,
         "center": true,
         "visible": false
       }

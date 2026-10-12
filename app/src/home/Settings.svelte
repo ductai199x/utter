@@ -1,0 +1,515 @@
+<script lang="ts">
+  // The Settings section (docs/ux/home.md, docs/ux/insertion.md "Paste rules", docs/ux/history.md
+  // "Settings → History"). Every change saves at once through `save`; the core applies it on
+  // the next dictation and reports back (`applied`).
+  import Confirm from './Confirm.svelte';
+  import {
+    historyClear,
+    historyCountOlder,
+    historyQuery,
+    openPath,
+    pasteRules,
+    type Applied,
+    type HomeState,
+    type KeepHistory,
+    type Model,
+    type PasteKeep,
+    type PasteOverride,
+    type PasteRules,
+    type PasteWith,
+    type Settings,
+  } from './core';
+
+  let {
+    home,
+    settings,
+    applied,
+    saveError,
+    save,
+  }: {
+    home: HomeState | null;
+    settings: Settings | null;
+    applied: Partial<Record<Applied['what'], Applied>>;
+    saveError: string;
+    save: (next: Settings) => Promise<void>;
+  } = $props();
+
+  /** A card size people know: bytes in whole GB, rounded up. */
+  const cardGb = (bytes: number) => Math.ceil(bytes / 2 ** 30);
+  /** GPU memory a model needs, to one decimal. */
+  const needGb = (model: Model) => ((home?.gpuNeed[model] ?? 0) / 1e9).toFixed(1);
+  // Why the quality model cannot be chosen, if it cannot.
+  const qualityBlocked = $derived(
+    home && !home.qualityFits ? `needs a graphics card with ${cardGb(home.cardNeed.quality)} GB of memory.` : '',
+  );
+  // The two models: Quality, the bigger one, and Light, once its model is published.
+  const MODELS = $derived(
+    (
+      [
+        ['quality', 'Quality', `The bigger model, most accurate: about ${needGb('quality')} GB of GPU memory.`],
+        [
+          'light',
+          'Light',
+          `The smaller model, for ${cardGb(home?.cardNeed.light ?? 0)} GB graphics cards: about ${needGb('light')} GB.`,
+        ],
+      ] as const
+    ).filter(([id]) => id !== 'light' || home?.lightAvailable),
+  );
+  /** "Downloads 3.9 GB" when choosing `model` needs a download first. */
+  function downloadNote(model: Model): string | undefined {
+    const bytes = home?.downloadBytes[model] ?? 0;
+    return bytes > 0 ? `Downloads ${(bytes / 1e9).toFixed(1)} GB` : undefined;
+  }
+
+  // Paste rules ----------------------------------------------------------------------------
+
+  const WITH: [PasteWith, string][] = [
+    ['ctrl-v', 'Ctrl+V'],
+    ['ctrl-shift-v', 'Ctrl+Shift+V'],
+    ['shift-insert', 'Shift+Insert'],
+    ['type', 'Type it out'],
+  ];
+  const KEEP: [PasteKeep, string][] = [
+    ['normal', 'Normal'],
+    ['3s', '3 seconds'],
+    ['5s', '5 seconds'],
+    ['leave', 'Leave it there'],
+  ];
+  let rules = $state<PasteRules | null>(null);
+  $effect(() => {
+    const overrides = settings?.paste ?? [];
+    void pasteRules($state.snapshot(overrides)).then((r) => (rules = r));
+  });
+
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+  /** One row per app: programs of the same app (Remote Desktop's two) share a rule. */
+  interface Group {
+    name: string;
+    apps: string[];
+    with: PasteWith;
+    keep: PasteKeep;
+    default: [PasteWith, PasteKeep] | null;
+  }
+  const groups = $derived.by(() => {
+    const out: Group[] = [];
+    for (const r of rules?.rules ?? []) {
+      const g = out.find(
+        (g) => g.name === r.name && g.with === r.with && g.keep === r.keep && `${g.default}` === `${r.default}`,
+      );
+      if (g) g.apps.push(r.app);
+      else out.push({ name: r.name, apps: [r.app], with: r.with, keep: r.keep, default: r.default });
+    }
+    return out;
+  });
+  const edited = (g: Group) => !!g.default && (g.default[0] !== g.with || g.default[1] !== g.keep);
+  // Utter's untouched defaults stay folded away unless asked for; the person's rules show.
+  let showDefaults = $state(false);
+  const shownGroups = $derived(groups.filter((g) => showDefaults || !g.default || edited(g)));
+  const folded = $derived(groups.length - groups.filter((g) => !g.default || edited(g)).length);
+
+  function setRule(g: Group, rule: Pick<PasteOverride, 'with' | 'keep'>) {
+    if (!settings) return;
+    const others = settings.paste.filter((o) => !g.apps.some((a) => same(o.app, a)));
+    // Back at Utter's default: no entry, so a better default in a later version still arrives.
+    const isDefault = g.default && g.default[0] === rule.with && g.default[1] === rule.keep;
+    void save({ ...settings, paste: isDefault ? others : [...others, ...g.apps.map((app) => ({ app, ...rule }))] });
+  }
+
+  function removeRule(g: Group) {
+    if (!settings) return;
+    void save({ ...settings, paste: settings.paste.filter((o) => !g.apps.some((a) => same(o.app, a))) });
+  }
+
+  function addApp(exe: string) {
+    if (!settings || !exe || rules?.rules.some((r) => same(r.app, exe))) return;
+    void save({ ...settings, paste: [...settings.paste, { app: exe, with: 'ctrl-v', keep: 'normal' }] });
+  }
+
+  // History ------------------------------------------------------------------------------
+
+  const KEEP_HISTORY: [KeepHistory, string][] = [
+    ['forever', 'Forever'],
+    ['30-days', '30 days'],
+    ['24-hours', '24 hours'],
+    ['off', 'Off'],
+  ];
+  let confirm = $state<{ title: string; message: string; action: string; run: () => void } | null>(null);
+
+  async function changeKeep(keep: KeepHistory, select: HTMLSelectElement) {
+    if (!settings) return;
+    const current = settings.keep_history;
+    const order = KEEP_HISTORY.map(([k]) => k);
+    const apply = () => settings && void save({ ...settings, keep_history: keep });
+    // Keeping longer deletes nothing; keeping less asks first, if anything would go.
+    const n = order.indexOf(keep) > order.indexOf(current) ? await historyCountOlder(keep) : 0;
+    if (n === 0 && keep !== 'off') return apply();
+    // Until confirmed the control shows what is stored.
+    select.value = current;
+    const plural = `${n} ${n === 1 ? 'dictation' : 'dictations'}`;
+    confirm =
+      keep === 'off'
+        ? {
+            title: 'Turn History off?',
+            message: n ? `This deletes all ${plural} and keeps no new ones.` : 'New dictations will not be kept.',
+            action: n ? 'Delete and turn off' : 'Turn off',
+            run: apply,
+          }
+        : {
+            title: 'Keep less history?',
+            message: `Delete ${plural} older than ${KEEP_HISTORY.find(([k]) => k === keep)![1]}?`,
+            action: 'Delete',
+            run: apply,
+          };
+  }
+
+  async function clearHistory() {
+    const { total } = await historyQuery({
+      search: '',
+      favorites: false,
+      inserted: null,
+      app: null,
+      since: null,
+      until: null,
+      offset: 0,
+      limit: 1,
+    });
+    if (total === 0) return;
+    confirm = {
+      title: 'Clear history?',
+      message: `Delete all ${total} ${total === 1 ? 'dictation' : 'dictations'}? This cannot be undone.`,
+      action: 'Delete all',
+      run: () => void historyClear(),
+    };
+  }
+</script>
+
+<div class="page">
+  <div class="column">
+    <h1>Settings</h1>
+    <p class="lede">Changes apply to your next dictation.</p>
+
+    {#if home?.error}
+      <div class="banner" role="alert">
+        <span>{home.error}</span>
+        <button onclick={() => openPath('settings')}>Open file</button>
+      </div>
+    {/if}
+    {#if saveError}<div class="banner" role="alert"><span>{saveError}</span></div>{/if}
+
+    {#if settings && home}
+      <h2>General</h2>
+      <div class="row">
+        <div class="label">
+          <label for="login">Start with Windows</label>
+          <span class="desc">Utter starts in the tray when you sign in.</span>
+        </div>
+        <button
+          id="login"
+          class="switch"
+          role="switch"
+          aria-checked={settings.start_at_login}
+          aria-label="Start with Windows"
+          onclick={() => settings && save({ ...settings, start_at_login: !settings.start_at_login })}
+          ><span></span></button
+        >
+      </div>
+
+      <h2>Dictation</h2>
+      <div class="row">
+        <div class="label">
+          <label for="lists">Format lists</label>
+          <span class="desc">Spoken lists become bullet points.</span>
+        </div>
+        <button
+          id="lists"
+          class="switch"
+          role="switch"
+          aria-checked={settings.lists}
+          aria-label="Format lists"
+          onclick={() => settings && save({ ...settings, lists: !settings.lists })}><span></span></button
+        >
+      </div>
+      <div class="row">
+        <div class="label">
+          <label for="mic">Microphone</label>
+          <span class="desc">Utter listens to this one.</span>
+          {#if applied.microphone?.status === 'error'}<span class="row-error">{applied.microphone.error}</span>{/if}
+        </div>
+        <select
+          id="mic"
+          value={settings.microphone}
+          onchange={(e) => settings && save({ ...settings, microphone: e.currentTarget.value })}
+        >
+          <option value="">System default</option>
+          {#each home.microphones as m (m)}<option value={m}>{m}</option>{/each}
+          {#if settings.microphone && !home.microphones.includes(settings.microphone)}
+            <option value={settings.microphone}>{settings.microphone} (not connected)</option>
+          {/if}
+        </select>
+      </div>
+
+      <h2>Cleanup model</h2>
+      <div class="row">
+        <div class="label">
+          <span class="label-text" id="model-label">Model</span>
+          <span class="desc">{MODELS.find(([id]) => id === settings?.model)?.[2] ?? ''}</span>
+          {#if applied.model?.status === 'loading'}
+            <span class="row-status"><span class="spinner" aria-hidden="true"></span>Loading...</span>
+          {:else if applied.model?.status === 'error'}
+            <span class="row-error">{applied.model.error}</span>
+          {/if}
+        </div>
+        <div class="segmented" role="radiogroup" aria-labelledby="model-label">
+          {#each MODELS as [id, label] (id)}
+            {@const blocked = id === 'quality' ? qualityBlocked : ''}
+            <button
+              role="radio"
+              aria-checked={settings.model === id}
+              disabled={!!blocked}
+              title={blocked ? `Quality ${blocked}` : downloadNote(id)}
+              onclick={() => settings && save({ ...settings, model: id })}>{label}</button
+            >
+          {/each}
+        </div>
+      </div>
+      {#if qualityBlocked && settings.model !== 'quality'}<p class="hint">Quality: {qualityBlocked}</p>{/if}
+
+      <h2>Typing</h2>
+      <p class="hint section-hint">
+        Most apps paste with Ctrl+V and read the clipboard at once. For one that doesn't, set how it pastes.
+      </p>
+      {#if rules}
+        {#if shownGroups.length}
+          <ul class="rules">
+            {#each shownGroups as g (g.apps.join())}
+              <li>
+                <div class="rule-app">
+                  <span class="rule-name">{g.name}</span>
+                  <span class="rule-exe">{g.apps.join(', ')}</span>
+                </div>
+                <select
+                  aria-label="{g.name}: paste with"
+                  value={g.with}
+                  onchange={(e) => setRule(g, { with: e.currentTarget.value as PasteWith, keep: g.keep })}
+                >
+                  {#each WITH as [v, label] (v)}<option value={v}>{label}</option>{/each}
+                </select>
+                <select
+                  aria-label="{g.name}: keep on the clipboard"
+                  value={g.keep}
+                  onchange={(e) => setRule(g, { with: g.with, keep: e.currentTarget.value as PasteKeep })}
+                >
+                  {#each KEEP as [v, label] (v)}<option value={v}>{label}</option>{/each}
+                </select>
+                <span class="rule-tail">
+                  {#if edited(g)}
+                    <button class="link" onclick={() => removeRule(g)}>Reset</button>
+                  {:else if g.default}
+                    <span class="rule-default">Default</span>
+                  {:else}
+                    <button class="remove" aria-label="Remove {g.name}" onclick={() => removeRule(g)}>
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
+                    </button>
+                  {/if}
+                </span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if folded > 0 || showDefaults}
+          <button class="link fold" onclick={() => (showDefaults = !showDefaults)}>
+            {showDefaults ? "Hide Utter's defaults" : `Show Utter's defaults (${folded})`}
+          </button>
+        {/if}
+        <div class="add-app">
+          <select
+            aria-label="Add an app"
+            value=""
+            onchange={(e) => {
+              addApp(e.currentTarget.value);
+              e.currentTarget.value = '';
+            }}
+          >
+            <option value="" disabled>Add an app…</option>
+            {#if rules.lastApp && !rules.rules.some((r) => same(r.app, rules!.lastApp!.exe))}
+              <option value={rules.lastApp.exe}>{rules.lastApp.name} (your last dictation)</option>
+            {/if}
+            {#each rules.openApps.filter((a) => !rules!.rules.some((r) => same(r.app, a.exe))) as a (a.exe)}
+              <option value={a.exe}>{a.name}</option>
+            {/each}
+          </select>
+          <span class="desc">Every other app: Ctrl+V, Normal.</span>
+        </div>
+      {/if}
+
+      <h2>History</h2>
+      <div class="row">
+        <div class="label">
+          <label for="keep">Keep history</label>
+          <span class="desc">Your dictations, kept on this computer only.</span>
+        </div>
+        <select
+          id="keep"
+          value={settings.keep_history}
+          onchange={(e) => void changeKeep(e.currentTarget.value as KeepHistory, e.currentTarget)}
+        >
+          {#each KEEP_HISTORY as [v, label] (v)}<option value={v}>{label}</option>{/each}
+        </select>
+      </div>
+      <div class="row">
+        <div class="label">
+          <span class="label-text">Clear history</span>
+          <span class="desc">Deletes every dictation, favorites too.</span>
+        </div>
+        <button onclick={clearHistory}>Clear…</button>
+      </div>
+
+      <h2>Shortcuts</h2>
+      <div class="row">
+        <div class="label">
+          <span class="label-text">Hold to talk</span>
+          <span class="desc">Hold to dictate. Double-tap for hands-free; Esc cancels.</span>
+        </div>
+        <kbd>Right Ctrl</kbd>
+      </div>
+      <div class="row">
+        <div class="label">
+          <span class="label-text">Paste last dictation</span>
+          <span class="desc">Into the app you are in. Also in the tray menu.</span>
+        </div>
+        <kbd>Alt+Shift+Z</kbd>
+      </div>
+      <div class="row">
+        <div class="label">
+          <span class="label-text">Copy last dictation</span>
+          <span class="desc">To the clipboard, without pasting.</span>
+        </div>
+        <kbd>Alt+Shift+X</kbd>
+      </div>
+    {/if}
+
+    {#if home}
+      <h2>About</h2>
+      <div class="row">
+        <div class="label"><span class="label-text">Version</span></div>
+        <span class="value">{home.version}</span>
+      </div>
+      <div class="row">
+        <div class="label">
+          <span class="label-text">Data folder</span>
+          <span class="desc path">{home.dataDir}</span>
+        </div>
+        <button onclick={() => openPath('data')}>Open</button>
+      </div>
+      <div class="row">
+        <div class="label">
+          <span class="label-text">Settings file</span>
+          <span class="desc path">{home.settingsPath}</span>
+        </div>
+        <button onclick={() => openPath('settings')}>Open</button>
+      </div>
+    {/if}
+  </div>
+</div>
+
+{#if confirm}
+  <Confirm
+    title={confirm.title}
+    message={confirm.message}
+    action={confirm.action}
+    onconfirm={() => {
+      confirm?.run();
+      confirm = null;
+    }}
+    oncancel={() => (confirm = null)}
+  />
+{/if}
+
+<style>
+  .section-hint {
+    margin: 2px 0 10px;
+  }
+  .rules {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--home-border);
+  }
+  .rules li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px 140px 64px;
+    align-items: center;
+    gap: 10px;
+    min-height: 50px;
+    border-bottom: 1px solid var(--home-border);
+  }
+  .rules select {
+    height: 32px;
+    font-size: 13px;
+    padding-left: 10px;
+    background-color: transparent;
+    border-color: transparent;
+    transition:
+      border-color 120ms var(--ease-out),
+      background-color 120ms var(--ease-out);
+  }
+  .rules li:hover select,
+  .rules select:focus-visible {
+    border-color: var(--home-border);
+    background-color: var(--home-surface);
+  }
+  .rule-app {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .rule-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .rule-exe {
+    font: 11.5px/16px 'Cascadia Mono', Consolas, monospace;
+    color: var(--home-faint);
+  }
+  .rule-tail {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .rule-default {
+    font-size: 12px;
+    color: var(--home-faint);
+  }
+  .remove {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: none;
+    display: grid;
+    place-items: center;
+    color: var(--home-muted);
+  }
+  .remove svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+  }
+  .fold {
+    display: block;
+    margin: 12px 0 0;
+    font-size: 13px;
+  }
+  .add-app {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .add-app select {
+    width: 230px;
+  }
+</style>

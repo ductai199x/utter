@@ -5,12 +5,27 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export type Model = 'quality' | 'light';
 
+export type KeepHistory = 'forever' | '30-days' | '24-hours' | 'off';
+export type PasteWith = 'ctrl-v' | 'ctrl-shift-v' | 'shift-insert' | 'type';
+export type PasteKeep = 'normal' | '3s' | '5s' | 'leave';
+
+export interface PasteOverride {
+  app: string;
+  with: PasteWith;
+  keep: PasteKeep;
+}
+
+/** settings.toml, every key: the core fills a missing one with its default, so a page that
+ *  left one out would reset it on every save. */
 export interface Settings {
   dictionary: string[];
   lists: boolean;
   start_at_login: boolean;
   microphone: string;
   model: Model;
+  keep_history: KeepHistory;
+  debug_log: boolean;
+  paste: PasteOverride[];
 }
 
 export interface HomeState {
@@ -46,6 +61,9 @@ const mock: HomeState = {
     start_at_login: true,
     microphone: '',
     model: 'quality',
+    keep_history: 'forever',
+    debug_log: false,
+    paste: [],
   },
   error: null,
   microphones: ['Microphone (Shure MV7)', 'Headset (Jabra Evolve2 65)'],
@@ -89,3 +107,249 @@ export function validTerm(t: string): boolean {
 }
 
 export const MAX_TERMS = 2000;
+
+// History (docs/ux/history.md) ---------------------------------------------------------------
+
+export interface HistoryEntry {
+  id: number;
+  /** Milliseconds since 1970. */
+  at: number;
+  appExe: string;
+  appName: string;
+  text: string;
+  heard: string;
+  inserted: boolean;
+  notInserted?: 'focus-moved' | 'no-window' | 'refused' | 'failed';
+  words: number;
+  speechS: number;
+  readyMs: number;
+  favorite: boolean;
+}
+
+export interface HistoryQuery {
+  search: string;
+  favorites: boolean;
+  inserted: boolean | null;
+  app: string | null;
+  since: number | null;
+  until: number | null;
+  offset: number;
+  limit: number;
+}
+
+export interface HistoryPage {
+  entries: HistoryEntry[];
+  matched: number;
+  total: number;
+  notInserted: number;
+  favorites: number;
+  apps: { exe: string; name: string; count: number }[];
+}
+
+export interface Change {
+  kind: 'same' | 'removed' | 'added';
+  text: string;
+}
+
+export const historyQuery = (query: HistoryQuery) =>
+  inTauri ? invoke<HistoryPage>('history_query', { query }) : Promise.resolve(mockQuery(query));
+export const historyFavorite = (id: number, favorite: boolean) => {
+  if (inTauri) return invoke<void>('history_favorite', { id, favorite });
+  const e = mockHistory.find((e) => e.id === id);
+  if (e) e.favorite = favorite;
+  return Promise.resolve();
+};
+export const historyDelete = (id: number): Promise<HistoryEntry | null> => {
+  if (inTauri) return invoke<HistoryEntry | null>('history_delete', { id });
+  const i = mockHistory.findIndex((e) => e.id === id);
+  return Promise.resolve(i < 0 ? null : mockHistory.splice(i, 1)[0]!);
+};
+export const historyRestore = (entry: HistoryEntry) => {
+  if (inTauri) return invoke<void>('history_restore', { entry });
+  mockHistory.push(clone(entry));
+  mockHistory.sort((a, b) => a.id - b.id);
+  return Promise.resolve();
+};
+export const historyCopy = (text: string) =>
+  inTauri ? invoke<void>('history_copy', { text }) : navigator.clipboard.writeText(text).catch(() => {});
+export const historyChanges = (heard: string, text: string) =>
+  inTauri ? invoke<Change[]>('history_changes', { heard, text }) : Promise.resolve(mockChanges(heard, text));
+export const historyCountOlder = (keep: KeepHistory) =>
+  inTauri
+    ? invoke<number>('history_count_older', { keep })
+    : Promise.resolve(keep === 'forever' ? 0 : keep === 'off' ? mockHistory.length : Math.floor(mockHistory.length / 3));
+export const historyClear = () => {
+  if (inTauri) return invoke<void>('history_clear');
+  mockHistory.length = 0;
+  return Promise.resolve();
+};
+export const onHistoryChanged = (f: () => void): Promise<UnlistenFn> =>
+  inTauri ? listen('history-changed', () => f()) : Promise.resolve(() => {});
+
+// Paste rules (docs/ux/insertion.md) ---------------------------------------------------------
+
+export interface RuleRow {
+  app: string;
+  name: string;
+  with: PasteWith;
+  keep: PasteKeep;
+  /** Utter's default for this program: [with, keep]. */
+  default: [PasteWith, PasteKeep] | null;
+}
+
+export interface PasteRules {
+  rules: RuleRow[];
+  openApps: { exe: string; name: string }[];
+  lastApp: { exe: string; name: string } | null;
+}
+
+export const pasteRules = (overrides: PasteOverride[]) =>
+  inTauri ? invoke<PasteRules>('paste_rules', { overrides }) : Promise.resolve(mockRules(overrides));
+
+// The stand-in core's History: a believable week of dictations, so the page can be reviewed
+// in a browser. Mock only; the app's History comes from history.rs.
+const DAY = 24 * 3600 * 1000;
+const mockHistory: HistoryEntry[] = (() => {
+  const now = Date.now();
+  const rows: [number, string, string, string, string, boolean?, HistoryEntry['notInserted']?][] = [
+    [0.004, 'slack.exe', 'Slack', 'um so the deploy finished and the error rate is back under point one percent', 'The deploy finished, and the error rate is back under 0.1%.'],
+    [0.03, 'chrome.exe', 'Google Chrome', 'can you summarize this thread and pull out the action items for me', 'Can you summarize this thread and pull out the action items for me?'],
+    [0.09, 'Code.exe', 'Visual Studio Code', 'rename the function to parse config and make it return a result instead of panicking', 'Rename the function to parse_config and make it return a Result instead of panicking.'],
+    [0.2, 'OUTLOOK.EXE', 'Outlook (classic)', 'hi maria thanks for the notes i will send the revised draft by thursday no actually friday morning', 'Hi Maria, thanks for the notes. I will send the revised draft by Friday morning.', false, 'focus-moved'],
+    [0.45, 'slack.exe', 'Slack', 'lunch at twelve thirty works for me', 'Lunch at 12:30 works for me.'],
+    [0.9, 'WINWORD.EXE', 'Microsoft Word', 'the results suggest that the model generalizes well to accents it never heard during training although the sample is small', 'The results suggest that the model generalizes well to accents it never heard during training, although the sample is small.'],
+    [1.1, 'Notion.exe', 'Notion', 'groceries eggs milk sourdough and coffee beans', 'Groceries:\n- Eggs\n- Milk\n- Sourdough\n- Coffee beans'],
+    [1.3, 'chrome.exe', 'Google Chrome', 'whats the difference between vulkan and cuda for running llama cpp on amd cards', "What's the difference between Vulkan and CUDA for running llama.cpp on AMD cards?"],
+    [1.6, 'slack.exe', 'Slack', 'sounds good ill take a look after standup', "Sounds good, I'll take a look after standup."],
+    [2.2, 'WindowsTerminal.exe', 'Windows Terminal', 'git log dash dash oneline dash twenty', 'git log --oneline -20'],
+    [2.8, 'ms-teams.exe', 'Microsoft Teams', 'running about five minutes late start without me', 'Running about five minutes late, start without me.'],
+    [3.5, 'Code.exe', 'Visual Studio Code', 'add a test for the case where the history file ends with a torn line', 'Add a test for the case where the history file ends with a torn line.'],
+    [4.4, 'chrome.exe', 'Google Chrome', 'nguyen tai at drexel dot edu', 'Nguyen Tai at drexel.edu', false, 'no-window'],
+    [5.2, 'slack.exe', 'Slack', 'congrats on the launch the new onboarding flow looks great', 'Congrats on the launch! The new onboarding flow looks great.'],
+    [6.1, 'WINWORD.EXE', 'Microsoft Word', 'in summary we recommend shipping the light model as the default for cards with four gigabytes', 'In summary, we recommend shipping the Light model as the default for cards with 4 GB.'],
+  ];
+  // The rows are newest first; ids follow time, so the newest has the highest. Kept oldest first.
+  return rows
+    .map(([days, appExe, appName, heard, text, inserted = true, notInserted], i) => ({
+    id: rows.length - i,
+    at: now - days * DAY,
+    appExe,
+    appName,
+    text,
+    heard,
+    inserted,
+    notInserted,
+    words: text.split(/\s+/).length,
+    speechS: Math.round(heard.split(' ').length * 3.2) / 10,
+    readyMs: 140 + ((i * 37) % 120),
+    favorite: i === 5 || i === 2,
+  }))
+    .reverse();
+})();
+
+const fold = (s: string) =>
+  s
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase();
+
+function mockQuery(q: HistoryQuery): HistoryPage {
+  const needle = fold(q.search.trim());
+  const all = [...mockHistory].reverse();
+  const matching = all.filter(
+    (e) =>
+      (!q.favorites || e.favorite) &&
+      (q.inserted === null || e.inserted === q.inserted) &&
+      (!q.app || e.appExe === q.app) &&
+      (q.since === null || e.at >= q.since) &&
+      (q.until === null || e.at < q.until) &&
+      (!needle || fold(e.text).includes(needle) || fold(e.heard).includes(needle)),
+  );
+  const apps = new Map<string, { exe: string; name: string; count: number }>();
+  for (const e of mockHistory) {
+    const a = apps.get(e.appExe) ?? { exe: e.appExe, name: e.appName, count: 0 };
+    a.count++;
+    apps.set(e.appExe, a);
+  }
+  return clone({
+    entries: matching.slice(q.offset, q.offset + (q.limit || 50)),
+    matched: matching.length,
+    total: mockHistory.length,
+    notInserted: mockHistory.filter((e) => !e.inserted).length,
+    favorites: mockHistory.filter((e) => e.favorite).length,
+    apps: [...apps.values()].sort((a, b) => b.count - a.count),
+  });
+}
+
+/** The mock's stand-in for history::changes (the same rule: words, case and punctuation aside). */
+function mockChanges(heard: string, text: string): Change[] {
+  const a = heard.split(/\s+/).filter(Boolean);
+  const b = text.split(/\s+/).filter(Boolean);
+  const key = (w: string) => fold(w).replace(/[^\p{L}\p{N}]/gu, '');
+  const ka = a.map(key);
+  const kb = b.map(key);
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      lcs[i]![j] = ka[i] && ka[i] === kb[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+  const out: Change[] = [];
+  const push = (kind: Change['kind'], w: string) => {
+    const last = out[out.length - 1];
+    if (last && last.kind === kind) last.text += ` ${w}`;
+    else out.push({ kind, text: w });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && ka[i] && ka[i] === kb[j]) {
+      push('same', b[j]!);
+      i++;
+      j++;
+    } else if (i < a.length && (j === b.length || lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) push('removed', a[i++]!);
+    else {
+      push(kb[j] ? 'added' : 'same', b[j]!);
+      j++;
+    }
+  }
+  return out;
+}
+
+const MOCK_DEFAULTS: [string, string, PasteWith, PasteKeep][] = [
+  ['mintty.exe', 'Git Bash (mintty)', 'shift-insert', 'normal'],
+  ['putty.exe', 'PuTTY', 'shift-insert', 'normal'],
+  ['alacritty.exe', 'Alacritty', 'ctrl-shift-v', 'normal'],
+  ['wezterm-gui.exe', 'WezTerm', 'ctrl-shift-v', 'normal'],
+  ['WINWORD.EXE', 'Microsoft Word', 'ctrl-v', '3s'],
+  ['OUTLOOK.EXE', 'Outlook (classic)', 'ctrl-v', '3s'],
+  ['olk.exe', 'Outlook', 'ctrl-v', '3s'],
+  ['WhatsApp.exe', 'WhatsApp', 'ctrl-v', '3s'],
+  ['mstsc.exe', 'Remote Desktop', 'ctrl-v', '5s'],
+  ['msrdc.exe', 'Remote Desktop', 'ctrl-v', '5s'],
+  ['wfica32.exe', 'Citrix Workspace', 'ctrl-v', '5s'],
+  ['CDViewer.exe', 'Citrix Workspace', 'ctrl-v', '5s'],
+  ['TeamViewer.exe', 'TeamViewer', 'ctrl-v', '5s'],
+  ['vncviewer.exe', 'VNC Viewer', 'ctrl-v', '5s'],
+];
+
+function mockRules(overrides: PasteOverride[]): PasteRules {
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const rules: RuleRow[] = MOCK_DEFAULTS.map(([app, name, w, k]) => {
+    const mine = overrides.find((o) => same(o.app, app));
+    return { app, name, with: mine?.with ?? w, keep: mine?.keep ?? k, default: [w, k] };
+  });
+  for (const o of overrides) {
+    if (!rules.some((r) => same(r.app, o.app))) {
+      rules.push({ app: o.app, name: o.app.replace(/\.exe$/i, ''), with: o.with, keep: o.keep, default: null });
+    }
+  }
+  return {
+    rules,
+    openApps: [
+      { exe: 'chrome.exe', name: 'Google Chrome' },
+      { exe: 'slack.exe', name: 'Slack' },
+      { exe: 'Code.exe', name: 'Visual Studio Code' },
+      { exe: 'WindowsTerminal.exe', name: 'Windows Terminal' },
+    ],
+    lastApp: { exe: 'slack.exe', name: 'Slack' },
+  };
+}
