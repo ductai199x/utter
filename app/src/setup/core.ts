@@ -37,20 +37,24 @@ export interface Problem {
   actions: ('retry' | 'repair' | 'logs' | 'quit' | 'close')[];
 }
 
-export type Mode = 'first' | 'update' | 'repair' | 'problem';
+export type Mode = 'first' | 'update' | 'model' | 'repair' | 'problem';
 
 const params = new URLSearchParams(location.search);
+/** Opened to carry on what the person already started (a repair that restarted Utter). */
+export const carryOn = params.get('go') === '1';
 export const mode = (): Mode => {
   const m = params.get('mode');
-  return m === 'update' || m === 'repair' || m === 'problem' ? m : 'first';
+  return m === 'update' || m === 'model' || m === 'repair' || m === 'problem' ? m : 'first';
 };
 
 const inTauri = '__TAURI_INTERNALS__' in window;
 // Cleared once a failure has played, so Retry then succeeds.
 let fail = new URLSearchParams(location.search).get('fail');
 
-export function check(): Promise<Checks> {
-  if (inTauri) return invoke<Checks>('setup_check');
+// beforeChoice: first run's check, before the model step: the disk is checked against the
+// smallest model on offer, which the person can still choose.
+export function check(beforeChoice = false): Promise<Checks> {
+  if (inTauri) return invoke<Checks>('setup_check', { beforeChoice });
   const checks: Check[] =
     fail === 'gpu'
       ? [{ id: 'gpu', ok: false, value: 'None found', fix: null }]

@@ -121,8 +121,14 @@
   }
 
   /** Loads the first page again (a filter changed, or a dictation arrived). */
+  // Each reload's number: an answer that arrives after a newer request was sent (typing, a new
+  // dictation) is stale and dropped.
+  let reloads = 0;
+
   async function reload() {
+    const mine = ++reloads;
     const p = await historyQuery(query(0));
+    if (mine !== reloads) return;
     page = p;
     const arrived = p.entries.filter((e) => seen.size > 0 && !seen.has(e.id)).map((e) => e.id);
     fresh = new Set(arrived);
@@ -137,10 +143,16 @@
   async function more() {
     if (loading || !page || entries.length >= page.matched) return;
     loading = true;
-    const p = await historyQuery(query(entries.length));
-    p.entries.forEach((e) => seen.add(e.id));
-    entries = [...entries, ...p.entries.filter((e) => !entries.some((x) => x.id === e.id))];
-    loading = false;
+    const mine = reloads;
+    try {
+      const p = await historyQuery(query(entries.length));
+      // A reload meanwhile (new filters) makes this page part of an old list.
+      if (mine !== reloads) return;
+      p.entries.forEach((e) => seen.add(e.id));
+      entries = [...entries, ...p.entries.filter((e) => !entries.some((x) => x.id === e.id))];
+    } finally {
+      loading = false;
+    }
   }
 
   // Filters and search apply as they change; typing waits a breath.

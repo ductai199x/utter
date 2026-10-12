@@ -46,11 +46,19 @@ pub struct HotkeyConfig {
     pub min_hold: Duration,
     /// Two taps within this make a double tap.
     pub double_tap: Duration,
+    /// Let injected key events act too (development builds' test dictations only: never in
+    /// use, or Utter's own Ctrl+V and other software could start a dictation).
+    pub accept_injected: bool,
 }
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
-        Self { key: VK_RCONTROL, min_hold: Duration::from_millis(150), double_tap: Duration::from_millis(350) }
+        Self {
+            key: VK_RCONTROL,
+            min_hold: Duration::from_millis(150),
+            double_tap: Duration::from_millis(350),
+            accept_injected: false,
+        }
     }
 }
 
@@ -87,7 +95,7 @@ impl HotkeyMachine {
     }
 
     pub fn on_event(&mut self, e: KeyEvent) -> Option<Action> {
-        if e.injected {
+        if e.injected && !self.cfg.accept_injected {
             return None;
         }
         let hold_ms = self.cfg.min_hold.as_millis() as u32;
@@ -216,7 +224,7 @@ mod imp {
             *sink = Some(tx);
         }
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u32, String>>();
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name("utter-hook".into())
             .spawn(move || {
                 // SAFETY: plain Win32 calls; the hook is installed and removed on this thread,
@@ -225,8 +233,11 @@ mod imp {
                     let module = GetModuleHandleW(std::ptr::null());
                     let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), module, 0);
                     if hook.is_null() {
-                        let _ = ready_tx
-                            .send(Err(format!("SetWindowsHookExW failed: {}", std::io::Error::last_os_error())));
+                        let error = std::io::Error::last_os_error();
+                        if let Ok(mut sink) = SINK.lock() {
+                            *sink = None;
+                        }
+                        let _ = ready_tx.send(Err(format!("SetWindowsHookExW failed: {error}")));
                         return;
                     }
                     let _ = ready_tx.send(Ok(GetCurrentThreadId()));
@@ -240,9 +251,15 @@ mod imp {
             })
             .map_err(|e| HotkeyError(e.to_string()))?;
         let thread_id = ready_rx.recv().map_err(|e| HotkeyError(e.to_string()))?.map_err(HotkeyError)?;
+        let mut thread = Some(thread);
         Ok(Box::new(move || {
             // SAFETY: posts WM_QUIT to the hook thread's message queue.
             unsafe { PostThreadMessageW(thread_id, WM_QUIT, 0, 0) };
+            // Waits until the hook is removed and the sink cleared, so a new listener can start
+            // right after.
+            if let Some(t) = thread.take() {
+                let _ = t.join();
+            }
         }))
     }
 }

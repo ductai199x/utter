@@ -46,7 +46,11 @@ pub struct ParakeetOptions {
     /// plan, and every utterance has a new length: off, the 8-bit build holds 1.3 GB over 240
     /// utterances instead of growing to 2.3 GB, at the same speed and with the same transcripts.
     pub memory_pattern: bool,
-    /// Threads for graphs on the CPU (0: onnxruntime's default, one per core).
+    /// Threads for each session's CPU work (0: onnxruntime's default, one per core). 2 with no
+    /// spinning: one per core, spinning, won the speech bench back to back, but in the running
+    /// app it starved everything else while the person spoke. The microphone's stream lost
+    /// audio (26 gaps in three dictations, none after), and cleanup ran 15-20% slower; speech
+    /// itself got faster (2026-10-12, docs/eval-results.md).
     pub cpu_threads: usize,
     /// Let idle CPU worker threads spin-wait for the next call instead of sleeping.
     pub cpu_spinning: bool,
@@ -76,8 +80,8 @@ impl Default for ParakeetOptions {
             tf32: true,
             conv_search: ConvSearch::Heuristic,
             memory_pattern: false,
-            cpu_threads: 0,
-            cpu_spinning: true,
+            cpu_threads: 2,
+            cpu_spinning: false,
             conv_max_workspace: true,
             arena_exact: false,
             weights_outside_pool: false,
@@ -126,13 +130,29 @@ pub struct ParakeetTdt {
 
 impl ParakeetTdt {
     pub fn load(dir: &Path, opts: ParakeetOptions) -> Result<Self, AsrError> {
+        let t = Instant::now();
         crate::runtime::init()?;
+        let runtime_ms = t.elapsed().as_secs_f64() * 1e3;
         let cfg = ModelConfig::load(dir)?;
         let frontend = MelFrontEnd::load(dir, &cfg)?;
         let vocab = Vocab::load(dir, cfg.vocab_size)?;
-        let encoder = session(&dir.join("encoder.onnx"), opts.encoder, &opts)?;
-        let decoder = session(&dir.join("decoder.onnx"), opts.decoder, &opts)?;
-        let joint = session(&dir.join("joint.onnx"), opts.decoder, &opts)?;
+        // The small decoder and joint sessions are created beside the encoder's, which takes
+        // seconds: starting Utter waits for the longest one only.
+        let t = Instant::now();
+        let (encoder, small) = std::thread::scope(|scope| {
+            let small = scope.spawn(|| -> Result<_, AsrError> {
+                let decoder = session(&dir.join("decoder.onnx"), opts.decoder, &opts)?;
+                let joint = session(&dir.join("joint.onnx"), opts.decoder, &opts)?;
+                Ok((decoder, joint, t.elapsed().as_secs_f64() * 1e3))
+            });
+            let encoder = session(&dir.join("encoder.onnx"), opts.encoder, &opts);
+            (encoder, small.join())
+        });
+        let encoder = encoder?;
+        let encoder_ms = t.elapsed().as_secs_f64() * 1e3;
+        let (decoder, joint, decoder_joint_ms) =
+            small.map_err(|_| AsrError::Model("creating the decoder sessions panicked".into()))??;
+        tracing::info!(runtime_ms, encoder_ms, decoder_joint_ms, "speech sessions");
         let step = match opts.decoder {
             Device::Cuda => Some(session(&dir.join("step.onnx"), Device::Cuda, &opts)?),
             Device::Cpu => None,
@@ -374,12 +394,12 @@ fn session(path: &Path, device: Device, opts: &ParakeetOptions) -> Result<Sessio
         if opts.weights_outside_pool {
             builder = builder.with_config_entry("session.use_device_allocator_for_initializers", "1")?;
         }
-    } else {
-        if opts.cpu_threads > 0 {
-            builder = builder.with_intra_threads(opts.cpu_threads)?;
-        }
-        builder = builder.with_intra_op_spinning(opts.cpu_spinning)?;
     }
+    // Every session has a CPU thread pool (a GPU session's runs its CPU-side nodes).
+    if opts.cpu_threads > 0 {
+        builder = builder.with_intra_threads(opts.cpu_threads)?;
+    }
+    builder = builder.with_intra_op_spinning(opts.cpu_spinning)?;
     builder.commit_from_file(path).map_err(|e| AsrError::Model(format!("{}: {e}", path.display())))
 }
 

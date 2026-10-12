@@ -1,7 +1,7 @@
 <script lang="ts">
-  // The setup window (docs/ux/first-run.md). One page, four modes from the URL: first run
-  // (check, microphone, download, try it), update and repair (check, download, then it closes
-  // itself), and problem (why dictation could not start, and what to do). The core does the
+  // The setup window (docs/ux/first-run.md). One page, five modes from the URL: first run
+  // (check, model, microphone, download, try it), update, model and repair (check, download,
+  // then it closes itself), and problem (why dictation could not start, and what to do). The core does the
   // work and reports; this page shows it and sends intent.
   import { onDestroy, onMount, tick } from 'svelte';
   import { cubicOut } from 'svelte/easing';
@@ -30,7 +30,9 @@
   const checkTitle =
     mode === 'update'
       ? 'Utter needs to download an update'
-      : mode === 'repair'
+      : mode === 'model'
+        ? 'Utter needs to download the model you chose'
+        : mode === 'repair'
         ? "Some of Utter's files are missing or damaged"
         : 'Welcome to Utter';
 
@@ -81,7 +83,10 @@
 
   async function runChecks() {
     checks = null;
-    checks = await core.check();
+    checks = await core.check(mode === 'first');
+    // Opened to carry on (a repair that restarted Utter): the person already asked for it, so
+    // a passing check goes straight to the download.
+    if (core.carryOn && step === 0 && checks.checks.every((c) => c.ok)) void next();
   }
 
   // Choose your model: the recommended card is selected when the step opens.
@@ -109,6 +114,9 @@
       const disk = checks.checks.find((c) => c.id === 'disk');
       if (disk && !disk.ok) modelError = disk.fix ?? 'Not enough disk space for this model.';
       else void next();
+    } catch (e) {
+      // The choice could not be saved (a settings file with an error, a full disk).
+      modelError = `Could not save your choice: ${e}`;
     } finally {
       choosing = false;
     }
@@ -247,7 +255,13 @@
     }
   });
   const downloadTitle = $derived(
-    repairing ? 'Repairing Utter' : mode === 'first' ? 'Downloading the models' : 'Downloading the update',
+    repairing
+      ? 'Repairing Utter'
+      : mode === 'first'
+        ? 'Downloading the models'
+        : mode === 'model'
+          ? 'Downloading the model'
+          : 'Downloading the update',
   );
 
   const CHECK_LABELS: Record<string, string> = {
@@ -300,6 +314,8 @@
             {#if mode === 'first'}
               Hold a key, speak, and clean text appears where you type. Everything runs on this computer; nothing you
               say leaves it.
+            {:else if checks && mode === 'model'}
+              {gb(checks.downloadBytes)} GB to download. Dictation keeps the current model until it is done.
             {:else if checks}
               {gb(checks.downloadBytes)} GB to download. Dictation starts again as soon as it is done.
             {:else}

@@ -13,7 +13,7 @@ pub fn started_at_sign_in() -> bool {
     std::env::args().any(|a| a == AUTOSTART_ARG)
 }
 
-/// Opens the card. Its page is loaded and drawing before the models start loading.
+/// Opens the card, just after loading starts (the page asks where loading is: splash_stage).
 pub fn open(app: &AppHandle) {
     let built = tauri::WebviewWindowBuilder::new(app, "splash", tauri::WebviewUrl::App("splash.html".into()))
         .title("Utter")
@@ -35,9 +35,19 @@ struct Stage {
     stage: &'static str,
 }
 
+/// The stage last reported, for a card that opens after loading started ([`splash_stage`]).
+static LAST: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
 /// Tells the card which stage is loading: "speech", "cleanup", "microphone", or "ready".
 pub fn stage(app: &AppHandle, stage: &'static str) {
+    *LAST.lock().expect("splash stage lock") = Some(stage);
     let _ = app.emit_to("splash", "splash-stage", Stage { stage });
+}
+
+/// Where loading is now: the card asks once it listens, since loading starts first.
+#[tauri::command]
+pub fn splash_stage() -> Option<&'static str> {
+    *LAST.lock().expect("splash stage lock")
 }
 
 /// Closes the card at once (dictation could not start: the problem screen takes its place).

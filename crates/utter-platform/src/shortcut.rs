@@ -93,8 +93,12 @@ mod imp {
                 unsafe {
                     let mut taken = Vec::new();
                     for (id, s) in Shortcut::ALL.into_iter().enumerate() {
-                        if RegisterHotKey(std::ptr::null_mut(), id as i32 + 1, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, vk(s))
-                            == 0
+                        if RegisterHotKey(
+                            std::ptr::null_mut(),
+                            id as i32 + 1,
+                            MOD_ALT | MOD_SHIFT | MOD_NOREPEAT,
+                            vk(s),
+                        ) == 0
                         {
                             taken.push(s);
                         }

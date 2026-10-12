@@ -45,6 +45,15 @@ toml_edit = "0.25.17"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 
+# Development builds (`npx tauri dev`) run optimized, so trying Utter there feels like the
+# product: an unoptimized audio front end, decoder loop and clipboard code made dictation
+# slower and lumpier than what ships. Debug info stays for stack traces.
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
