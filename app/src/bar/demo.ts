@@ -48,4 +48,26 @@ async function play() {
   }
 }
 
-void play();
+// bar.html?demo=notice: what paste and copy last say (docs/ux/insertion.md).
+const NOTICES: [string, boolean][] = [
+  ['Pasted', true],
+  ['Copied', true],
+  ['Copied: press Ctrl+V to paste', false],
+  ['Copied: this app runs as administrator. Press Ctrl+V', false],
+  ['Nothing to paste yet', false],
+];
+
+async function notices() {
+  for (;;) {
+    for (const [message, ok] of NOTICES) {
+      emitLocal('bar:state', { state: 'notice', message, ok });
+      await sleep(ok ? 1200 : 2500);
+      emitLocal('bar:state', { state: 'exit' });
+      await sleep(400);
+      emitLocal('bar:state', { state: 'hidden' });
+      await sleep(500);
+    }
+  }
+}
+
+void (new URLSearchParams(location.search).get('demo') === 'notice' ? notices() : play());

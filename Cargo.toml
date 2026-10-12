@@ -10,6 +10,7 @@ authors = ["Tai Duc Nguyen"]
 rust-version = "1.98"
 
 [workspace.dependencies]
+unicode-normalization = "0.1.24"
 utter-core = { path = "crates/utter-core" }
 utter-platform = { path = "crates/utter-platform" }
 utter-runtime = { path = "crates/utter-runtime" }
