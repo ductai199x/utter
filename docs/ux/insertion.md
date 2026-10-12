@@ -149,26 +149,67 @@ with = "ctrl-shift-v"
 keep = "normal"
 ```
 
+## How a paste works, on every OS
+
+One portable sequence (insert.rs, `paste_by_clipboard`); each OS supplies six small primitives:
+`save_all` and `restore` the clipboard, `put_text`, `sequence` (a change counter), `is_free`
+(no one holds the clipboard), and `press` (the paste keys).
+
+1. Save the clipboard. Contents can show up a moment after a change, so a format listed but not
+   readable yet is waited for, and an empty-looking clipboard is looked at again (150 ms) before
+   it is believed.
+2. Put the text on it, plainly, marked to stay out of clipboard history and monitors.
+3. **Wait until the clipboard is quiet:** no one holding it and nothing changing it for 25 ms,
+   at most 150 ms. Clipboard managers (Windows' clipboard history, GNOME's and KDE's, macOS
+   history apps, UniClipboard) read every new clipboard at once, and an app gets one try at the
+   clipboard when the paste keys arrive: if a manager holds it that instant, the app pastes
+   nothing.
+4. Press the app's paste keys.
+5. After the keep time, put the old clipboard back, unless something new was copied meanwhile
+   (the sequence number, read after the clipboard is closed).
+
+A paste cannot be confirmed. Offering the text lazily (delayed rendering on Windows, a data
+provider on macOS, selection requests on X11) tells Utter when something read it, but managers
+read every clipboard at once and the OS then answers the app from that copy, so the app's own
+read never comes back. Tried on Windows: it also missed more (5 of 240 into a RichEdit box,
+against none), so it is not used. A paste that misses is in History, and Alt+Shift+Z pastes it.
+
 ## Measured (2026-10-12, insert::live, run by hand)
 
-A test window of Utter's own, never another app's, with the person's clipboard saved and put
-back around the run:
-- **Ctrl+V, Shift+Insert, typing it out, Leave it there, a newer copy kept, focus moved
-  refused:** all pass.
+A window of Utter's own (the RichEdit control Notepad is built on), never another app's, with
+the person's clipboard saved and put back around every run:
+- **Like dictations** (the clipboard settled for a second, then a paste, 60 times): with no
+  clipboard manager, 60 of 60 went in and 60 of 60 clipboards came back. With UniClipboard
+  running, 1 of 120 missed (from 1 of 60 before the quiet wait); every clipboard came back.
+  A paste takes 52 ms p50, 69 ms at most.
+- **Each case:** Ctrl+V, Shift+Insert, typing it out, Leave it there, a newer copy kept, focus
+  moved refused: all pass.
 - **The restore was broken before this:** the sequence number was read while the clipboard was
-  still open, one behind, so the restore took the paste for the person's copy and never put
-  anything back. Fixed; 120 of 120 save-and-restore rounds come back.
-- **With a clipboard manager running (UniClipboard):** contents show up to about 100 ms after a
-  write (none at once, the text listed but unreadable at 20 ms), and an open can be lost
-  mid-way. Saves wait for listed formats and look twice at an empty clipboard; every
-  operation retries as a whole; the paste waits until its text reads back. Without it, every
-  round-trip passes at once.
-- **A paste that types nothing:** 3 in 240 back-to-back pastes, with or without a settle
-  between the clipboard write and the keys (0, 10, 25, 50 ms), so no settle is added. The app
-  opens the clipboard once when the keys arrive; if something else holds it that instant
-  (Windows' clipboard history reads every change), it pastes nothing. The dictation is in
-  History and Alt+Shift+Z pastes it again. **Next:** supply the text by delayed rendering, so
-  Utter knows whether the app read it and can press the keys again if it did not.
+  still open, one behind, so the restore took every paste for the person's own copy and never
+  put anything back. Fixed; 120 of 120 save-and-restore rounds come back.
+- **The basic EDIT box** misses more (about 1 in 20 back to back) however the text is put on
+  the clipboard: it opens the clipboard once and gives up. Real apps measured here are RichEdit.
+
+## Other platforms
+
+The primitives exist on macOS and Linux (checked 2026-10-12 against Apple's, freedesktop's and
+the compositors' documentation and code); each has a catch to design for:
+
+| Primitive | macOS | Linux X11 | Linux Wayland |
+|---|---|---|---|
+| Save and put text | NSPasteboard; mark with the nspasteboard.org transient and concealed types | own the CLIPBOARD selection; mark with `x-kde-passwordManagerHint` | `ext-data-control-v1` / `wlr-data-control` (wlroots, KDE); **not GNOME**, which needs XWayland's clipboard |
+| Change counter | `changeCount` | XFixes selection events (Utter keeps a count) | the data-control offer events |
+| Is free | always (no lock) | always | always |
+| Paste keys | `CGEventPost` Cmd+V: the **Accessibility** permission | XTest, no permission | the **RemoteDesktop portal** (a consent dialog once, then a restore token), or uinput (root-like access) |
+| Focused app | `NSWorkspace.frontmostApplication` | `_NET_ACTIVE_WINDOW`, `_NET_WM_PID` | per desktop: wlr-foreign-toplevel, a KWin script, a GNOME Shell extension, or AT-SPI |
+
+- **macOS reading the clipboard prompts:** since the macOS 15.4 SDK Apple has been rolling out
+  an alert when an app reads the pasteboard without a paste gesture ("Paste from Other Apps" in
+  Privacy & Security). Saving the person's clipboard is such a read, so first run asks for it
+  once, beside the Accessibility permission.
+- **Clipboard managers everywhere** read at once (GNOME's own reads every change); the quiet
+  wait covers them the same way.
+- **Linux terminals** paste with Ctrl+Shift+V (Shift+Insert pastes the primary selection there).
 
 ## Acceptance checks
 

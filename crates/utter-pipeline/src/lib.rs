@@ -268,7 +268,13 @@ impl NotInserted {
 
     /// Whether the text should be left on the clipboard instead.
     fn copy_instead(&self) -> bool {
-        matches!(self, NotInserted::NoWindow | NotInserted::FocusMoved | NotInserted::Refused | NotInserted::Failed(_))
+        matches!(
+            self,
+            NotInserted::NoWindow
+                | NotInserted::FocusMoved
+                | NotInserted::Refused
+                | NotInserted::Failed(_)
+        )
     }
 
     /// What the Bar says (`copied`: the text is on the clipboard).
