@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use utter_llm::cleanup::Tier;
+use utter_platform::insert::{self, Keep, PasteKeys, PasteRule};
 
 use crate::PipelineConfig;
 
@@ -29,9 +30,26 @@ start_at_login = true
 # The microphone: part of its name, or \"\" for the system default.
 microphone = \"\"
 
-# The model: \"quality\" (the bigger one, about 6 GB of GPU memory) or \"light\" (the smaller
-# one, about 2.5 GB, for graphics cards with 4 GB).
+# The model: \"quality\" (the bigger one, about 4.8 GB of GPU memory, for graphics cards with
+# 6 GB or more) or \"light\" (the smaller one, about 3.3 GB, for graphics cards with 4 GB).
 model = \"quality\"
+
+# How long History keeps your dictations, on this computer only: \"forever\", \"30-days\",
+# \"24-hours\" or \"off\".
+keep_history = \"forever\"
+
+# Keep a detailed record of every dictation, with its audio, for troubleshooting
+# (<data folder>/dictations). Development builds always keep it.
+debug_log = false
+
+# How dictations are pasted, per app (docs/ux/insertion.md). Utter's defaults cover common
+# terminals, Office and remote desktops; an entry here replaces the default for that program.
+# with: \"ctrl-v\", \"ctrl-shift-v\", \"shift-insert\" or \"type\"
+# keep: \"normal\" (0.5 s), \"3s\", \"5s\" or \"leave\" (the old clipboard is not restored)
+# [[paste]]
+# app = \"mintty.exe\"
+# with = \"ctrl-shift-v\"
+# keep = \"normal\"
 ";
 
 /// The most dictionary entries (docs/ux/home.md).
@@ -46,6 +64,117 @@ pub struct Settings {
     /// Part of the input device's name; empty for the system default.
     pub microphone: String,
     pub model: Model,
+    pub keep_history: KeepHistory,
+    /// Keep the detailed dictation log with audio (development builds always do).
+    pub debug_log: bool,
+    /// The person's paste rules: each replaces Utter's default for its program.
+    pub paste: Vec<PasteOverride>,
+}
+
+/// How long History keeps dictations (docs/ux/history.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum KeepHistory {
+    #[default]
+    #[serde(rename = "forever")]
+    Forever,
+    #[serde(rename = "30-days")]
+    Days30,
+    #[serde(rename = "24-hours")]
+    Hours24,
+    #[serde(rename = "off")]
+    Off,
+}
+
+impl KeepHistory {
+    /// The oldest an entry may be; `None`: no limit. Off keeps nothing at all.
+    pub fn max_age(self) -> Option<std::time::Duration> {
+        match self {
+            KeepHistory::Forever => None,
+            KeepHistory::Days30 => Some(std::time::Duration::from_secs(30 * 24 * 3600)),
+            KeepHistory::Hours24 => Some(std::time::Duration::from_secs(24 * 3600)),
+            KeepHistory::Off => Some(std::time::Duration::ZERO),
+        }
+    }
+}
+
+/// One app's paste rule, as the person set it (docs/ux/insertion.md, "Paste rules").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasteOverride {
+    /// The program's file name, matched without regard to case.
+    pub app: String,
+    pub with: PasteWith,
+    #[serde(default)]
+    pub keep: PasteKeep,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PasteWith {
+    CtrlV,
+    CtrlShiftV,
+    ShiftInsert,
+    Type,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PasteKeep {
+    #[default]
+    #[serde(rename = "normal")]
+    Normal,
+    #[serde(rename = "3s")]
+    Seconds3,
+    #[serde(rename = "5s")]
+    Seconds5,
+    #[serde(rename = "leave")]
+    Leave,
+}
+
+impl PasteOverride {
+    pub fn rule(&self) -> PasteRule {
+        let keys = match self.with {
+            PasteWith::CtrlV => PasteKeys::Primary,
+            PasteWith::CtrlShiftV => PasteKeys::CtrlShiftV,
+            PasteWith::ShiftInsert => PasteKeys::ShiftInsert,
+            PasteWith::Type => PasteKeys::Type,
+        };
+        let keep = match self.keep {
+            PasteKeep::Normal => Keep::Normal,
+            PasteKeep::Seconds3 => Keep::Seconds3,
+            PasteKeep::Seconds5 => Keep::Seconds5,
+            PasteKeep::Leave => Keep::Leave,
+        };
+        PasteRule { keys, keep }
+    }
+
+    pub fn from_rule(app: &str, rule: PasteRule) -> Self {
+        let with = match rule.keys {
+            PasteKeys::Primary => PasteWith::CtrlV,
+            PasteKeys::CtrlShiftV => PasteWith::CtrlShiftV,
+            PasteKeys::ShiftInsert => PasteWith::ShiftInsert,
+            PasteKeys::Type => PasteWith::Type,
+        };
+        let keep = match rule.keep {
+            Keep::Normal => PasteKeep::Normal,
+            Keep::Seconds3 => PasteKeep::Seconds3,
+            Keep::Seconds5 => PasteKeep::Seconds5,
+            Keep::Leave => PasteKeep::Leave,
+        };
+        Self { app: app.to_owned(), with, keep }
+    }
+}
+
+/// The paste rule for `exe`: the person's override, else this platform's default, else the
+/// plain paste keys.
+pub fn paste_rule(overrides: &[PasteOverride], exe: &str) -> PasteRule {
+    overrides
+        .iter()
+        .find(|o| o.app.eq_ignore_ascii_case(exe))
+        .map(PasteOverride::rule)
+        .or_else(|| {
+            insert::default_rules().iter().find(|(app, _, _)| app.eq_ignore_ascii_case(exe)).map(|&(_, _, r)| r)
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -77,6 +206,9 @@ impl Default for Settings {
             start_at_login: true,
             microphone: String::new(),
             model: Model::Quality,
+            keep_history: KeepHistory::Forever,
+            debug_log: false,
+            paste: Vec::new(),
         }
     }
 }
@@ -131,6 +263,23 @@ impl Settings {
             Model::Light => "light",
         };
         set(&mut doc, "model", model.into());
+        set(&mut doc, "keep_history", word(&self.keep_history).into());
+        set(&mut doc, "debug_log", self.debug_log.into());
+        // The paste rules are tables at the end of the file; with none, no entries (the
+        // commented example stays).
+        if self.paste.is_empty() {
+            doc.remove("paste");
+        } else {
+            let mut rules = toml_edit::ArrayOfTables::new();
+            for o in &self.paste {
+                let mut t = toml_edit::Table::new();
+                t["app"] = toml_edit::value(o.app.as_str());
+                t["with"] = toml_edit::value(word(&o.with));
+                t["keep"] = toml_edit::value(word(&o.keep));
+                rules.push(t);
+            }
+            doc["paste"] = toml_edit::Item::ArrayOfTables(rules);
+        }
         // Write then rename, so a crash never leaves half a file.
         let tmp = path.with_extension("toml.tmp");
         std::fs::write(&tmp, doc.to_string()).map_err(|e| format!("{}: {e}", tmp.display()))?;
@@ -142,7 +291,16 @@ impl Settings {
         cfg.lists = self.lists;
         cfg.mic.device = (!self.microphone.is_empty()).then(|| self.microphone.clone());
         cfg.tier = self.model.into();
+        cfg.paste = self.paste.clone();
+        cfg.keep_history = self.keep_history;
+        cfg.log.enabled = self.debug_log || utter_core::is_development_build();
+        cfg.log.audio = cfg.log.enabled;
     }
+}
+
+/// A unit enum's name as serde writes it ("ctrl-shift-v", "3s", "30-days").
+pub fn word<T: Serialize>(v: &T) -> String {
+    serde_json::to_value(v).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
 /// Keeps a value's place (and the comments around it) when it exists; appends it otherwise.
@@ -218,11 +376,46 @@ mod tests {
             start_at_login: false,
             microphone: "USB".into(),
             model: Model::Light,
+            keep_history: KeepHistory::Days30,
+            debug_log: true,
+            paste: vec![PasteOverride {
+                app: "mintty.exe".into(),
+                with: PasteWith::CtrlShiftV,
+                keep: PasteKeep::Seconds3,
+            }],
         };
         s.save(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("# mine\nlists = false # keep this\n"), "{text}");
         assert_eq!(Settings::parse(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn paste_rules_save_as_tables_and_clear_away() {
+        let path = temp("paste");
+        let _ = std::fs::remove_file(&path);
+        let mut s = Settings {
+            paste: vec![PasteOverride { app: "putty.exe".into(), with: PasteWith::CtrlV, keep: PasteKeep::Leave }],
+            ..Settings::default()
+        };
+        s.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("[[paste]]\napp = \"putty.exe\"\nwith = \"ctrl-v\"\nkeep = \"leave\""), "{text}");
+        assert_eq!(Settings::parse(&text).unwrap(), s);
+        s.paste.clear();
+        s.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("[[paste]]\napp"), "{text}");
+        assert_eq!(Settings::parse(&text).unwrap(), s);
+    }
+
+    #[test]
+    fn a_rule_overrides_the_default_and_other_apps_paste_plainly() {
+        let mine = [PasteOverride { app: "MINTTY.exe".into(), with: PasteWith::CtrlShiftV, keep: PasteKeep::Normal }];
+        assert_eq!(paste_rule(&mine, "mintty.exe").keys, PasteKeys::CtrlShiftV);
+        assert_eq!(paste_rule(&[], "notepad.exe"), PasteRule::default());
+        #[cfg(windows)]
+        assert_eq!(paste_rule(&[], "mintty.exe").keys, PasteKeys::ShiftInsert);
     }
 
     #[test]

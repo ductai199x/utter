@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import { Waveform } from '../lib/waveform';
 
-  type BarState = 'hidden' | 'listening' | 'finishing' | 'done' | 'cancelled' | 'error' | 'exit';
+  type BarState = 'hidden' | 'listening' | 'finishing' | 'done' | 'notice' | 'cancelled' | 'error' | 'exit';
 
   let barState = $state<BarState>('hidden');
   let handsFree = $state(false);
@@ -17,6 +17,8 @@
   // text being pasted.
   let isFinal = $state(false);
   let message = $state('');
+  // A notice (paste or copy last, docs/ux/insertion.md): it did what was asked, or not.
+  let noticeOk = $state(true);
 
   // Geometry, logical px (docs/ux/bar.md "Geometry").
   const BARS = 16;
@@ -39,6 +41,9 @@
   // line that fits is never wrapped by rounding.
   const CHROME_W = 2 + 2 * PAD + WAVE_W + TEXT_GAP + (TEXT_END - PAD) + 1;
   const MAX_TEXT_W = MAX_W - CHROME_W;
+  // A notice has no waveform: its check or dot takes a narrow slot.
+  const NOTICE_LEAD = 18;
+  const NOTICE_CHROME_W = CHROME_W - WAVE_W + NOTICE_LEAD;
 
   let canvas = $state<HTMLCanvasElement>();
   // Hidden copies measure the words at the pill's target size, not its animated one: one line
@@ -51,14 +56,19 @@
 
   const hasWords = $derived(committed.length + preview.length > 0);
   // Exactly the text the pill shows, for the measuring copies.
-  const shownText = $derived(committed && preview ? `${committed} ${preview}` : committed || preview);
+  const shownText = $derived(
+    barState === 'notice' ? message : committed && preview ? `${committed} ${preview}` : committed || preview,
+  );
   // Words show while listening and finishing, and stay under the Done check once they are
   // the pasted text.
   const showWords = $derived(
-    hasWords && (barState === 'listening' || barState === 'finishing' || (barState === 'done' && isFinal)),
+    barState === 'notice' ||
+      (hasWords && (barState === 'listening' || barState === 'finishing' || (barState === 'done' && isFinal))),
   );
   const pillWidth = $derived(
-    showWords
+    barState === 'notice'
+      ? NOTICE_CHROME_W + textAreaW
+      : showWords
       ? CHROME_W + textAreaW
       : barState === 'error'
         ? MAX_W
@@ -104,7 +114,7 @@
     if (measureEl) sizes.observe(measureEl);
     if (wrapEl) sizes.observe(wrapEl);
     const unlisten = [
-      on<{ state: BarState; handsFree?: boolean; message?: string }>('bar:state', (e) => {
+      on<{ state: BarState; handsFree?: boolean; message?: string; ok?: boolean }>('bar:state', (e) => {
         const p = e.payload;
         if (p.state === 'listening' && barState !== 'listening') {
           committed = '';
@@ -117,6 +127,7 @@
         if (p.handsFree !== undefined) handsFree = p.handsFree;
         if (p.state === 'hidden') handsFree = false;
         message = p.message ?? '';
+        noticeOk = p.ok ?? true;
       }),
       on<{ committed: string; preview: string; final: boolean }>('bar:words', (e) => {
         committed = e.payload.committed;
@@ -147,8 +158,15 @@
     {#if barState === 'error'}
       <span class="error">{message}</span>
     {:else}
-      <div class="lead" class:done={barState === 'done'}>
-        {#if barState === 'done'}
+      <div
+        class="lead"
+        class:done={barState === 'done' || barState === 'notice'}
+        class:notice={barState === 'notice'}
+        style:--lead-w={barState === 'notice' ? `${NOTICE_LEAD}px` : undefined}
+      >
+        {#if barState === 'notice' && !noticeOk}
+          <span class="alert" aria-hidden="true"></span>
+        {:else if barState === 'done' || barState === 'notice'}
           <svg class="check" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path d="M5 12.5l4.2 4.2L19 7" />
           </svg>
@@ -161,10 +179,12 @@
       <div class="words" class:overflowing={lines > MAX_LINES}>
         <!-- Laid out at the pill's target width, not its animated one: as the pill grows it
              reveals the text instead of reflowing it, so lines never spill past the height. -->
-        <div class="text" style:width="{textAreaW + 1}px">
+        <div class="text" class:notice={barState === 'notice'} class:amber={barState === 'notice' && !noticeOk} style:width="{textAreaW + 1}px">
           <!-- The provisional words update in place: re-creating them on every recognizer pass
                would replay their fade, a flicker every 300 ms. -->
-          {committed}{#if preview}<span class="preview">{committed ? ' ' : ''}{preview}</span>{/if}
+          {#if barState === 'notice'}{message}{:else}{committed}{#if preview}<span class="preview"
+                >{committed ? ' ' : ''}{preview}</span
+              >{/if}{/if}
         </div>
       </div>
     {/if}
@@ -225,7 +245,7 @@
   /* A fixed-width slot, so the words never move when the waveform becomes the check. */
   .lead {
     flex: none;
-    width: var(--wave-w);
+    width: var(--lead-w, var(--wave-w));
     height: 38px;
     display: flex;
     align-items: center;
@@ -330,6 +350,17 @@
     to {
       stroke-dashoffset: 0;
     }
+  }
+  /* A notice that did not do what was asked: an amber dot in the waveform's place. */
+  .alert {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--bar-error);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--bar-error) 60%, transparent);
+  }
+  .text.amber {
+    color: var(--bar-error);
   }
   .error {
     color: var(--bar-error);

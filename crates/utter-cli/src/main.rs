@@ -666,6 +666,10 @@ fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, d
                 println!("\r\x1b[2Kcancelled");
                 return;
             }
+            Event::Notice { text, .. } => {
+                println!("\r\x1b[2K{text}");
+                return;
+            }
             Event::Done(d) => d,
         };
         let target = d.target.as_ref().map(|w| w.title.as_str()).unwrap_or("?");
@@ -676,7 +680,7 @@ fn dictate(tier: utter_llm::cleanup::Tier, dictionary: &str, no_cleanup: bool, d
         }
         match &d.inserted {
             Ok(()) => println!("  inserted into \"{target}\""),
-            Err(e) => println!("  NOT inserted: {e}"),
+            Err(e) => println!("  NOT inserted: {e}{}", if d.copied { " (left on the clipboard)" } else { "" }),
         }
         println!(
             "  {:.1} s of audio in {} segment(s) | key up -> transcribed {:.0} ms | cleanup {} | key up -> pasted {:.0} ms",

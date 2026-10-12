@@ -10,3 +10,4 @@ pub mod insert;
 pub mod overlay;
 pub mod process;
 pub mod shell;
+pub mod shortcut;

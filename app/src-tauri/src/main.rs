@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use utter_pipeline::{Event, Pipeline, PipelineConfig, Settings};
@@ -30,6 +30,8 @@ const BAR_BOTTOM_MARGIN: u32 = 48 - 12;
 const DONE_HOLD: Duration = Duration::from_millis(400);
 /// How long an error line stays.
 const ERROR_HOLD: Duration = Duration::from_millis(2500);
+/// How long "Pasted" or "Copied" shows (docs/ux/insertion.md).
+const NOTICE_HOLD: Duration = Duration::from_millis(1200);
 /// The exit transition (--dur-exit); the window hides once it has played.
 const EXIT: Duration = Duration::from_millis(160);
 /// The level feed's rate while the Bar is listening.
@@ -43,11 +45,14 @@ struct BarState {
     hands_free: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
+    /// For a notice: it did what was asked (a check), or not (amber).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ok: Option<bool>,
 }
 
 impl BarState {
     fn new(state: &'static str) -> Self {
-        Self { state, hands_free: None, message: None }
+        Self { state, hands_free: None, message: None, ok: None }
     }
 }
 
@@ -133,8 +138,8 @@ impl Bar {
                 match (&d.inserted, d.text.trim().is_empty()) {
                     (_, true) => self.leave_with_error("Didn't catch that"),
                     (Err(e), false) => {
-                        tracing::warn!("insert failed: {e}");
-                        self.leave_with_error(&insert_message(e));
+                        tracing::warn!("not inserted: {e}");
+                        self.leave_with_error(&e.message(d.copied));
                     }
                     (Ok(()), false) => {
                         self.emit_state(BarState::new("done"));
@@ -180,6 +185,15 @@ impl Bar {
                 );
             }
             Event::Microphone(meter) => *self.meter.lock().expect("meter lock") = Some(meter),
+            Event::Notice { text, ok } => {
+                // Outside a dictation: a new generation, so an old timer cannot hide it.
+                self.generation.fetch_add(1, Ordering::Relaxed);
+                self.emit_state(BarState { message: Some(text), ok: Some(ok), ..BarState::new("notice") });
+                if let Some(h) = self.handle() {
+                    overlay::show_bottom_center(h, None, BAR_SIZE, BAR_BOTTOM_MARGIN);
+                }
+                self.leave_after(if ok { NOTICE_HOLD } else { ERROR_HOLD });
+            }
         }
     }
 
@@ -220,17 +234,6 @@ impl Bar {
     }
 }
 
-/// What the Bar says when the paste didn't happen. The text is never lost: it stays on the
-/// paste-last shortcut (and in History, once there is one).
-fn insert_message(error: &str) -> String {
-    if error.contains("focus") {
-        "Focus moved: press Shift+Alt+Z to paste"
-    } else {
-        "Couldn't paste: press Shift+Alt+Z"
-    }
-    .to_owned()
-}
-
 /// Feeds the microphone level to the Bar while it is listening.
 fn level_feed(bar: Bar) {
     std::thread::Builder::new()
@@ -251,17 +254,18 @@ fn level_feed(bar: Bar) {
 struct Core {
     bar: Bar,
     link: home::PipelineLink,
+    /// Where the tray's paste and copy last go, once dictation runs.
+    commands: Arc<Mutex<Option<utter_pipeline::Commands>>>,
     started: AtomicBool,
 }
 
-/// Starts dictation once (at launch, or when first run has installed everything).
 /// Starts dictation once (at launch, or when setup has installed everything). Returns whether
 /// this call started it (false: it was running or starting already).
 pub fn start_pipeline(app: &AppHandle) -> bool {
     let core = app.state::<Core>();
     let start = !core.started.swap(true, Ordering::Relaxed);
     if start {
-        run_pipeline(app.clone(), core.bar.clone(), core.link.clone());
+        run_pipeline(app.clone(), core.bar.clone(), core.link.clone(), core.commands.clone());
     }
     start
 }
@@ -279,8 +283,21 @@ pub fn reapply_settings(app: &AppHandle) {
     }
 }
 
+/// Paste or copy last from the tray; before dictation runs there is nothing to paste.
+fn send_command(app: &AppHandle, c: utter_pipeline::Command) {
+    match app.state::<Core>().commands.lock().expect("commands").as_ref() {
+        Some(commands) => commands.send(c),
+        None => tracing::info!("{c:?} before dictation started: nothing to do"),
+    }
+}
+
 /// Loads the pipeline and runs dictations for as long as the app lives.
-fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
+fn run_pipeline(
+    app: AppHandle,
+    bar: Bar,
+    link: home::PipelineLink,
+    commands: Arc<Mutex<Option<utter_pipeline::Commands>>>,
+) {
     std::thread::Builder::new()
         .name("utter-pipeline".into())
         .spawn(move || {
@@ -319,6 +336,7 @@ fn run_pipeline(app: AppHandle, bar: Bar, link: home::PipelineLink) {
             *bar.meter.lock().expect("meter lock") = Some(pipeline.microphone().level_meter());
             level_feed(bar.clone());
             *link.0.lock().expect("pipeline link") = Some(pipeline.settings_sender());
+            *commands.lock().expect("commands") = Some(pipeline.commands());
             if let Err(e) = pipeline.run(|event| bar.on_event(event)) {
                 tracing::error!("dictation stopped: {e}");
                 set_tray_status(&app, "Utter: stopped");
@@ -383,8 +401,12 @@ fn main() {
         })
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Utter", true, None::<&str>)?;
+            // Their shortcuts are shown beside them (docs/ux/insertion.md).
+            let paste = MenuItem::with_id(app, "paste-last", "Paste last dictation", true, Some("Alt+Shift+Z"))?;
+            let copy = MenuItem::with_id(app, "copy-last", "Copy last dictation", true, Some("Alt+Shift+X"))?;
             let quit = MenuItem::with_id(app, "quit", "Quit Utter", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &quit])?;
+            let line = || PredefinedMenuItem::separator(app);
+            let menu = Menu::with_items(app, &[&open, &line()?, &paste, &copy, &line()?, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("an app icon"))
                 .tooltip("Utter: loading...")
@@ -392,6 +414,8 @@ fn main() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => home::show(app),
+                    "paste-last" => send_command(app, utter_pipeline::Command::PasteLast),
+                    "copy-last" => send_command(app, utter_pipeline::Command::CopyLast),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -400,7 +424,12 @@ fn main() {
             let window = app.get_webview_window("bar").expect("the bar window (tauri.conf.json)");
             let link = home::PipelineLink::default();
             home::watch(app.handle().clone(), link.clone());
-            app.manage(Core { bar: Bar::new(window), link, started: AtomicBool::new(false) });
+            app.manage(Core {
+                bar: Bar::new(window),
+                link,
+                commands: Arc::default(),
+                started: AtomicBool::new(false),
+            });
             // What an update left behind goes first: it may be the disk space the next
             // download needs.
             let freed = utter_runtime::prune();
