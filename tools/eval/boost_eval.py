@@ -77,9 +77,12 @@ def dictionary(
                     found.add(tok)
     terms = sorted(found)
     picked = sorted(random.Random(seed).sample(terms, min(size, len(terms))))
-    out = out or eval_dir() / "boost" / f"{eval_set}-terms{len(picked)}-s{seed}.txt"
+    # Kept with the code (tools/eval/dictionaries): the evals' dictionaries are part of the protocol.
+    out = (
+        out or Path(__file__).parent / "dictionaries" / f"{eval_set}-terms{len(picked)}-s{seed}.txt"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(picked) + "\n", encoding="utf-8")
+    out.write_text("\n".join(picked) + "\n", encoding="utf-8", newline="\n")
     print(f"{len(picked)} of {len(terms)} terms -> {out}")
 
 

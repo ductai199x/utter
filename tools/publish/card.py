@@ -263,13 +263,6 @@ published. Nothing was added; nothing about the people who use Utter is in this 
 - Technical forums are overrepresented next to everyday writing.
 - Targets were produced with a language model's help and checked automatically, not by people, row by row.
 
-## Supplementary files
-
-- `extra/cleanup_checks.jsonl`: the 112 hand-written checks Utter's cleanup models were chosen on (fillers,
-  backtracking, numbers, lists, spoken formatting, dictionary words, code, questions that must be typed rather than
-  answered...): `id`, `category`, `input` (what was heard), `expected` (what should be typed), `must_not_contain`.
-  Not part of the dataset's configs.
-
 ## Use
 
 ```python
@@ -281,7 +274,8 @@ ds["train"][0]["messages"]   # ready for chat fine-tuning
 
 ## More information
 
-Built by `tools/publish/text.py` in the Utter repository. Card authors: Tai Duc Nguyen.
+Built by `tools/publish/text.py` in the Utter repository, where the eval code and its small hand-written
+cleanup checks (`tools/eval/cleanup_cases.jsonl`) live. Card authors: Tai Duc Nguyen.
 """
     (out / "README.md").write_text(card, encoding="utf-8")
     print(f"wrote {out / 'README.md'}")
@@ -498,12 +492,6 @@ from public posts can contain the usernames their writers published.
   substitute for real speech.
 - Technical forums are overrepresented next to everyday writing.
 
-## Supplementary files
-
-- `extra/dictionary-terms/<collection>-terms<N>-s0.txt`: the dictionaries used for the dictionary evals on those test
-  collections, one term per line: N distinct terms (product names, acronyms, paths: `GitHub`, `TF32`, `LTS`) sampled
-  with seed 0 from the collection's final texts, as a person's dictionary would hold them.
-
 ## Use
 
 ```python
@@ -516,7 +504,8 @@ row = test[0]; row["audio"]["array"], row["transcript"], row["final_text"]
 
 ## More information
 
-Built by `tools/publish/voice.py` in the Utter repository. Card authors: Tai Duc Nguyen.
+Built by `tools/publish/voice.py` in the Utter repository. The dictionaries the dictionary evals give the
+test collections are next to the eval code there (`tools/eval/dictionaries/`). Card authors: Tai Duc Nguyen.
 """
     (out / "README.md").write_text(card, encoding="utf-8")
     print(f"wrote {out / 'README.md'}")

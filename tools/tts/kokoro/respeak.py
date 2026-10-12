@@ -9,26 +9,28 @@ Run (from tools/tts/kokoro): uv run python respeak.py en-finaltext-train-kokoro-
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 import soxr
 import typer
-
 from synth import KOKORO_RATE, RATE, eval_dir
 
 
 def main(
     name: str,
-    shard: str = typer.Option("0/1", help="I/N: only rows I, I+N, I+2N... for N processes at once."),
+    shard: str = typer.Option(
+        "0/1", help="I/N: only rows I, I+N, I+2N... for N processes at once."
+    ),
 ) -> None:
     from kokoro import KPipeline
 
     index, count = (int(x) for x in shard.split("/"))
     out = eval_dir() / name
     rows = [json.loads(line) for line in (out / "manifest.jsonl").open(encoding="utf-8")]
-    rows = [r for i, r in enumerate(rows) if i % count == index and not (out / r["audio"]).is_file()]
+    rows = [
+        r for i, r in enumerate(rows) if i % count == index and not (out / r["audio"]).is_file()
+    ]
     pipelines: dict[str, KPipeline] = {}
     mismatched = 0
     for i, r in enumerate(rows):
@@ -39,7 +41,9 @@ def main(
         if not chunks:
             print(f"{r['id']}: no audio", flush=True)
             continue
-        audio = np.concatenate([c.numpy() if hasattr(c, "numpy") else np.asarray(c) for c in chunks])
+        audio = np.concatenate(
+            [c.numpy() if hasattr(c, "numpy") else np.asarray(c) for c in chunks]
+        )
         audio = soxr.resample(audio.astype(np.float32), KOKORO_RATE, RATE)
         pad = np.zeros(int(0.25 * RATE), dtype=np.float32)
         audio = np.concatenate([pad, audio, pad])
