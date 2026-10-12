@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/app-icon.svg" width="96" alt="Utter">
+  <img src="app/brand/icon.svg" width="96" alt="Utter">
 </p>
 
 <h1 align="center">Utter</h1>

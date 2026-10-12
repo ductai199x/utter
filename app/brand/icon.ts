@@ -1,8 +1,8 @@
-// Writes the app icon source (tools/brand/icon.svg) from the mark's own geometry, so the icon
-// and the UI never drift apart. Then `npx tauri icon ../tools/brand/icon.svg` (from app/)
-// makes every size. Run: node --experimental-strip-types tools/brand/icon.ts
+// Writes the app icon source (app/brand/icon.svg) from the mark's own geometry, so the icon
+// and the UI never drift apart. Then `npx tauri icon brand/icon.svg` (from app/)
+// makes every size. Run: node --experimental-strip-types app/brand/icon.ts
 import { writeFileSync } from 'node:fs';
-import { LINES, MARK_STROKE, ribbonPath } from '../../app/src/lib/mark.ts';
+import { LINES, MARK_STROKE, ribbonPath } from '../src/lib/mark.ts';
 
 // The accent tile with a little light at the top, and the mark in the accent's ink.
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="1024" height="1024">
@@ -20,4 +20,4 @@ ${LINES.map((d) => `    <path d="${d}"/>`).join('\n')}
 </svg>
 `;
 writeFileSync(new URL('./icon.svg', import.meta.url), svg);
-console.log('wrote tools/brand/icon.svg');
+console.log('wrote app/brand/icon.svg');
