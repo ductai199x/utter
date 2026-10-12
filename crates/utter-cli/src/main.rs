@@ -182,7 +182,7 @@ enum Command {
         /// The GGUF model file.
         #[arg(long)]
         gguf: PathBuf,
-        /// Case files (JSONL with id, input, optional dictionary).
+        /// Case files (JSONL with id, input, optional dictionary and lists_off).
         #[arg(long, required = true)]
         cases: Vec<PathBuf>,
         /// Name the results are written under (results/llm/<name>/).
@@ -474,8 +474,14 @@ fn llm_bench(
         Some(path) => std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
         None => cleanup::SYSTEM_PROMPT.to_owned(),
     };
-    let messages = |text: &str, dictionary: &[String]| {
-        cleanup::messages_with(&system, text, dictionary, &cleanup::Context::default())
+    // A case may say lists are off (the setting), as the app then tells the model.
+    let messages = |text: &str, dictionary: &[String], lists_off: bool| {
+        cleanup::messages_with(
+            &system,
+            text,
+            dictionary,
+            &cleanup::Context { lists_off, ..cleanup::Context::default() },
+        )
     };
     let mut opts = ServerOptions::new(gguf);
     opts.extra_args = server_args.to_vec();
@@ -500,7 +506,7 @@ fn llm_bench(
     let warmer = warm_gpu.then(utter_runtime::gpu::GpuWarmer::new);
     let params = |input: &str| ChatParams { max_tokens: (input.len() as u32 / 2).max(64), ..ChatParams::default() };
     for warm in ["Um, this is a warm-up.", "The the second warm-up, no, third."] {
-        server.chat(&messages(warm, &[]), &params(warm))?;
+        server.chat(&messages(warm, &[], false), &params(warm))?;
     }
     for file in case_files {
         let mut rows: Vec<serde_json::Map<String, serde_json::Value>> = Vec::new();
@@ -525,6 +531,7 @@ fn llm_bench(
                 .and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default();
+            let lists_off = row.get("lists_off").and_then(|v| v.as_bool()).unwrap_or(false);
             let gap_end = std::time::Instant::now() + std::time::Duration::from_millis(pacing.gap_ms);
             if let Some(w) = &warmer {
                 w.start();
@@ -537,7 +544,7 @@ fn llm_bench(
                 }
                 std::thread::sleep(left.min(std::time::Duration::from_millis(pacing.keepalive_ms)));
                 if std::time::Instant::now() < gap_end {
-                    server.keep_warm(&messages("", &dictionary))?;
+                    server.keep_warm(&messages("", &dictionary, lists_off))?;
                 }
             }
             if let Some(w) = &warmer {
@@ -548,12 +555,12 @@ fn llm_bench(
                 let keep = ((words.len() as f64) * prefill_fraction).floor() as usize;
                 if keep > 0 {
                     let partial = words[..keep].join(" ");
-                    let pre = server.prefill(&messages(&partial, &dictionary))?;
+                    let pre = server.prefill(&messages(&partial, &dictionary, lists_off))?;
                     row.insert("prefill_ms".into(), (pre.wall.as_secs_f64() * 1e3).into());
                     row.insert("prefill_predicted_n".into(), pre.server.predicted_n.into());
                 }
             }
-            let out = server.chat(&messages(&input, &dictionary), &params(&input))?;
+            let out = server.chat(&messages(&input, &dictionary, lists_off), &params(&input))?;
             let s = out.server;
             row.insert("output".into(), cleanup::tidy_output(&out.text).into());
             row.insert("raw_output".into(), out.text.clone().into());
