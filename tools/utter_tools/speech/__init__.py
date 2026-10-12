@@ -1,1 +1,62 @@
-"""utter-speech: the speech model Utter ships, exported, quantized and checked."""
+"""utter-speech: rebuild the speech model Utter ships, parakeet-ultra in Utter's own ONNX runtime.
+
+utter-speech export      the checkpoint to the ONNX graphs the Rust core runs
+utter-speech quantize    the encoder's weights in 8 bits, as the app runs it
+utter-speech check       the export against Transformers, token for token
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import typer
+
+app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Rebuild the speech model Utter ships."
+)
+
+
+@app.command("export")
+def export_cmd(
+    weights: str = typer.Option("moondream/parakeet-ultra", help="ParakeetForTDT checkpoint."),
+    name: str = typer.Option("parakeet-ultra", help="Output folder under <data dir>/models."),
+    max_frames: int = typer.Option(512, help="Longest clip, in encoder frames of 80 ms."),
+) -> None:
+    """Export the checkpoint to ONNX (fp16 encoder, convolutions rewritten)."""
+    from utter_tools.speech.export import export_model
+
+    export_model(weights, name, max_frames)
+
+
+@app.command("quantize")
+def quantize_cmd(
+    src: str = typer.Option(..., help="The export under <data dir>/models."),
+    dst: str = typer.Option(..., help="The quantized copy's folder under <data dir>/models."),
+    bits: int = typer.Option(8, help="Bits per weight."),
+    block_size: int = typer.Option(32, help="Weights per quantization scale."),
+) -> None:
+    """Quantize the encoder's weights."""
+    from utter_tools.speech.export import quantize
+
+    quantize(src, dst, bits, block_size)
+
+
+@app.command("check")
+def check_cmd(
+    name: str = typer.Option("parakeet-ultra", help="The export under <data dir>/models."),
+    weights: str = typer.Option("moondream/parakeet-ultra", help="The reference checkpoint."),
+    clips: int = typer.Option(
+        60, help="Clips, spread over the public English sets (utter-bench fetch)."
+    ),
+    fixture: Path = typer.Option(
+        None, help="Also write the front-end fixture the Rust tests use here."
+    ),
+) -> None:
+    """Check the export against Transformers."""
+    from utter_tools.speech.check import check
+
+    check(name, weights, clips, fixture)
+
+
+def cli() -> None:
+    app()

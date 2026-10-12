@@ -16,7 +16,8 @@ import random
 import re
 from functools import cache
 
-from utter_tools.data.script import Script, ask, same_numbers
+from utter_tools import common
+from utter_tools.data.script import Script, same_numbers
 from utter_tools.llm import Chat
 
 # ERRANT error types a speaker produces (spelling, orthography and punctuation are left out: a
@@ -24,11 +25,15 @@ from utter_tools.llm import Chat
 TYPES = {
     "DET": 'articles: a/an/the missing, extra or wrong ("I bought car", "the life is hard")',
     "PREP": 'prepositions: wrong or missing ("since three weeks", "depends of", "in Monday")',
-    "VERB:TENSE": 'tense or aspect ("yesterday I go", "I am knowing him", "I live here since 2019")',
+    "VERB:TENSE": (
+        'tense or aspect ("yesterday I go", "I am knowing him", "I live here since 2019")'
+    ),
     "VERB:SVA": 'subject-verb agreement ("he go", "they was", "the list of items are")',
     "VERB:FORM": 'verb form ("I have went", "can sending", "we buyed", "I seen it")',
     "VERB": 'a missing auxiliary or copula ("he going home", "she very tired")',
-    "NOUN:NUM": 'noun number and countability ("two book", "many informations", "one of my friend")',
+    "NOUN:NUM": (
+        'noun number and countability ("two book", "many informations", "one of my friend")'
+    ),
     "PRON": 'pronoun case or choice ("me and him went", "he" for "she", "who" for "which")',
     "ADJ:FORM": 'comparatives and superlatives ("more better", "the most fast", "bigger as")',
     "ADV": 'an adjective used as an adverb, or a misplaced adverb ("runs quick", "real good")',
@@ -83,18 +88,7 @@ PROFILES = {
 # How many errors, by level: a fixed range, or one per so many words for broken English.
 LEVELS = {"light": (1, 2), "medium": (3, 4), "heavy": None}
 
-_PROPOSE = """You help build training data for a dictation app that turns a speaker's
-ungrammatical English into correct English. Given a correct passage, rewrite it the way this
-speaker would say it, making grammar mistakes of exactly the requested kinds.
-
-Rules:
-- Make exactly the number of mistakes asked for, each of one of the requested kinds, spread over
-  the passage. Each mistake changes one word or a few adjacent words.
-- The mistakes must be natural for this speaker: the kind a real person with this background
-  makes when speaking.
-- Change nothing else: keep every other word, the word order, names, numbers and punctuation
-  exactly as they are. Do not change vocabulary, add ideas or drop any.
-Return JSON with "text": the passage with the mistakes."""
+_PROPOSE = common.prompt("propose-grammar")
 
 _SCHEMA = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
 
@@ -160,7 +154,7 @@ def grammar_script(passage: str, rng: random.Random, llm: Chat, seed: int) -> Sc
         f"Make {len(requested)} mistakes, of these kinds:\n"
         + "\n".join(f"- {TYPES[k]}" for k in kinds)
     )
-    p = ask(llm, _PROPOSE, f"Passage:\n{passage}\n\n{note}", _SCHEMA, seed, max_tokens=1024)
+    p = llm.ask(_PROPOSE, f"Passage:\n{passage}\n\n{note}", _SCHEMA, seed, max_tokens=1024)
     wrong = " ".join(p.get("text", "").split()) if p else ""
     if not wrong or wrong == passage or not same_numbers(passage, wrong):
         return None

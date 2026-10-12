@@ -10,6 +10,7 @@ from utter_tools.data.spoken import (
     disfluent_script,
     kinds_for,
 )
+from utter_tools.llm import Chat
 
 
 def test_words_match_letter_by_letter_and_split_names():
@@ -49,10 +50,11 @@ def test_check_reports_why():
     assert check("send it to sam", "send it to sam") is None
 
 
-class FakeLLM:
+class FakeLLM(Chat):
     """Answers the structured proposals with fixed JSON."""
 
     def __init__(self, reply: str) -> None:
+        super().__init__("http://fake")
         self.reply = reply
 
     def chat(self, *args, **kwargs) -> str:

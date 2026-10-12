@@ -17,13 +17,15 @@ Output folder (default `<data_dir>/models/<name>/`):
 - `vocab.txt`: one token per line, line number = token id (SentencePiece pieces, "▁" kept).
 - `config.json`: the numbers the runtime needs (blank id, durations, front-end parameters).
 
-Run: utter-speech export [--weights moondream/parakeet-ultra] [--name parakeet-ultra]
+quantize() then stores the encoder's MatMul weights in 8 bits (onnxruntime's MatMulNBits), as
+the app runs it.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +33,7 @@ import torch
 from rich.console import Console
 from torch import nn
 
-from utter_tools.config import data_dir
+from utter_tools.common import data_dir
 
 FRONT_END_REPO = "nvidia/parakeet-tdt-0.6b-v3"  # processor and generation config (same family)
 OPSET = 20
@@ -93,7 +95,7 @@ class Step(nn.Module):
         return tokens, durations, h2, c2
 
 
-def export(
+def _to_onnx(
     module: nn.Module,
     args: tuple,
     path: Path,
@@ -117,7 +119,7 @@ def export(
     onnx.checker.check_model(str(path))
 
 
-def main(
+def export_model(
     weights: str = "moondream/parakeet-ultra",
     name: str = "parakeet-ultra",
     max_frames: int = 512,
@@ -125,7 +127,12 @@ def main(
     """Exports `weights` to <data_dir>/models/<name>/ as Utter ships it: the encoder's
     convolutions rewritten (conv_free.py; clips up to `max_frames` encoder frames of 80 ms) and
     its weights and math in fp16 (half the size; its inputs and outputs stay fp32)."""
-    from transformers import AutoProcessor, GenerationConfig, ParakeetForTDT
+    from transformers import (
+        AutoProcessor,
+        GenerationConfig,
+        ParakeetEncoderConfig,
+        ParakeetForTDT,
+    )
 
     from utter_tools.speech.conv_free import rewrite
 
@@ -136,16 +143,19 @@ def main(
     model.generation_config = GenerationConfig.from_pretrained(FRONT_END_REPO)
     rewrite(model, max_frames)
     cfg = model.config
+    encoder_cfg = cfg.encoder_config
+    assert isinstance(encoder_cfg, ParakeetEncoderConfig)
     hidden, layers = cfg.decoder_hidden_size, cfg.num_decoder_layers
 
     with torch.inference_mode():
         console.print("encoder (fp16)")
         # Traced on the GPU: PyTorch's CPU kernels do not all run in half precision. The rest of
         # the model is exported from the float32 model below.
-        half = copy.deepcopy(model).half().cuda()
+        # Transformers' typing of the model's .half() and .cuda() is wrong (they run fine).
+        half = copy.deepcopy(model).half().cuda()  # pyright: ignore[reportCallIssue]
         enc_module = Encoder(half, torch.float16)
-        dummy = torch.randn(1, 300, cfg.encoder_config.num_mel_bins, device="cuda")
-        export(
+        dummy = torch.randn(1, 300, encoder_cfg.num_mel_bins, device="cuda")
+        _to_onnx(
             enc_module,
             (dummy,),
             out / "encoder.onnx",
@@ -157,7 +167,7 @@ def main(
         torch.cuda.empty_cache()
         console.print("decoder")
         zeros = torch.zeros(layers, 1, hidden)
-        export(
+        _to_onnx(
             Decoder(model),
             (torch.tensor([[cfg.blank_token_id]]), zeros, zeros),
             out / "decoder.onnx",
@@ -166,7 +176,7 @@ def main(
             {},
         )
         console.print("joint")
-        export(
+        _to_onnx(
             Joint(model),
             (torch.randn(4, hidden), torch.randn(1, hidden)),
             out / "joint.onnx",
@@ -175,7 +185,7 @@ def main(
             {"encoded": {0: "n"}, "logits": {0: "n"}},
         )
         console.print("step")
-        export(
+        _to_onnx(
             Step(model),
             (
                 torch.tensor([[cfg.blank_token_id]]),
@@ -204,7 +214,7 @@ def main(
                 "encoder_dtype": "fp16",
                 "encoder_convolutions": "rewritten, depthwise fixed",
                 "max_encoder_frames": max_frames,
-                "subsampling_factor": cfg.encoder_config.subsampling_factor,
+                "subsampling_factor": encoder_cfg.subsampling_factor,
                 "vocab_size": cfg.vocab_size,
                 "blank_id": cfg.blank_token_id,
                 "durations": list(cfg.durations),
@@ -227,3 +237,42 @@ def main(
         newline="\n",
     )
     console.print(f"Exported to {out}")
+
+
+def quantize(src: str, dst: str, bits: int = 8, block_size: int = 32) -> None:
+    """Quantizes the encoder of <data_dir>/models/<src> into <data_dir>/models/<dst>: `bits` per
+    weight, one scale per `block_size` weights."""
+    import onnx
+    from onnxruntime.quantization.matmul_nbits_quantizer import (
+        DefaultWeightOnlyQuantConfig,
+        MatMulNBitsQuantizer,
+    )
+    from onnxruntime.quantization.onnx_model import ONNXModel
+
+    src_dir, dst_dir = data_dir() / "models" / src, data_dir() / "models" / dst
+    if dst_dir.exists():
+        shutil.rmtree(dst_dir)
+    dst_dir.mkdir(parents=True)
+    for f in src_dir.iterdir():
+        if not f.name.startswith("encoder.onnx"):
+            shutil.copy2(f, dst_dir / f.name)
+    model = onnx.load(str(src_dir / "encoder.onnx"), load_external_data=True)
+    config = DefaultWeightOnlyQuantConfig(
+        block_size=block_size, is_symmetric=True, bits=bits, op_types_to_quantize=("MatMul",)
+    )
+    q = MatMulNBitsQuantizer(
+        model, bits=bits, block_size=block_size, is_symmetric=True, algo_config=config
+    )
+    q.process()
+    assert isinstance(q.model, ONNXModel)
+    out = q.model.model
+    onnx.save_model(out, str(dst_dir / "encoder.onnx"))
+    cfg_path = dst_dir / "config.json"
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    cfg["encoder_weights"] = (
+        f"MatMul weights {bits}-bit (MatMulNBits, block {block_size}, symmetric)"
+    )
+    cfg_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8", newline="\n")
+    size = (dst_dir / "encoder.onnx").stat().st_size / 1e6
+    n = sum(1 for node in out.graph.node if node.op_type == "MatMulNBits")
+    print(f"{dst}: {n} MatMulNBits nodes, encoder.onnx {size:.0f} MB")
