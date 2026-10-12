@@ -23,6 +23,7 @@ import soundfile as sf
 import torch
 from rich.console import Console
 
+from utter_tools.bench import SETS
 from utter_tools.common import data_dir, eval_dir
 
 console = Console()
@@ -116,7 +117,11 @@ def check(
     dec_sess = ort.InferenceSession(str(folder / "decoder.onnx"), providers=providers)
     joint_sess = ort.InferenceSession(str(folder / "joint.onnx"), providers=providers)
 
-    sets = sorted(p.parent.name for p in eval_dir().glob("en-*/manifest.jsonl"))
+    sets = [
+        s.name for s in SETS if s.lang == "en" and (eval_dir() / s.name / "manifest.jsonl").exists()
+    ]
+    if not sets:
+        raise SystemExit("no public English sets: run utter-bench fetch")
     per_set = max(1, clips // len(sets))
     worst_enc, token_match, text_match, total = 0.0, 0, 0, 0
     for s in sets:
