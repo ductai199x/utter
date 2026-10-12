@@ -21,7 +21,7 @@ from pathlib import Path
 
 from utter_tools import common
 
-# The local model the grader and the generator use without a URL
+# The local model the judge and the generator use without a URL
 # (installed by utter-cli setup gemma4-26b-a4b-qat).
 LOCAL_MODEL = "gemma4-26b-a4b-qat"
 
