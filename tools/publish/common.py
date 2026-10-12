@@ -23,6 +23,119 @@ SYNTHETIC_DEFAULT = f"{REPO_BLOB}/tools/eval/finaltext/messages.py"
 # The dataset's license: share-alike, as most of its text requires (Stack Exchange, Wikipedia);
 # text Utter's tools wrote takes it too.
 DATASET_LICENSE = "cc-by-sa-4.0"
+# Sources left out of the published datasets, and why. GitHub text carries its repository's license
+# (MIT, Apache, BSD...), which requires the copyright notice and license text with every copy, and
+# an issue's or comment's text is not clearly under the code's license at all.
+EXCLUDED_SOURCES = {
+    "common-pile/github_archive": "repository licenses require their notice with every copy; issue text's license is unclear",
+}
+
+
+def jsonl(path) -> list[dict]:
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def current_passages() -> dict[str, dict]:
+    """The current passage files only (not snapshots): their text is the gold, with every later fix
+    (goldfix), exactly as the training pairs (trainset.py --passages) and the evals use it."""
+    out: dict[str, dict] = {}
+    for f in sorted(glob.glob(str(data_dir() / "eval" / "finaltext" / "passages-*.jsonl"))):
+        if any(tag in Path(f).name for tag in (".pre-", ".raw", ".v1", ".v2-only")):
+            continue
+        for p in jsonl(f):
+            out.setdefault(p["id"], p)
+    return out
+
+
+def gold(passage_id: str, synthesized: str, current: dict[str, dict]) -> str:
+    """A rendition's final text: its passage's current text, or (for a passage in no current file)
+    the text it was synthesized with; mechanical slips fixed."""
+    p = current.get(passage_id)
+    return fix_final(p["text"] if p else synthesized)
+
+
+# Words a line of a real list does not end on: an item ending on one runs on into the next line,
+# which makes the "list" hard-wrapped prose (a code comment, a quoted paragraph), not a list.
+_DANGLING = frozenset(
+    [
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "for",
+        "with",
+        "and",
+        "or",
+        "but",
+        "nor",
+        "by",
+        "from",
+        "as",
+        "into",
+        "onto",
+        "than",
+        "that",
+        "which",
+        "whose",
+        "this",
+        "these",
+        "those",
+        "your",
+        "our",
+        "their",
+        "its",
+        "my",
+        "his",
+        "her",
+        "is",
+        "are",
+        "was",
+        "were",
+        "can",
+        "could",
+        "will",
+        "would",
+        "should",
+        "may",
+        "might",
+        "must",
+        "shall",
+        "if",
+        "when",
+        "while",
+        "because",
+        "although",
+        "during",
+    ]
+)
+
+
+def wrapped_prose(text: str) -> bool:
+    """A passage written as list items that is really wrapped prose: some item stops on a word no
+    line ends on and the next one continues it in lower case."""
+    from eval.finaltext.lists import parse
+
+    lp = parse(text)
+    if lp is None:
+        return False
+    for a, b in zip(lp.items, lp.items[1:]):
+        last = re.findall(r"[A-Za-z']+$", a.strip())
+        if last and last[0].lower() in _DANGLING and re.match(r"[a-z(]", b.strip()):
+            return True
+    return False
+
+
+def excluded_passages(P: dict[str, dict]) -> dict[str, str]:
+    """Passage id -> why its rows are left out of both datasets."""
+    out = {}
+    for pid, p in P.items():
+        if p["source"] in EXCLUDED_SOURCES:
+            out[pid] = "license"
+        elif p["domain"] == "list" and wrapped_prose(p["text"]):
+            out[pid] = "wrapped-prose list"
+    return out
 
 
 def passages() -> dict[str, dict]:
@@ -31,15 +144,15 @@ def passages() -> dict[str, dict]:
     for f in sorted(glob.glob(str(data_dir() / "eval" / "finaltext" / "passages-*.jsonl"))):
         if any(tag in Path(f).name for tag in (".pre-", ".raw", ".v1", ".v2-only")):
             continue
-        for line in open(f, encoding="utf-8"):
-            p = json.loads(line)
+        for p in jsonl(f):
             out.setdefault(p["id"], p)
     # Rows from passages later reworded or filtered out: an earlier snapshot holds their source,
     # URL and license (the same in every snapshot), newest first.
     for tag in (".pre-", ".v2-only", ".v1", ".raw"):
-        for f in sorted(glob.glob(str(data_dir() / "eval" / "finaltext" / f"passages-*{tag}*.jsonl"))):
-            for line in open(f, encoding="utf-8"):
-                p = json.loads(line)
+        for f in sorted(
+            glob.glob(str(data_dir() / "eval" / "finaltext" / f"passages-*{tag}*.jsonl"))
+        ):
+            for p in jsonl(f):
                 out.setdefault(p["id"], p)
     return out
 
@@ -89,7 +202,9 @@ def provenance(p: dict) -> dict:
 # Mechanical punctuation slips in final texts, fixed only where there is no reading in which they
 # are right: ".?" or "?." after a word (not after an abbreviation), ",." after a word, a space before
 # a comma, semicolon or colon, and ".." that is not an ellipsis.
-_ABBREVIATIONS = r"(?<!\betc)(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bapprox)(?<!\bincl)(?<!\bMr)(?<!\bDr)(?<!\bSt)"
+_ABBREVIATIONS = (
+    r"(?<!\betc)(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bapprox)(?<!\bincl)(?<!\bMr)(?<!\bDr)(?<!\bSt)"
+)
 _FIXES = [
     (re.compile(r"(?<=\w)" + _ABBREVIATIONS + r"\.\?(?=\s|$)"), "?"),
     (re.compile(r"(?<=\w)\?\.(?=\s|$)"), "?"),
@@ -101,7 +216,7 @@ _FIXES = [
 
 def fix_final(text: str) -> str:
     # Code spans and fenced blocks are left exactly as they are.
-    parts = re.split(r"(```.*?```|`[^`\n]*`)", text, flags=re.S)
+    parts = re.split(r"(```.*?```|`[^`\n]*`)", text, flags=re.DOTALL)
     for i in range(0, len(parts), 2):
         for pattern, repl in _FIXES:
             parts[i] = pattern.sub(repl, parts[i])

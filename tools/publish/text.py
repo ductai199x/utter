@@ -15,7 +15,7 @@ import pyarrow as pa
 import typer
 
 from eval.paths import data_dir
-from publish.common import fix_final, passages, provenance, shards, write_parquet
+from publish.common import excluded_passages, fix_final, passages, provenance, shards, write_parquet
 
 RUN = "e2b"
 SPLITS = {"train": "pairs.jsonl", "test": "pairs.eval.jsonl"}
@@ -44,7 +44,10 @@ FEATURES = {
     "dictionary": {"feature": {"dtype": "string", "_type": "Value"}, "_type": "List"},
     "lists": {"dtype": "bool", "_type": "Value"},
     "messages": {
-        "feature": {"role": {"dtype": "string", "_type": "Value"}, "content": {"dtype": "string", "_type": "Value"}},
+        "feature": {
+            "role": {"dtype": "string", "_type": "Value"},
+            "content": {"dtype": "string", "_type": "Value"},
+        },
         "_type": "List",
     },
     "source": {"dtype": "string", "_type": "Value"},
@@ -52,13 +55,15 @@ FEATURES = {
     "license": {"dtype": "string", "_type": "Value"},
 }
 
-_HEADER = re.compile(r"^((?:Dictionary: [^\n]*\n|Lists: off\n)*)Dictated: (.*)$", re.S)
+_HEADER = re.compile(r"^((?:Dictionary: [^\n]*\n|Lists: off\n)*)Dictated: (.*)$", re.DOTALL)
 
 
 def row(r: dict, P: dict) -> tuple[dict, bool]:
     system, user = r["prompt"]
     assistant = r["completion"][0]
-    assert [m["role"] for m in (system, user, assistant)] == ["system", "user", "assistant"], r["id"]
+    assert [m["role"] for m in (system, user, assistant)] == ["system", "user", "assistant"], r[
+        "id"
+    ]
     m = _HEADER.match(user["content"])
     assert m, f"{r['id']}: {user['content'][:80]!r}"
     header, dictated = m.groups()
@@ -88,19 +93,47 @@ def row(r: dict, P: dict) -> tuple[dict, bool]:
 
 def main(out: Path) -> None:
     P = passages()
+    X = excluded_passages(P)
     stats = {}
     for split, name in SPLITS.items():
-        rows, fixed = [], 0
+        rows, order, fixed_ids, excluded = [], {}, {}, {"license": 0, "wrapped-prose list": 0}
         for line in (data_dir() / "train" / RUN / name).open(encoding="utf-8"):
-            built, was_fixed = row(json.loads(line), P)
+            raw = json.loads(line)
+            why = X.get(raw["id"].split("-")[0])
+            if why:
+                excluded[why] += 1
+                continue
+            built, was_fixed = row(raw, P)
+            fixed_ids[built["id"]] = was_fixed
+            order[built["id"]] = len(rows)
             rows.append(built)
-            fixed += was_fixed
         assert len({r["id"] for r in rows}) == len(rows), f"{split}: duplicate ids"
+        # Two renditions of one passage that the recognizer heard identically (say "natural" and
+        # "explicit") make the same pair twice: one is kept, natural first, so no pair repeats and
+        # no row carries a category its input does not show.
+        rows.sort(key=lambda r: (r["id"].split("-")[0], r["category"] != "natural", r["id"]))
+        kept, pairs = [], set()
+        for r in rows:
+            key = (r["dictated"], r["final_text"])
+            if key not in pairs:
+                pairs.add(key)
+                kept.append(r)
+        duplicates = len(rows) - len(kept)
+        rows = sorted(kept, key=lambda r: order[r["id"]])
         parts = shards(rows, 300 << 20, lambda r: sum(len(m["content"]) for m in r["messages"]) * 2)
         for i, part in enumerate(parts):
             path = out / "data" / f"{split}-{i:05d}-of-{len(parts):05d}.parquet"
-            write_parquet(path, pa.Table.from_pylist(part, schema=SCHEMA), FEATURES, row_group_size=10_000)
-        stats[split] = {"rows": len(rows), "fixed": fixed, "shards": len(parts)}
+            write_parquet(
+                path, pa.Table.from_pylist(part, schema=SCHEMA), FEATURES, row_group_size=10_000
+            )
+        stats[split] = {
+            "rows": len(rows),
+            "fixed": sum(fixed_ids.get(r["id"], 0) for r in rows),
+            "duplicates_removed": duplicates,
+            "excluded_for_license": excluded["license"],
+            "wrapped_prose_lists": excluded["wrapped-prose list"],
+            "shards": len(parts),
+        }
         print(split, stats[split])
     (out / "stats.json").write_text(json.dumps(stats, indent=2), encoding="utf-8")
 
