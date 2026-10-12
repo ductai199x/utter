@@ -149,6 +149,27 @@ with = "ctrl-shift-v"
 keep = "normal"
 ```
 
+## Measured (2026-10-12, insert::live, run by hand)
+
+A test window of Utter's own, never another app's, with the person's clipboard saved and put
+back around the run:
+- **Ctrl+V, Shift+Insert, typing it out, Leave it there, a newer copy kept, focus moved
+  refused:** all pass.
+- **The restore was broken before this:** the sequence number was read while the clipboard was
+  still open, one behind, so the restore took the paste for the person's copy and never put
+  anything back. Fixed; 120 of 120 save-and-restore rounds come back.
+- **With a clipboard manager running (UniClipboard):** contents show up to about 100 ms after a
+  write (none at once, the text listed but unreadable at 20 ms), and an open can be lost
+  mid-way. Saves wait for listed formats and look twice at an empty clipboard; every
+  operation retries as a whole; the paste waits until its text reads back. Without it, every
+  round-trip passes at once.
+- **A paste that types nothing:** 3 in 240 back-to-back pastes, with or without a settle
+  between the clipboard write and the keys (0, 10, 25, 50 ms), so no settle is added. The app
+  opens the clipboard once when the keys arrive; if something else holds it that instant
+  (Windows' clipboard history reads every change), it pastes nothing. The dictation is in
+  History and Alt+Shift+Z pastes it again. **Next:** supply the text by delayed rendering, so
+  Utter knows whether the app read it and can press the keys again if it did not.
+
 ## Acceptance checks
 
 1. Notepad, Chrome, Slack (Electron), Word, Windows Terminal: the text goes in, and the old
