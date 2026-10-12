@@ -129,6 +129,13 @@ an injected Right Ctrl start one, so a script can hold the key (SendInput) and c
 paste, History and the Bar. Nothing is played. With `UTTER_DATA_DIR` pointing at a folder of
 its own it never touches the real History or settings.
 
+**The published datasets** (private on the Hub): `ductai199x/dictation-to-text`, the cleanup
+training corpus (`tools/publish/text.py`), and `ductai199x/dictation-speech`, its audio and the
+eval sets (`tools/publish/voice.py`, run where each split's audio is: the test sets here, the
+training audio on FLAME's `/workspace/tai/utter/data-utter/eval`). `publish.card` writes the
+cards, `publish.upload` uploads. Training clips whose audio was lost are spoken again by
+`tools/tts/kokoro/respeak.py`.
+
 **Run Utter from a normal terminal, not from inside a packaged app.** The Claude desktop app
 is an MSIX package: a folder that a process started from it creates under `%LOCALAPPDATA%`
 lands in the package's private store (`AppData\Local\Packages\<package>\LocalCache\Local\`),
