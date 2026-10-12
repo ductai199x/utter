@@ -1,7 +1,7 @@
 # First run
 
 What a person sees the first time Utter starts, from the installer to their first dictation.
-Status: **spec, not built**. It replaces `utter-cli setup` for everyone but developers.
+Status: **built** (app/src/setup). It replaces `utter-cli setup` for everyone but developers.
 
 ## What it is for
 
@@ -55,7 +55,8 @@ published):
 
 - Each card: the name, its sentence, "N GB GPU memory", and "N GB download".
 - The best fit for this GPU is selected when the step opens and marked **Recommended** (a
-  badge on the card's top edge): Quality when the card has 7.5 GB or more, Light below.
+  badge on the card's top edge): Quality when the card is big enough for it (utter_pipeline::card_need,
+  about 5.8 GB), Light below.
 - A model this GPU cannot run is shown disabled, with "Needs an N GB graphics card".
 - The prompted 26B is never offered: the fine-tuned E4B beats it on every eval.
 - Choosing a card saves it (settings.toml `model`); the download step fetches what it needs,
@@ -70,9 +71,9 @@ Choosing a device saves it to settings.toml. **Continue**.
 
 ### 4. Download
 
-Title "Downloading the models". Line: "About 7.8 GB. You can use your computer meanwhile;
+Title "Downloading the models". Line: "About N GB (what the chosen model still needs). You can use your computer meanwhile;
 Utter will let you know when it is ready."
-- One progress bar for everything, with "3.1 of 7.8 GB" on the left and "about 4 min left" on
+- One progress bar for everything, with "3.1 of 6.0 GB" on the left and "about 4 min left" on
   the right (from the speed over the last 10 s; nothing until there are 3 s of data).
 - Under it, what is being fetched now in muted text: "Speech model", "Cleanup model",
   "GPU runtime". After all downloads: "Checking files..." then "Getting ready..." while the
