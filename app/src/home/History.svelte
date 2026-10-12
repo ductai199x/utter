@@ -5,6 +5,7 @@
   import { cubicOut } from 'svelte/easing';
   import { fade, fly } from 'svelte/transition';
   import AnimatedMark from '../lib/AnimatedMark.svelte';
+  import '../lib/chips.css';
   import {
     historyChanges,
     historyCopy,
@@ -364,7 +365,7 @@
 <div class="history">
   <section class="list-col" aria-label="Dictations">
     <div class="top">
-      <label class="search">
+      <label class="search-field">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="M13.2 13.2L17 17" /></svg>
         <input
           bind:this={searchEl}
@@ -615,145 +616,17 @@
   .top {
     padding: 16px 16px 8px;
   }
-  .search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 38px;
-    padding: 0 12px;
-    border-radius: 10px;
-    background: var(--home-surface);
-    border: 1px solid var(--home-border);
-    transition:
-      border-color 120ms var(--ease-out),
-      box-shadow 160ms var(--ease-out);
-  }
-  .search:focus-within {
-    border-color: color-mix(in srgb, var(--home-accent) 55%, transparent);
-    box-shadow: 0 0 0 4px var(--home-accent-soft);
-  }
-  .search svg {
-    width: 16px;
-    height: 16px;
-    flex: none;
-    fill: none;
-    stroke: var(--home-faint);
-    stroke-width: 1.7;
-    stroke-linecap: round;
-  }
-  .search input {
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    padding: 0;
-    border: none;
-    background: none;
-    box-shadow: none;
-  }
-  .count {
-    font-size: 12px;
-    color: var(--home-faint);
-    font-variant-numeric: tabular-nums;
-  }
-
   .chips {
-    display: flex;
-    gap: 6px;
+    flex-wrap: nowrap;
     margin-top: 10px;
-  }
-  .chip-wrap {
-    position: relative;
-  }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 14px;
-    font-size: 12.5px;
-    color: var(--home-muted);
-    background: none;
-    border: 1px solid var(--home-border);
-    white-space: nowrap;
-  }
-  .chip.on {
-    color: var(--home-accent);
-    background: var(--home-accent-soft);
-    border-color: transparent;
   }
   .chip.star {
     width: 28px;
     padding: 0;
     justify-content: center;
   }
-  .chip svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    stroke-linejoin: round;
-  }
   .chip.star.on svg {
     fill: currentColor;
-  }
-  .chip .chev {
-    width: 12px;
-    height: 12px;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    margin-right: -3px;
-  }
-  .chip .clear {
-    font-size: 14px;
-    line-height: 1;
-    margin-right: -3px;
-    opacity: 0.75;
-  }
-  .chip .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--home-error);
-  }
-  .menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    min-width: 184px;
-    max-height: 320px;
-    overflow-y: auto;
-    padding: 5px;
-    border-radius: 12px;
-    background: var(--home-surface);
-    border: 1px solid var(--home-border);
-    box-shadow: var(--home-shadow);
-    z-index: 10;
-  }
-  .menu button {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    height: 32px;
-    padding: 0 10px;
-    border: none;
-    border-radius: 7px;
-    background: none;
-    text-align: left;
-    white-space: nowrap;
-  }
-  .menu button[aria-checked='true'] {
-    color: var(--home-accent);
-    font-weight: 600;
-  }
-  .menu .n {
-    font-size: 12px;
-    color: var(--home-faint);
-    font-weight: 400;
-    margin-left: 16px;
-    font-variant-numeric: tabular-nums;
   }
 
   .scroll {
