@@ -28,18 +28,19 @@ pub struct State {
     microphones: Vec<String>,
     /// The light model is published (components.json): until then only Quality is offered.
     light_available: bool,
-    /// The GPU has the memory the quality model needs (with the speech model, about 6 GB).
+    /// The GPU is big enough for the quality model (utter_pipeline::card_need).
     quality_fits: bool,
     /// What choosing each model would download now, in bytes (0: installed).
     download_bytes: std::collections::HashMap<&'static str, u64>,
+    /// The GPU memory each model needs, speech included (utter_pipeline::gpu_need), and the
+    /// smallest graphics card it runs on (card_need), in bytes.
+    gpu_need: std::collections::HashMap<&'static str, u64>,
+    card_need: std::collections::HashMap<&'static str, u64>,
     version: &'static str,
     data_dir: String,
     settings_path: String,
 }
 
-/// The quality model with the speech model needs about 6 GB; a card with 7.5 GB leaves the room
-/// the desktop itself takes.
-const QUALITY_GPU_BYTES: u64 = 7_500_000_000;
 
 /// The GPU's memory, asked once: it does not change while Utter runs.
 fn gpu_memory() -> Option<u64> {
@@ -48,6 +49,10 @@ fn gpu_memory() -> Option<u64> {
 }
 
 /// Bytes `tier` still needs downloaded (its components that are not installed and intact).
+/// The models offered, by the name the settings and the page use.
+const TIERS: [(&str, utter_llm::cleanup::Tier); 2] =
+    [("quality", utter_llm::cleanup::Tier::Quality), ("light", utter_llm::cleanup::Tier::Light)];
+
 fn to_download(tier: utter_llm::cleanup::Tier) -> u64 {
     utter_pipeline::components_for(tier)
         .into_iter()
@@ -68,11 +73,13 @@ fn state() -> State {
         error,
         microphones: utter_audio::input_devices(),
         light_available: utter_llm::cleanup::Tier::Light.offered(),
-        quality_fits: gpu_memory().is_some_and(|m| m >= QUALITY_GPU_BYTES),
-        download_bytes: [("quality", utter_llm::cleanup::Tier::Quality), ("light", utter_llm::cleanup::Tier::Light)]
+        quality_fits: gpu_memory().is_some_and(|m| m >= utter_pipeline::card_need(utter_llm::cleanup::Tier::Quality)),
+        download_bytes: TIERS
             .into_iter()
             .map(|(name, tier)| (name, to_download(tier)))
             .collect(),
+        gpu_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::gpu_need(tier))).collect(),
+        card_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::card_need(tier))).collect(),
         version: env!("CARGO_PKG_VERSION"),
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),

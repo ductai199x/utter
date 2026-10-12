@@ -44,8 +44,26 @@ peak over loading plus 240 utterances (60 eval clips, the 10 longest included, u
 - **The 4-bit encoder** would save another 300 MB but costs accuracy (+0.08 WER points, worse in
   90% of resamples), so it stays out.
 
-**Light, all on the GPU: about 3.1 GB** (1.77 cleanup + 1.30 speech). **Quality: about
-5.6 GB → 5.2 GB** with the float16 settings, for free.
+**Then both models on the 8-bit speech build** (Tai: cut memory as far as quality allows, small
+latency costs are fine), **and cleanup prompts processed 128 tokens at a time** (`-ub 128`):
+the compute buffer shrinks from 109 to 27 MiB (Quality) and 122 to 30 MiB (Light), with the
+same outputs (200 real cases, at -ub 256, 128 and 64 all identical to 512) and the same cleanup
+time (Quality 111 -> 114 ms p50, Light 81 -> 82 ms). 64 saves only 11 MB more and would slow
+long prompts.
+
+**End to end** (120 clips of AMI, VoxPopuli and Earnings-22 replayed in real time through the
+whole pipeline; GPU memory of Utter and its llama-server together, at the peak):
+
+| | GPU memory | Key up to text, p50 / p95 |
+|---|---|---|
+| Quality, as it was | 5,306 MiB (5.6 GB) | 192 / 396 ms |
+| **Quality, 8-bit speech, -ub 128** | **4,572 MiB (4.8 GB)** | 209 / 406 ms |
+| Light, all on the GPU | 3,153 MiB | 170 / 337 ms |
+| **Light, -ub 128** | **3,085 MiB (3.2 GB)** | 167 / 323 ms |
+
+The context stays 4,096 tokens: its whole cache is 72 MiB for Light (flash attention keeps
+attention's memory linear, and only 3 full and 12 sliding-window layers keep a cache), so
+halving it would save 36 MB. A dictation too long for it gets typed raw, never lost.
 
 ---
 

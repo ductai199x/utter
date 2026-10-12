@@ -44,14 +44,24 @@
   let fileInput = $state<HTMLInputElement>();
 
   const terms = $derived(settings?.dictionary ?? []);
+  /** A card size people know: bytes in whole GB, rounded up. */
+  const cardGb = (bytes: number) => Math.ceil(bytes / 2 ** 30);
+  /** GPU memory a model needs, to one decimal. */
+  const needGb = (model: Model) => ((home?.gpuNeed[model] ?? 0) / 1e9).toFixed(1);
   // Why the quality model cannot be chosen, if it cannot.
-  const qualityBlocked = $derived(home && !home.qualityFits ? 'needs a graphics card with 8 GB of memory.' : '');
+  const qualityBlocked = $derived(
+    home && !home.qualityFits ? `needs a graphics card with ${cardGb(home.cardNeed.quality)} GB of memory.` : '',
+  );
   // The two models: Quality, the bigger one, and Light, once its model is published.
   const MODELS = $derived(
     (
       [
-        ['quality', 'Quality', 'The bigger model, most accurate: about 6 GB of GPU memory.'],
-        ['light', 'Light', 'The smaller model, for 4 GB graphics cards: about 2.5 GB. Speech runs on the processor.'],
+        ['quality', 'Quality', `The bigger model, most accurate: about ${needGb('quality')} GB of GPU memory.`],
+        [
+          'light',
+          'Light',
+          `The smaller model, for ${cardGb(home?.cardNeed.light ?? 0)} GB graphics cards: about ${needGb('light')} GB.`,
+        ],
       ] as const
     ).filter(([id]) => id !== 'light' || home?.lightAvailable),
   );

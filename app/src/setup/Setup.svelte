@@ -327,7 +327,7 @@
           </ul>
           {#if checks?.noGpu}
             <p class="panel">
-              Utter needs an NVIDIA graphics card with 8 GB of memory or more. Support for other cards is planned.
+              Utter needs an NVIDIA graphics card. Support for other cards is planned.
             </p>
           {/if}
         {:else if view === 'model'}

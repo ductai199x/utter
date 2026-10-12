@@ -34,6 +34,8 @@ CLI = REPO / "target" / "release" / "utter-cli.exe"
 # The product's cleanup settings (crates/utter-llm/src/cleanup.rs, SERVER_ARGS).
 PRODUCT_SERVER_ARGS = [
     "--swa-full",
+    "-ub",
+    "128",
     "--spec-type",
     "ngram-simple",
     "--spec-ngram-simple-size-n",
