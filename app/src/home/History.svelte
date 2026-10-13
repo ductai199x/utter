@@ -44,6 +44,7 @@
     'no-window': 'No window had the focus.',
     refused: 'The app runs as administrator, so Windows would not let Utter type into it.',
     failed: 'The paste did not go through.',
+    unconfirmed: "The app did not take the paste. A paste rule can fix that app: Settings, Paste rules.",
   };
 
   let search = $state('');

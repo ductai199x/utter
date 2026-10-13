@@ -1,5 +1,6 @@
 //! The text just before the cursor in the focused app, so a dictation that continues text can
-//! be joined to it with a space (docs/ux/insertion.md, "Spacing"). Windows reads it through UI
+//! be joined to it with a space (docs/ux/insertion.md, "Spacing"), and a paste can be seen to
+//! have landed ("Confirming the paste"). Windows reads it through UI
 //! Automation's text pattern, which Notepad, Word, browsers' text fields and most editors
 //! expose; an app that does not (a terminal) gives nothing, and Utter adds nothing.
 //!
@@ -10,7 +11,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-/// How many characters before the cursor are read.
+/// How many characters before the cursor spacing needs.
 pub const BEFORE_CHARS: i32 = 2;
 
 /// An answer on its way ([`before_cursor`]).
@@ -24,12 +25,12 @@ impl Pending {
     }
 }
 
-/// Starts reading up to [`BEFORE_CHARS`] characters before the cursor of the focused control.
-pub fn before_cursor() -> Pending {
+/// Starts reading up to `chars` characters before the cursor of the focused control.
+pub fn before_cursor(chars: i32) -> Pending {
     let (tx, rx) = mpsc::channel();
     match worker() {
         Some(w) => {
-            let _ = w.lock().expect("caret worker lock").send(tx);
+            let _ = w.lock().expect("caret worker lock").send((chars, tx));
         }
         None => {
             let _ = tx.send(None);
@@ -38,8 +39,8 @@ pub fn before_cursor() -> Pending {
     Pending(rx)
 }
 
-/// Where queries go: each carries where its answer goes.
-type Requests = Sender<Sender<Option<String>>>;
+/// Where queries go: each carries how many characters to read and where its answer goes.
+type Requests = Sender<(i32, Sender<Option<String>>)>;
 
 /// One thread for every query: COM set up once, the automation object made once (tens of
 /// milliseconds), and never on a thread that owns windows or hooks.
@@ -47,13 +48,13 @@ fn worker() -> Option<&'static Mutex<Requests>> {
     static WORKER: OnceLock<Option<Mutex<Requests>>> = OnceLock::new();
     WORKER
         .get_or_init(|| {
-            let (tx, rx) = mpsc::channel::<Sender<Option<String>>>();
+            let (tx, rx) = mpsc::channel::<(i32, Sender<Option<String>>)>();
             std::thread::Builder::new()
                 .name("utter-caret".into())
                 .spawn(move || {
                     let reader = imp::Reader::new();
-                    for reply in rx {
-                        let _ = reply.send(reader.as_ref().and_then(|r| r.before_cursor(BEFORE_CHARS)));
+                    for (chars, reply) in rx {
+                        let _ = reply.send(reader.as_ref().and_then(|r| r.before_cursor(chars)));
                     }
                 })
                 .ok()
