@@ -479,9 +479,10 @@ fn main() {
             // Their shortcuts are shown beside them (docs/ux/insertion.md).
             let paste = MenuItem::with_id(app, "paste-last", "Paste last dictation", true, Some("Alt+Shift+Z"))?;
             let copy = MenuItem::with_id(app, "copy-last", "Copy last dictation", true, Some("Alt+Shift+X"))?;
+            let retry = MenuItem::with_id(app, "retry-last", "Retry last dictation", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Utter", true, None::<&str>)?;
             let line = || PredefinedMenuItem::separator(app);
-            let menu = Menu::with_items(app, &[&open, &line()?, &paste, &copy, &line()?, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &line()?, &paste, &copy, &retry, &line()?, &quit])?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("an app icon"))
                 .tooltip("Utter: loading...")
@@ -491,6 +492,7 @@ fn main() {
                     "open" => home::show(app),
                     "paste-last" => send_command(app, utter_pipeline::Command::PasteLast),
                     "copy-last" => send_command(app, utter_pipeline::Command::CopyLast),
+                    "retry-last" => send_command(app, utter_pipeline::Command::RetryLast),
                     "quit" => app.exit(0),
                     _ => {}
                 })

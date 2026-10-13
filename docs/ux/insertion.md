@@ -82,6 +82,12 @@ Two shortcuts, the same as Wispr Flow's so they are familiar, and two tray menu 
   the tray item still works.
 - They become changeable with the dictation hotkey (later, DESIGN.md section 8.1).
 
+A third tray item, **Retry last dictation** (no shortcut), runs the last dictation's audio
+through recognition and cleanup again, as fast as they go, and pastes the result where paste
+last would. It is for a dictation something went wrong with: a GPU error, a cleanup that timed
+out (the raw text went in), a microphone that dropped out. The audio is kept in memory only,
+never written, and only the newest one; with none yet, the Bar says "Nothing to retry yet".
+
 ## Paste rules
 
 Most apps paste with Ctrl+V and read the clipboard at once. Some do not: terminals that paste
