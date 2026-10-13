@@ -480,12 +480,7 @@ fn llm_bench(
     };
     // A case may say lists are off (the setting), as the app then tells the model.
     let messages = |text: &str, dictionary: &[String], lists_off: bool| {
-        cleanup::messages_with(
-            &system,
-            text,
-            dictionary,
-            &cleanup::Context { lists_off },
-        )
+        cleanup::messages_with(&system, text, dictionary, &cleanup::Context { lists_off })
     };
     let mut opts = ServerOptions::new(gguf);
     opts.extra_args = server_args.to_vec();
@@ -758,7 +753,7 @@ fn e2e_bench(sets: &str, limit: usize, name: &str, cfg: utter_pipeline::Pipeline
         let (t50, t95) = pct(&mut total);
         let (a50, a95) = pct(&mut asr_t);
         println!(
-            "{set:>14}: {} clips | key up -> text ready p50 {t50:.0} ms p95 {t95:.0} | transcribed p50 {a50:.0} p95 {a95:.0} | cleanup ran on {cleaned}",
+            "{set:>14}: {} clips | key up -> text ready p50 {t50:.0} ms p95 {t95:.0} | transcribed p50 {a50:.0} p95 {a95:.0} | the gate flagged {cleaned}",
             rows.len()
         );
         all_total.extend(total);
