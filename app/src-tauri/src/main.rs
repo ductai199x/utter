@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use utter_pipeline::{Event, Pipeline, PipelineConfig, Settings};
 use utter_platform::overlay;
 
+mod args;
 mod history;
 mod home;
 mod problem;
@@ -412,6 +413,9 @@ fn since_launch() -> f64 {
 }
 
 fn main() {
+    if !args::handle() {
+        return;
+    }
     LAUNCHED.get_or_init(std::time::Instant::now);
     tracing_subscriber_init();
     if let Some(old) = utter_core::move_legacy_data() {
