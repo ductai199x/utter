@@ -89,6 +89,8 @@
     ['off', 'Off'],
   ];
   let confirm = $state<{ title: string; message: string; action: string; run: () => void } | null>(null);
+  // Why a History row could not do what was asked (History could not be read).
+  let historyError = $state<string | null>(null);
 
   async function changeKeep(keep: KeepHistory, select: HTMLSelectElement) {
     if (!settings) return;
@@ -96,7 +98,15 @@
     const order = KEEP_HISTORY.map(([k]) => k);
     const apply = () => settings && void save({ ...settings, keep_history: keep });
     // Keeping longer deletes nothing; keeping less asks first, if anything would go.
-    const n = order.indexOf(keep) > order.indexOf(current) ? await historyCountOlder(keep) : 0;
+    let n = 0;
+    try {
+      n = order.indexOf(keep) > order.indexOf(current) ? await historyCountOlder(keep) : 0;
+      historyError = null;
+    } catch (e) {
+      select.value = current;
+      historyError = String(e);
+      return;
+    }
     if (n === 0 && keep !== 'off') return apply();
     // Until confirmed the control shows what is stored.
     select.value = current;
@@ -118,16 +128,23 @@
   }
 
   async function clearHistory() {
-    const { total } = await historyQuery({
-      search: '',
-      favorites: false,
-      inserted: null,
-      app: null,
-      since: null,
-      until: null,
-      offset: 0,
-      limit: 1,
-    });
+    let total: number;
+    try {
+      ({ total } = await historyQuery({
+        search: '',
+        favorites: false,
+        inserted: null,
+        app: null,
+        since: null,
+        until: null,
+        offset: 0,
+        limit: 1,
+      }));
+      historyError = null;
+    } catch (e) {
+      historyError = String(e);
+      return;
+    }
     if (total === 0) return;
     confirm = {
       title: 'Clear history?',
@@ -307,6 +324,7 @@
         </div>
         <button onclick={clearHistory}>Clear…</button>
       </div>
+      {#if historyError}<p class="row-error" role="alert">History could not be read: {historyError}</p>{/if}
 
       <h2>Shortcuts</h2>
       <div class="row">

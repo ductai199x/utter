@@ -69,7 +69,7 @@ pub struct AppCount {
 }
 
 /// One page of results, newest first, with what the filter column shows.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Page {
     pub entries: Vec<Entry>,
@@ -100,11 +100,14 @@ impl History {
         Self { path: path.into(), entries: Mutex::new(None) }
     }
 
-    /// Runs `f` on the entries, loading them first if needed.
-    fn with<R>(&self, f: impl FnOnce(&mut Vec<Entry>) -> R) -> R {
+    /// Runs `f` on the entries, loading them first if needed. A file that could not be read
+    /// is an error, and is read again next time: nothing is ever written over it.
+    fn with<R>(&self, f: impl FnOnce(&mut Vec<Entry>) -> R) -> Result<R, String> {
         let mut guard = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        let entries = guard.get_or_insert_with(|| load(&self.path));
-        f(entries)
+        if guard.is_none() {
+            *guard = Some(load(&self.path)?);
+        }
+        Ok(f(guard.as_mut().expect("loaded just above")))
     }
 
     /// Adds a finished dictation, giving it its id and time.
@@ -117,15 +120,18 @@ impl History {
             append(&self.path, &entry)?;
             entries.push(entry.clone());
             Ok(entry)
-        })
+        })?
     }
 
     /// The newest dictation with text, inserted or not: what "paste last" pastes.
     pub fn last_text(&self) -> Option<String> {
         self.with(|entries| entries.iter().rev().find(|e| !e.text.trim().is_empty()).map(|e| e.text.clone()))
+            .inspect_err(|e| tracing::warn!("history: {e}"))
+            .ok()
+            .flatten()
     }
 
-    pub fn query(&self, q: &Query) -> Page {
+    pub fn query(&self, q: &Query) -> Result<Page, String> {
         self.with(|entries| {
             let needle = fold(&q.search);
             let in_time = |e: &Entry| q.since.is_none_or(|s| e.at >= s) && q.until.is_none_or(|u| e.at < u);
@@ -190,7 +196,7 @@ impl History {
     }
 
     /// How many entries are older than `max_age` (for the confirm before shortening it).
-    pub fn count_older(&self, max_age: Duration) -> usize {
+    pub fn count_older(&self, max_age: Duration) -> Result<usize, String> {
         let cutoff = now_ms().saturating_sub(max_age.as_millis() as u64);
         self.with(|entries| entries.iter().filter(|e| e.at < cutoff).count())
     }
@@ -221,7 +227,7 @@ impl History {
                 return Ok(());
             }
             rewrite(&self.path, entries).inspect_err(|_| *entries = before)
-        })
+        })?
     }
 }
 
@@ -297,11 +303,18 @@ fn fold(s: &str) -> String {
     s.nfd().filter(|c| !unicode_normalization::char::is_combining_mark(*c)).flat_map(char::to_lowercase).collect()
 }
 
-/// Reads the file. A line that does not parse (a crash mid-append, a newer version's entry) is
-/// moved to `history.unreadable.jsonl` beside it, never lost, and the file is written again
-/// without it, so the next entry does not land on a torn line.
-fn load(path: &Path) -> Vec<Entry> {
-    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+/// Reads the file: none yet is an empty history, any other failure an error. Bytes that are not
+/// UTF-8 (a torn character) spoil only their line. A line that does not parse (a crash
+/// mid-append, a newer version's entry) is moved to `history.unreadable.jsonl` beside it, never
+/// lost, and the file is written again without it, so the next entry does not land on a torn
+/// line.
+fn load(path: &Path) -> Result<Vec<Entry>, String> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let text = String::from_utf8_lossy(&bytes);
     let mut unreadable = String::new();
     let mut entries: Vec<Entry> = text
         .lines()
@@ -333,17 +346,19 @@ fn load(path: &Path) -> Vec<Entry> {
             Err(e) => tracing::warn!("history: could not keep the unreadable lines in {}: {e}", aside.display()),
         }
     }
-    entries
+    Ok(entries)
 }
 
 fn append(path: &Path, entry: &Entry) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+    // The line and its end in one write: a crash cannot leave a line without its newline
+    // for the next entry to land on.
+    let line = serde_json::to_string(entry).map_err(|e| e.to_string())? + "\n";
     let mut f =
         OpenOptions::new().create(true).append(true).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    writeln!(f, "{line}").map_err(|e| format!("{}: {e}", path.display()))
+    f.write_all(line.as_bytes()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn rewrite(path: &Path, entries: &[Entry]) -> Result<(), String> {
@@ -390,7 +405,7 @@ mod tests {
         h.add(entry("first", "slack.exe", true)).unwrap();
         h.add(entry("second", "chrome.exe", true)).unwrap();
         let again = History::open(h.path.clone());
-        let page = again.query(&Query::default());
+        let page = again.query(&Query::default()).unwrap();
         assert_eq!(page.entries.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["second", "first"]);
         assert!(page.entries[0].id > page.entries[1].id);
         assert_eq!(again.last_text().as_deref(), Some("second"));
@@ -401,7 +416,7 @@ mod tests {
         let h = temp("search");
         h.add(entry("Meet at the Café", "slack.exe", true)).unwrap();
         h.add(Entry { heard: "jira ticket".into(), ..entry("Jira ticket", "chrome.exe", true) }).unwrap();
-        let find = |s: &str| h.query(&Query { search: s.into(), ..Query::default() }).matched;
+        let find = |s: &str| h.query(&Query { search: s.into(), ..Query::default() }).unwrap().matched;
         assert_eq!(find("cafe"), 1);
         assert_eq!(find("JIRA"), 1);
         assert_eq!(find("nothing"), 0);
@@ -413,7 +428,8 @@ mod tests {
         h.add(entry("a", "slack.exe", true)).unwrap();
         h.add(entry("b", "slack.exe", false)).unwrap();
         h.add(entry("c", "chrome.exe", false)).unwrap();
-        let page = h.query(&Query { inserted: Some(false), app: Some("SLACK.exe".into()), ..Query::default() });
+        let page =
+            h.query(&Query { inserted: Some(false), app: Some("SLACK.exe".into()), ..Query::default() }).unwrap();
         assert_eq!(page.matched, 1);
         assert_eq!(page.not_inserted, 2);
         assert_eq!(page.apps[0].exe, "slack.exe");
@@ -428,11 +444,11 @@ mod tests {
         h.set_favorite(a.id, true).unwrap();
         let removed = h.delete(b.id).unwrap().unwrap();
         let again = History::open(h.path.clone());
-        let page = again.query(&Query::default());
+        let page = again.query(&Query::default()).unwrap();
         assert_eq!(page.total, 1);
         assert!(page.entries[0].favorite);
         again.restore(removed).unwrap();
-        assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 2);
+        assert_eq!(History::open(h.path.clone()).query(&Query::default()).unwrap().total, 2);
     }
 
     #[test]
@@ -440,14 +456,14 @@ mod tests {
         let h = temp("prune");
         h.add(entry("old", "slack.exe", true)).unwrap();
         // Make it old by hand, as if written a day ago.
-        h.with(|e| e[0].at -= 25 * 3600 * 1000);
+        h.with(|e| e[0].at -= 25 * 3600 * 1000).unwrap();
         h.add(entry("new", "slack.exe", true)).unwrap();
-        assert_eq!(h.count_older(Duration::from_secs(24 * 3600)), 1);
+        assert_eq!(h.count_older(Duration::from_secs(24 * 3600)).unwrap(), 1);
         assert_eq!(h.prune(Some(Duration::from_secs(24 * 3600))).unwrap(), 1);
         assert_eq!(h.prune(None).unwrap(), 0);
-        assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 1);
+        assert_eq!(History::open(h.path.clone()).query(&Query::default()).unwrap().total, 1);
         h.clear().unwrap();
-        assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 0);
+        assert_eq!(History::open(h.path.clone()).query(&Query::default()).unwrap().total, 0);
     }
 
     #[test]
@@ -475,11 +491,40 @@ mod tests {
         write!(f, "{{\"id\": 9, \"at\"").unwrap();
         drop(f);
         let reopened = History::open(h.path.clone());
-        assert_eq!(reopened.query(&Query::default()).total, 1);
+        assert_eq!(reopened.query(&Query::default()).unwrap().total, 1);
         // The next entry is appended after the torn line was dealt with, and reads back.
         reopened.add(entry("after", "slack.exe", true)).unwrap();
-        assert_eq!(History::open(h.path.clone()).query(&Query::default()).total, 2);
+        assert_eq!(History::open(h.path.clone()).query(&Query::default()).unwrap().total, 2);
         let aside = std::fs::read_to_string(h.path.with_extension("unreadable.jsonl")).unwrap();
         assert_eq!(aside, "{\"id\": 9, \"at\"\n");
+    }
+
+    #[test]
+    fn a_history_that_cannot_be_read_is_an_error_and_never_written_over() {
+        let h = temp("unreadable");
+        // A folder where the file should be: reading it fails, and not because it is missing.
+        std::fs::create_dir_all(&h.path).unwrap();
+        assert!(h.query(&Query::default()).is_err());
+        assert!(h.add(entry("lost?", "slack.exe", true)).is_err());
+        assert!(h.clear().is_err());
+        assert!(h.path.is_dir(), "nothing was written in its place");
+        // Once it can be read, it is: the failure was not cached as an empty history.
+        std::fs::remove_dir(&h.path).unwrap();
+        h.add(entry("now", "slack.exe", true)).unwrap();
+        assert_eq!(h.query(&Query::default()).unwrap().total, 1);
+    }
+
+    #[test]
+    fn bytes_that_are_not_utf8_spoil_only_their_line() {
+        let h = temp("bytes");
+        h.add(entry("first", "slack.exe", true)).unwrap();
+        let mut f = OpenOptions::new().append(true).open(&h.path).unwrap();
+        // A line cut inside a three-byte character.
+        f.write_all(b"{\"id\": 7, \"text\": \"caf\xE2\x82\n").unwrap();
+        drop(f);
+        let reopened = History::open(h.path.clone());
+        reopened.add(entry("second", "slack.exe", true)).unwrap();
+        let page = History::open(h.path.clone()).query(&Query::default()).unwrap();
+        assert_eq!(page.entries.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["second", "first"]);
     }
 }

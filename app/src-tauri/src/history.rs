@@ -8,7 +8,7 @@ use utter_platform::focus;
 use utter_platform::insert::{self, PasteRule};
 
 #[tauri::command]
-pub fn history_query(query: Query) -> Page {
+pub fn history_query(query: Query) -> Result<Page, String> {
     History::global().query(&query)
 }
 
@@ -42,9 +42,9 @@ pub fn history_changes(heard: String, text: String) -> Vec<Change> {
 
 /// How many entries a shorter keep time would delete (for its confirm).
 #[tauri::command]
-pub fn history_count_older(keep: KeepHistory) -> usize {
+pub fn history_count_older(keep: KeepHistory) -> Result<usize, String> {
     match keep.max_age() {
-        None => 0,
+        None => Ok(0),
         Some(age) => History::global().count_older(age),
     }
 }
@@ -99,7 +99,11 @@ fn words(rule: PasteRule) -> (String, String) {
 /// The rules the Settings page lists, merged from this platform's defaults and `overrides`.
 #[tauri::command]
 pub fn paste_rules(overrides: Vec<PasteOverride>) -> PasteRules {
-    let page = History::global().query(&Query { limit: 1, ..Query::default() });
+    // History only adds counts and names here: the rules list without them when it cannot be read.
+    let page = History::global()
+        .query(&Query { limit: 1, ..Query::default() })
+        .inspect_err(|e| tracing::warn!("history: {e}"))
+        .unwrap_or_default();
     let used = |exe: &str| page.apps.iter().find(|a| a.exe.eq_ignore_ascii_case(exe)).map_or(0, |a| a.count);
     let mut rules: Vec<RuleRow> = Vec::new();
     for &(app, name, rule) in insert::default_rules() {
