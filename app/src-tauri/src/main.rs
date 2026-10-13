@@ -218,6 +218,13 @@ impl Bar {
         }
     }
 
+    /// Dictation stopped with an error, possibly mid-dictation: the Bar stops listening and
+    /// leaves with why, instead of staying up.
+    fn stopped(&self, why: &str) {
+        self.listening.store(false, Ordering::Relaxed);
+        self.leave_with_error(why);
+    }
+
     fn leave_with_error(&self, message: &str) {
         self.emit_state(BarState { message: Some(message.to_owned()), ..BarState::new("error") });
         self.leave_after(ERROR_HOLD);
@@ -388,6 +395,7 @@ fn run_pipeline(
             *commands.lock().expect("commands") = Some(pipeline.commands());
             if let Err(e) = pipeline.run(|event| bar.on_event(event)) {
                 tracing::error!("dictation stopped: {e}");
+                bar.stopped("Dictation stopped");
                 set_tray_status(&app, "Utter: stopped");
                 *link.0.lock().expect("pipeline link") = None;
                 *commands.lock().expect("commands") = None;

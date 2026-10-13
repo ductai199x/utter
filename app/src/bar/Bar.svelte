@@ -9,6 +9,9 @@
   type BarState = 'hidden' | 'listening' | 'finishing' | 'done' | 'notice' | 'cancelled' | 'error' | 'exit';
 
   let barState = $state<BarState>('hidden');
+  // What the pill draws: the state, except that exit and cancelled only fade the pill out, so
+  // it fades with what it showed (the words, the check, its size) rather than changing first.
+  let drawn = $state<BarState>('hidden');
   let handsFree = $state(false);
   let committed = $state('');
   let preview = $state('');
@@ -57,20 +60,20 @@
   const hasWords = $derived(committed.length + preview.length > 0);
   // Exactly the text the pill shows, for the measuring copies.
   const shownText = $derived(
-    barState === 'notice' ? message : committed && preview ? `${committed} ${preview}` : committed || preview,
+    drawn === 'notice' ? message : committed && preview ? `${committed} ${preview}` : committed || preview,
   );
   // Words show while listening and finishing, and stay under the Done check once they are
   // the pasted text.
   const showWords = $derived(
-    barState === 'notice' ||
-      (hasWords && (barState === 'listening' || barState === 'finishing' || (barState === 'done' && isFinal))),
+    drawn === 'notice' ||
+      (hasWords && (drawn === 'listening' || drawn === 'finishing' || (drawn === 'done' && isFinal))),
   );
   const pillWidth = $derived(
-    barState === 'notice'
+    drawn === 'notice'
       ? NOTICE_CHROME_W + textAreaW
       : showWords
       ? CHROME_W + textAreaW
-      : barState === 'error'
+      : drawn === 'error'
         ? MAX_W
         : BASE_W,
   );
@@ -126,8 +129,11 @@
         if (p.state !== 'hidden') wake();
         if (p.handsFree !== undefined) handsFree = p.handsFree;
         if (p.state === 'hidden') handsFree = false;
-        message = p.message ?? '';
-        noticeOk = p.ok ?? true;
+        if (p.state !== 'exit' && p.state !== 'cancelled') {
+          drawn = p.state;
+          message = p.message ?? '';
+          noticeOk = p.ok ?? true;
+        }
       }),
       on<{ committed: string; preview: string; final: boolean }>('bar:words', (e) => {
         committed = e.payload.committed;
@@ -150,23 +156,23 @@
   <div
     class="pill"
     class:shown={barState !== 'hidden' && barState !== 'exit' && barState !== 'cancelled'}
-    class:finishing={barState === 'finishing'}
+    class:finishing={drawn === 'finishing'}
     style:width="{pillWidth}px"
     style:height="{pillHeight}px"
   >
-    {#if handsFree && barState === 'listening'}<span class="dot"></span>{/if}
-    {#if barState === 'error'}
+    {#if handsFree && drawn === 'listening'}<span class="dot"></span>{/if}
+    {#if drawn === 'error'}
       <span class="error">{message}</span>
     {:else}
       <div
         class="lead"
-        class:done={barState === 'done' || barState === 'notice'}
-        class:notice={barState === 'notice'}
-        style:--lead-w={barState === 'notice' ? `${NOTICE_LEAD}px` : undefined}
+        class:done={drawn === 'done' || drawn === 'notice'}
+        class:notice={drawn === 'notice'}
+        style:--lead-w={drawn === 'notice' ? `${NOTICE_LEAD}px` : undefined}
       >
-        {#if barState === 'notice' && !noticeOk}
+        {#if drawn === 'notice' && !noticeOk}
           <span class="alert" aria-hidden="true"></span>
-        {:else if barState === 'done' || barState === 'notice'}
+        {:else if drawn === 'done' || drawn === 'notice'}
           <svg class="check" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path d="M5 12.5l4.2 4.2L19 7" />
           </svg>
@@ -179,10 +185,10 @@
       <div class="words" class:overflowing={lines > MAX_LINES}>
         <!-- Laid out at the pill's target width, not its animated one: as the pill grows it
              reveals the text instead of reflowing it, so lines never spill past the height. -->
-        <div class="text" class:notice={barState === 'notice'} class:amber={barState === 'notice' && !noticeOk} style:width="{textAreaW + 1}px">
+        <div class="text" class:notice={drawn === 'notice'} class:amber={drawn === 'notice' && !noticeOk} style:width="{textAreaW + 1}px">
           <!-- The provisional words update in place: re-creating them on every recognizer pass
                would replay their fade, a flicker every 300 ms. -->
-          {#if barState === 'notice'}{message}{:else}{committed}{#if preview}<span class="preview"
+          {#if drawn === 'notice'}{message}{:else}{committed}{#if preview}<span class="preview"
                 >{committed ? ' ' : ''}{preview}</span
               >{/if}{/if}
         </div>
