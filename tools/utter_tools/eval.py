@@ -14,6 +14,7 @@ differ: it reads the outputs, it writes none. Every step resumes: what is on dis
 
 from __future__ import annotations
 
+import hashlib
 import io
 import itertools
 import json
@@ -89,6 +90,29 @@ def _made_from(folder: Path, source: dict) -> bool:
     return marker.is_file() and json.loads(marker.read_text()) == source
 
 
+def _set_source(eval_set: str) -> dict:
+    """What an eval set was made from (make_sets): the dataset, its revision, the limit."""
+    return json.loads((common.eval_dir() / eval_set / "source.json").read_text())
+
+
+def _stamp(results_path: Path) -> Path:
+    return results_path.with_suffix(".source.json")
+
+
+def _fresh(results_path: Path, source: dict) -> bool:
+    """Whether a results file was made from `source`: a new revision of the set, another model
+    file or recognizer run makes it stale, and it is made again."""
+    stamp = _stamp(results_path)
+    return stamp.is_file() and json.loads(stamp.read_text()) == source
+
+
+def _file_id(path: Path) -> dict:
+    """Which file `path` is (a rebuilt model under the same name is another): without hashing
+    gigabytes."""
+    st = path.stat()
+    return {"path": str(path.resolve()), "bytes": st.st_size, "modified": int(st.st_mtime)}
+
+
 def make_sets(text_ref: str | None, speech_ref: str | None, limit: int = 0) -> list[str]:
     """The eval sets from the datasets at those revisions (default: main), as `utter-cli bench`
     reads them: a manifest of dataset rows and, for speech, a WAV per clip; with `limit`, the
@@ -140,19 +164,30 @@ def _done(path: Path, eval_set: str, field: str) -> bool:
 
 
 def recognize(eval_set: str, run: str, dictionary: Path | None = None) -> None:
-    if _done(results("asr", run, eval_set), eval_set, "hyp"):
+    out = results("asr", run, eval_set)
+    source = {"set": _set_source(eval_set), "dictionary": str(dictionary) if dictionary else None}
+    if _fresh(out, source) and _done(out, eval_set, "hyp"):
         return
+    # utter-cli bench resumes from what is there: stale results must not be.
+    out.unlink(missing_ok=True)
     cmd = [common.utter_cli(), "bench", "--sets", eval_set, "--name", run]
     if dictionary:
         cmd += ["--phrases", str(dictionary)]
     subprocess.run(cmd, check=True)
+    _stamp(out).write_text(json.dumps(source))
 
 
 def clean(eval_set: str, run: str, gguf: Path, asr_run: str, dictionary: Path | None) -> None:
     """The model's output for every dictation, with what the app sends with it: the dictionary
     terms heard (a text row's own, or those of `dictionary`) and the lists setting."""
     out = results("llm", run, eval_set)
-    if _done(out, eval_set, "output"):
+    source = {
+        "set": _set_source(eval_set),
+        "model": _file_id(gguf),
+        "asr": asr_run,
+        "dictionary": str(dictionary) if dictionary else None,
+    }
+    if _fresh(out, source) and _done(out, eval_set, "output"):
         return
     rows = {r["id"]: r for r in manifest(eval_set)}
     lines = dictionary.read_text(encoding="utf-8").splitlines() if dictionary else []
@@ -172,6 +207,7 @@ def clean(eval_set: str, run: str, gguf: Path, asr_run: str, dictionary: Path | 
     cmd = [common.utter_cli(), "llm-bench", "--gguf", str(gguf), "--name", run, "--cases", str(out)]
     cmd += ["--prompt", str(FINE_TUNED_PROMPT)] + [f"--server-arg={a}" for a in SERVER_ARGS]
     subprocess.run(cmd, check=True)
+    _stamp(out).write_text(json.dumps(source))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -187,12 +223,17 @@ def ready_to_send(eval_set: str, run: str, chat: llm.Chat, judge: str, workers: 
     gold = {r["id"]: r["final_text"] for r in manifest(eval_set)}
     outputs = common.read_jsonl(results("llm", run, eval_set))
     path = results("judge", f"{run}--{judge}", eval_set)
-    # A verdict holds the output it judged: one for an output since changed is not reused.
-    verdicts = {v["id"]: v for v in common.read_jsonl(path)}
-    current = {o["id"]: o["output"] for o in outputs}
-    verdicts = {i: v for i, v in verdicts.items() if v.get("output") == current.get(i)}
-    todo = [o for o in outputs if o["id"] not in verdicts and not _same(o["output"], gold[o["id"]])]
     system = common.prompt("judge")
+    rubric = hashlib.sha256(system.encode()).hexdigest()[:12]
+    # A verdict holds what it judged: the output, the intended text and the rubric. One whose
+    # output, gold (a new dataset revision) or rubric has changed since is not reused.
+    judged = {o["id"]: (o["output"], gold.get(o["id"]), rubric) for o in outputs}
+    verdicts = {
+        v["id"]: v
+        for v in common.read_jsonl(path)
+        if (v.get("output"), v.get("meant"), v.get("rubric")) == judged.get(v["id"])
+    }
+    todo = [o for o in outputs if o["id"] not in verdicts and not _same(o["output"], gold[o["id"]])]
 
     def judge_one(o: dict) -> dict:
         user = f"Heard: {o['input']}\n\nMeant: {gold[o['id']]}\n\nTyped: {o['output']}"
@@ -200,6 +241,8 @@ def ready_to_send(eval_set: str, run: str, chat: llm.Chat, judge: str, workers: 
         return {
             "id": o["id"],
             "output": o["output"],
+            "meant": gold[o["id"]],
+            "rubric": rubric,
             **(reply or {"verdict": "needs_edit", "cause": "other", "note": "unreadable"}),
         }
 
