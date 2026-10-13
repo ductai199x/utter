@@ -70,8 +70,8 @@ paste went in: for up to 400 ms after the keys, Utter reads it again, and the la
 and digits of the dictation must end it. Only letters and digits count, so an app that turns
 quotes curly, adds a space or changes case still counts as pasted. When they do not show, the
 dictation is copied as above, History marks it Not inserted ("The app did not take the
-paste"), and the Paste rules window opens with a line on it: "Your last dictation, in Slack,
-did not paste", and one button that adds a rule for that app typing the text out (or shows
+paste"), and the Paste rules window (Settings, Paste rules) shows a line at its top: "Your last
+dictation, in Slack, did not paste", with one button that adds a rule for that app typing the text out (or shows
 the rule it has). An app that does not say what is before the cursor is not second-guessed.
 
 ## Paste and copy the last dictation
