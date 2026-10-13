@@ -51,13 +51,16 @@ def install(dest: Path) -> tuple[Path, Path]:
         tree = Path(build)
         return tree, tree / "build" / "bin" / "llama-quantize"
     quantize = dest / "llama-quantize.exe"
-    if quantize.is_file() and (dest / "convert_hf_to_gguf.py").is_file():
+    c = component()
+    # The version is written last, so a cache from another pin or a cut-short unpack is not used.
+    stamp = dest / "version.txt"
+    if stamp.is_file() and stamp.read_text(encoding="utf-8") == c["version"]:
         return dest, quantize
     if os.name != "nt":
         raise RuntimeError(
             "no llama.cpp release for this platform: set UTTER_LLAMA_BUILD to a built tree"
         )
-    c = component()
+    shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
     blob = _fetch(c["url"])
     digest = hashlib.sha256(blob).hexdigest()
@@ -83,6 +86,7 @@ def install(dest: Path) -> tuple[Path, Path]:
                 f = t.extractfile(m)
                 assert f is not None
                 target.write_bytes(f.read())
+    stamp.write_text(c["version"], encoding="utf-8")
     return dest, quantize
 
 

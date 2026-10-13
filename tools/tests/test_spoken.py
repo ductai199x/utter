@@ -39,6 +39,24 @@ def test_dropped_words_fail():
     )
 
 
+def test_a_negation_is_not_a_form_of_the_word():
+    assert not words_in_order("I do agree with them", "I don't agree with them", 1.0)
+    assert not words_in_order("we can ship it", "we cannot ship it", 1.0)
+    assert not words_in_order("it wasn't ready", "it was ready", 1.0)
+
+
+def test_a_reading_that_adds_words_fails_but_what_a_reading_adds_anyway_does_not():
+    assert check("I do agree with them", "I do not agree with them") == "added"
+    assert check("send the report", "send the full report to everyone now") == "added"
+    assert check("hello there", "hello comma there period") is None
+    assert check("buy 3 apples", "buy three apples") is None
+    assert check("well I think so", "um well I think so") is None
+
+
+def test_a_form_ending_in_n_is_still_the_word():
+    assert words_in_order("we see it", "we seen it", 1.0)
+
+
 def test_numbers_must_be_the_same_digits_in_order():
     assert same_numbers("all 108k in 7.5 hours", "all 108 k in 7.5 hours")
     assert not same_numbers("all 108k in 7.5 hours", "all 188 k in 7.5 hours")
