@@ -824,14 +824,14 @@ fn record(out: &Path, seconds: f64, device: Option<String>) -> Result<()> {
     println!("Device: {} ({} Hz native)", mic.device_name(), mic.native_rate());
     // Let the pre-roll fill, as it would have long before any key press.
     std::thread::sleep(Duration::from_millis(400));
-    mic.start();
     let start = Instant::now();
+    mic.start(start);
     let mut peak = 0.0f32;
     while start.elapsed().as_secs_f64() < seconds {
         peak = peak.max(mic.level());
         std::thread::sleep(Duration::from_millis(20));
     }
-    let audio = mic.stop(Duration::from_millis(80));
+    let audio = mic.stop(Instant::now());
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: utter_audio::SAMPLE_RATE,
