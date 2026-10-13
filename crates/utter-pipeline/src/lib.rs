@@ -382,6 +382,9 @@ impl From<InsertError> for NotInserted {
 pub enum Command {
     PasteLast,
     CopyLast,
+    /// Recognize and clean the last dictation's audio again, and paste it: after a GPU error,
+    /// a cleanup that timed out or a microphone that dropped out.
+    RetryLast,
 }
 
 /// Everything the idle pipeline waits for, on one channel: the hotkey, the shortcuts, the tray.
@@ -483,6 +486,12 @@ fn next_key(input: &Receiver<Input>, timeout: Duration) -> Option<(Action, Insta
             Err(_) => return None,
         }
     }
+}
+
+/// Where paste last and retry last paste: the focused window, unless it is the taskbar (the
+/// tray menu was used), which has nothing to paste into.
+fn command_target() -> Option<Window> {
+    focus::foreground().filter(|w| !(w.title.is_empty() && w.app.exe.eq_ignore_ascii_case("explorer.exe")))
 }
 
 fn log_target(target: &Option<Window>) -> Option<(String, u32)> {
@@ -644,6 +653,33 @@ impl AudioSource for ReplaySource<'_> {
     }
 }
 
+/// A recording delivered all at once (retry last): the dictation runs as fast as recognition does.
+struct WholeSource<'a> {
+    audio: &'a [f32],
+    given: bool,
+}
+
+impl<'a> WholeSource<'a> {
+    fn new(audio: &'a [f32]) -> Self {
+        Self { audio, given: false }
+    }
+}
+
+impl AudioSource for WholeSource<'_> {
+    fn start(&mut self, _at: Instant) {
+        self.given = false;
+    }
+    fn take_new(&mut self) -> Vec<f32> {
+        if std::mem::replace(&mut self.given, true) { Vec::new() } else { self.audio.to_vec() }
+    }
+    fn stop(&mut self, _until: Instant) -> Vec<f32> {
+        self.audio.to_vec()
+    }
+    fn ended(&self) -> bool {
+        self.given
+    }
+}
+
 pub struct Pipeline {
     mic: Microphone,
     engine: Engine,
@@ -674,6 +710,8 @@ struct Engine {
     gpu: GpuWarmer,
     /// The newest dictation's text, for paste last when History is off.
     last_text: Option<String>,
+    /// The newest dictation's audio, for retry last (memory only, never written).
+    last_audio: Option<std::sync::Arc<Vec<f32>>>,
 }
 
 impl Pipeline {
@@ -729,6 +767,7 @@ impl Pipeline {
                 generation: 0,
                 gpu: GpuWarmer::new(),
                 last_text: None,
+                last_audio: None,
             },
             settings_tx,
             settings_rx,
@@ -1029,8 +1068,17 @@ impl Pipeline {
 }
 
 impl Engine {
-    /// Paste or copy the last dictation (docs/ux/insertion.md).
+    /// Paste, copy or retry the last dictation (docs/ux/insertion.md).
     fn command(&mut self, c: Command, on_event: &mut impl FnMut(Event)) {
+        match c {
+            Command::PasteLast => self.paste_last(true, on_event),
+            Command::CopyLast => self.paste_last(false, on_event),
+            Command::RetryLast => self.retry_last(on_event),
+        }
+    }
+
+    /// Pastes the last dictation's text (`paste`), or copies it.
+    fn paste_last(&mut self, paste: bool, on_event: &mut impl FnMut(Event)) {
         let text = self.last_text.clone().or_else(|| History::global().last_text());
         let Some(text) = text else {
             on_event(Event::Notice { text: "Nothing to paste yet".into(), ok: false });
@@ -1045,23 +1093,33 @@ impl Engine {
             };
             on_event(Event::Notice { text, ok: copied && why.is_none() });
         };
-        match c {
-            Command::CopyLast => copy(on_event, None),
-            Command::PasteLast => {
-                // The shortcut fires with its keys down; paste keys sent now would reach the
-                // app with them.
-                shortcut::wait_for_modifiers_released(MODIFIER_WAIT);
-                // From the tray, the taskbar has the focus: nothing to paste into.
-                let target = focus::foreground()
-                    .filter(|w| !(w.title.is_empty() && w.app.exe.eq_ignore_ascii_case("explorer.exe")));
-                let Some(w) = target else { return copy(on_event, Some(NotInserted::NoWindow)) };
-                let before = utter_platform::caret::before_cursor().get(CARET_WAIT_COMMAND);
-                let text = spaced(before.as_deref(), &text);
-                match insert::paste(&w, &text, settings::paste_rule(&self.cfg.paste, &w.app.exe)) {
-                    Ok(()) => on_event(Event::Notice { text: "Pasted".into(), ok: true }),
-                    Err(e) => copy(on_event, Some(e.into())),
-                }
-            }
+        if !paste {
+            return copy(on_event, None);
+        }
+        // The shortcut fires with its keys down; paste keys sent now would reach the app with them.
+        shortcut::wait_for_modifiers_released(MODIFIER_WAIT);
+        let Some(w) = command_target() else { return copy(on_event, Some(NotInserted::NoWindow)) };
+        let before = utter_platform::caret::before_cursor().get(CARET_WAIT_COMMAND);
+        let text = spaced(before.as_deref(), &text);
+        match insert::paste(&w, &text, settings::paste_rule(&self.cfg.paste, &w.app.exe)) {
+            Ok(()) => on_event(Event::Notice { text: "Pasted".into(), ok: true }),
+            Err(e) => copy(on_event, Some(e.into())),
+        }
+    }
+
+    /// The last dictation's audio through recognition and cleanup again, delivered at once
+    /// rather than at speaking pace, and pasted where paste last would paste it.
+    fn retry_last(&mut self, on_event: &mut impl FnMut(Event)) {
+        let Some(audio) = self.last_audio.clone() else {
+            on_event(Event::Notice { text: "Nothing to retry yet".into(), ok: false });
+            return;
+        };
+        shortcut::wait_for_modifiers_released(MODIFIER_WAIT);
+        let mut source = WholeSource::new(&audio);
+        let start = Start { at: Instant::now(), hands_free: false };
+        if let Err(e) = self.dictate(&mut source, |_| None, command_target(), start, true, &mut |e| on_event(e)) {
+            tracing::warn!("retry: {e}");
+            on_event(Event::Notice { text: format!("Couldn't retry it: {e}"), ok: false });
         }
     }
 
@@ -1391,7 +1449,9 @@ impl Engine {
             }
         }
         on_event(Event::Done(Box::new(dictation.clone())));
-        // The audio is not needed past here: it moves into the log, uncopied.
+        if do_insert && !audio.is_empty() {
+            self.last_audio = Some(std::sync::Arc::new(audio.clone()));
+        }
         log.finish(Finished {
             target: log_target(&dictation.target),
             config: self.log_config(),
