@@ -21,7 +21,8 @@
     type HistoryQuery,
   } from './core';
 
-  let { historyOff = false }: { historyOff?: boolean } = $props();
+  // `keyName`: the key held to dictate, for the empty list's hint.
+  let { historyOff = false, keyName = 'Right Ctrl' }: { historyOff?: boolean; keyName?: string } = $props();
 
   const PAGE = 60;
   type Status = 'all' | 'inserted' | 'not-inserted';
@@ -614,7 +615,7 @@
     {:else if page && page.total === 0 && !historyOff}
       <div class="welcome" in:fade={{ duration: 200 }}>
         <div class="welcome-mark"><AnimatedMark size={132} color="var(--home-accent)" /></div>
-        <p>Hold <kbd>Right Ctrl</kbd> and speak in any app.<br />Your dictations show up here.</p>
+        <p>Hold <kbd>{keyName}</kbd> and speak in any app.<br />Your dictations show up here.</p>
       </div>
     {:else if undo}
       <footer class="actions">

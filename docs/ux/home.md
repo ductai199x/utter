@@ -77,7 +77,7 @@ right. Groups have a 13 px uppercase header.
 **Shortcut**
 | Setting | Control | Description |
 |---|---|---|
-| Hold to talk | shows "Right Ctrl" (a key cap) | "Hold to dictate. Double-tap for hands-free; Esc cancels." Changing the key is a later feature. |
+| Hold to talk | a list of keys: Right Ctrl (default), Left Ctrl, Right Shift, Scroll Lock, F13 to F24 | "Hold to dictate. Double-tap for hands-free; Esc cancels." Only keys that do nothing pressed alone (not Alt, which opens app menus; not Caps Lock or Insert, which toggle). A change applies at once; the tray tooltip, the splash and Try it name the chosen key. |
 
 **About**
 - Utter's version, the data folder (with an **Open** button) and the settings file (with an

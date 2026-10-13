@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use utter_pipeline::Settings;
-use utter_pipeline::settings::{Model, clean_terms};
+use utter_pipeline::settings::{DictationKey, Model, clean_terms};
 
 /// How often the watcher looks at the file's modification time.
 const WATCH_EVERY: Duration = Duration::from_millis(500);
@@ -94,9 +94,18 @@ pub struct State {
     /// smallest graphics card it runs on (card_need), in bytes.
     gpu_need: std::collections::HashMap<&'static str, u64>,
     card_need: std::collections::HashMap<&'static str, u64>,
+    /// The keys the person can dictate with.
+    dictation_keys: Vec<KeyOption>,
     version: &'static str,
     data_dir: String,
     settings_path: String,
+}
+
+/// A dictation key as Settings lists it: its name in settings.toml and as people read it.
+#[derive(Serialize, Clone)]
+struct KeyOption {
+    id: String,
+    name: String,
 }
 
 /// The GPU's memory, asked once: it does not change while Utter runs.
@@ -134,6 +143,10 @@ fn state() -> State {
         download_bytes: TIERS.into_iter().map(|(name, tier)| (name, to_download(tier))).collect(),
         gpu_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::gpu_need(tier))).collect(),
         card_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::card_need(tier))).collect(),
+        dictation_keys: DictationKey::ALL
+            .iter()
+            .map(|k| KeyOption { id: utter_pipeline::settings::word(k), name: k.name() })
+            .collect(),
         version: env!("CARGO_PKG_VERSION"),
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),
@@ -143,6 +156,17 @@ fn state() -> State {
 #[tauri::command]
 pub fn home_state() -> State {
     state()
+}
+
+/// The name of the key held to dictate ("Right Ctrl"), for the pages that tell people to hold it.
+#[tauri::command]
+pub fn dictation_key() -> String {
+    dictation_key_name()
+}
+
+/// [`dictation_key`], for Rust: the saved key, or the default when the file cannot be read.
+pub fn dictation_key_name() -> String {
+    Settings::load_or_create(&Settings::path()).map(|s| s.dictation_key).unwrap_or_default().name()
 }
 
 /// Saves the settings the page sends; the watcher then applies them. Returns them as stored

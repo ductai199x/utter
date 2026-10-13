@@ -300,7 +300,7 @@ pub enum Event {
     Done(Box<Dictation>),
     Cancelled,
     /// A settings change took effect (`error: None`) or could not (the old value stays).
-    /// `what` names the setting: "dictionary", "lists", "microphone" or "model".
+    /// `what` names the setting: "dictionary", "lists", "microphone", "model" or "key".
     Applied {
         what: &'static str,
         error: Option<String>,
@@ -688,6 +688,45 @@ impl AudioSource for WholeSource<'_> {
     }
 }
 
+/// The hotkey listener on a thread of its own, feeding [`Input::Key`]s. Dropping it stops
+/// listening, and it is gone when the drop returns: only one listener can exist (a new key, a
+/// Retry starts another).
+struct Keys {
+    cfg: HotkeyConfig,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Keys {
+    fn start(cfg: HotkeyConfig, input: Sender<Input>) -> Result<Self, PipelineError> {
+        let listener = hotkey::listen(cfg)?;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop.clone();
+        let thread = std::thread::Builder::new()
+            .name("utter-keys".into())
+            .spawn(move || {
+                while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some((action, at)) = listener.recv_timeout(Duration::from_millis(100))
+                        && input.send(Input::Key(action, at)).is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .map_err(|e| hotkey::HotkeyError(e.to_string()))?;
+        Ok(Self { cfg, stop, thread: Some(thread) })
+    }
+}
+
+impl Drop for Keys {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
 pub struct Pipeline {
     mic: Microphone,
     engine: Engine,
@@ -810,35 +849,7 @@ impl Pipeline {
     /// happens, from the key going down to the paste. Between dictations it applies settings,
     /// History's retention, and paste or copy last.
     pub fn run(&mut self, mut on_event: impl FnMut(Event)) -> Result<(), PipelineError> {
-        let listener = hotkey::listen(self.engine.cfg.hotkey)?;
-        let keys = self.input_tx.clone();
-        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let stopped = stop.clone();
-        let thread = std::thread::Builder::new()
-            .name("utter-keys".into())
-            .spawn(move || {
-                // Owns the listener; dropping it stops listening. Only one listener can exist, so
-                // it must be gone by the time run returns (a Retry starts a new pipeline).
-                while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
-                    if let Some((action, at)) = listener.recv_timeout(Duration::from_millis(100))
-                        && keys.send(Input::Key(action, at)).is_err()
-                    {
-                        break;
-                    }
-                }
-            })
-            .map_err(|e| hotkey::HotkeyError(e.to_string()))?;
-        // However run ends (an error included), the key thread stops and the listener goes with it.
-        struct StopKeys(std::sync::Arc<std::sync::atomic::AtomicBool>, Option<std::thread::JoinHandle<()>>);
-        impl Drop for StopKeys {
-            fn drop(&mut self) {
-                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
-                if let Some(t) = self.1.take() {
-                    let _ = t.join();
-                }
-            }
-        }
-        let _keys = StopKeys(stop, Some(thread));
+        let mut keys = Keys::start(self.engine.cfg.hotkey, self.input_tx.clone())?;
         let commands = self.input_tx.clone();
         let _shortcuts = match shortcut::register(move |s| {
             let c = match s {
@@ -860,6 +871,9 @@ impl Pipeline {
         };
         loop {
             self.apply_settings(&mut on_event);
+            if self.engine.cfg.hotkey.key != keys.cfg.key {
+                keys = self.switch_key(keys, &mut on_event)?;
+            }
             self.prune_history(false);
             self.check_microphone(false, &mut on_event);
             self.report_cleanup_health(&mut on_event);
@@ -951,6 +965,25 @@ impl Pipeline {
         on_event(Event::Microphone(self.mic.level_meter()));
     }
 
+    /// Listens for the newly chosen dictation key instead of `old`'s. Only one listener can
+    /// exist, so `old` stops first; if the new one cannot start, the old key is listened for
+    /// again (and kept in the settings in use).
+    fn switch_key(&mut self, old: Keys, on_event: &mut impl FnMut(Event)) -> Result<Keys, PipelineError> {
+        let previous = old.cfg;
+        drop(old);
+        match Keys::start(self.engine.cfg.hotkey, self.input_tx.clone()) {
+            Ok(keys) => {
+                on_event(Event::Applied { what: "key", error: None });
+                Ok(keys)
+            }
+            Err(e) => {
+                on_event(Event::Applied { what: "key", error: Some(e.to_string()) });
+                self.engine.cfg.hotkey = previous;
+                Keys::start(previous, self.input_tx.clone())
+            }
+        }
+    }
+
     /// Says on the Bar when the cleanup model's server went down and when it is back: in
     /// between, dictations go in as they were heard.
     fn report_cleanup_health(&mut self, on_event: &mut impl FnMut(Event)) {
@@ -1012,6 +1045,7 @@ impl Pipeline {
         let mut wanted = self.engine.cfg.clone();
         s.apply(&mut wanted);
         self.engine.cfg.paste = wanted.paste;
+        self.engine.cfg.hotkey.key = wanted.hotkey.key;
         self.engine.cfg.log = wanted.log;
         if wanted.keep_history != self.engine.cfg.keep_history {
             self.engine.cfg.keep_history = wanted.keep_history;

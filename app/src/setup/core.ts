@@ -259,6 +259,9 @@ export const openLogs = (): Promise<void> =>
   inTauri ? invoke('open_path', { which: 'logs' }) : Promise.resolve();
 
 export const finish = (): Promise<void> => (inTauri ? invoke('setup_finish') : Promise.resolve());
+/** The name of the key held to dictate ("Right Ctrl"). */
+export const dictationKey = (): Promise<string> =>
+  inTauri ? invoke<string>('dictation_key') : Promise.resolve('Right Ctrl');
 
 /** Quits Utter (no usable GPU): closing the window does it. */
 export async function quit(): Promise<void> {
