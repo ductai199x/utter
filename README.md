@@ -115,7 +115,7 @@ On the development machine (RTX 3090 Ti), in the app itself. Every figure comes 
 | Launch to ready | **3.5-3.8 s** warm, 5.6-6.0 s right after a reboot |
 | Ready to send as typed, realistic dictation (Quality) | **88.1%**, 80.1% with voices the model never heard |
 | Dictionary terms spelled right | **97.8%** |
-| GPU memory | Quality **4.8 GB**, Light **3.2 GB** |
+| GPU memory (NVIDIA) | Quality **4.8 GB**, Light **3.2 GB** |
 
 "Ready to send" is the share of dictations a careful writer would send exactly as typed, judged
 dictation by dictation against the intended text with a rubric checked against human review.
@@ -159,9 +159,10 @@ flowchart LR
   the Rust core inside the app. The cleanup model is llama.cpp's server as a supervised child
   process, kept warm and restarted if it ever dies.
 - **The GPU is kept awake.** An idle GPU drops its clocks and a cold pass is five times slower,
-  so Utter warms it at key down and holds it up until key up.
+  so Utter warms it at key down and holds it up until key up (on NVIDIA for now).
 - **Standalone.** Utter uses nothing installed on the machine but the GPU driver. onnxruntime,
-  CUDA, cuDNN, llama.cpp and the models are pinned components with SHA-256 checksums
+  CUDA and cuDNN on NVIDIA (onnxruntime's WebGPU provider on AMD and Intel), llama.cpp and the
+  models are pinned components with SHA-256 checksums
   ([components.json](crates/utter-runtime/components.json)), downloaded on first run and
   repaired in one click if a file is ever damaged.
 - **The UI only renders.** The Svelte windows show state and send intent; every decision and
@@ -210,7 +211,8 @@ an NVIDIA card made to run the Vulkan path.
 
 ## Building from source
 
-Rust (see `rust-version` in Cargo.toml), Node, and an NVIDIA GPU. From the repository root:
+Rust (see `rust-version` in Cargo.toml), Node, and a graphics card (NVIDIA, or AMD and Intel
+through Vulkan). From the repository root:
 
 ```bash
 cargo run --release -p utter-cli -- setup
@@ -250,8 +252,9 @@ docs/               UX specs, eval results, research notes, local setup
 ## Status
 
 Windows, English, NVIDIA graphics, with AMD and Intel graphics through Vulkan in preview until
-they are measured on real AMD and Intel cards. Next: Android. After that: context from the text around the cursor, styles per app, Command
-Mode, Linux (GNOME) and macOS, and Vietnamese with switching between the two mid-sentence.
+they are measured on real AMD and Intel cards. Next: Android. After that: context from the text
+around the cursor, styles per app, Command Mode, Linux (GNOME) and macOS, and Vietnamese with
+switching between the two mid-sentence.
 
 ## License
 
