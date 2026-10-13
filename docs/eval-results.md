@@ -1,8 +1,38 @@
 # Eval results
 
-Every number here was measured on the development machine (RTX 3090 Ti, Windows 11) by
-`tools/eval`. Raw outputs are under `%LOCALAPPDATA%\Utter_dev\eval\results\` (see
+Every number here was measured on the development machine (RTX 3090 Ti, Windows 11) by the
+tools (`utter-eval`, `utter-bench`; earlier entries: `tools/eval`), unless an entry says FLAME.
+Raw outputs are under `%LOCALAPPDATA%\Utter_dev\eval\results\` (see
 `docs/local-setup.md`). Newest first.
+
+---
+
+## 2026-10-12: Cleanup v2, trained on the published dataset
+
+Quality (E4B) and Light (E2B) v2: one recipe for both tiers (LoRA rank 16, alpha 32, lr 2e-4,
+1 epoch) over the train split of `ductai199x/dictation-to-text` (79,246 pairs), merged and
+exported to Q4_0. Run on FLAME: cleanup through `utter-cli llm-bench` with the app's prompt and
+server settings, exact match first, then the 26B judge (vLLM, `prompts/judge.md`) on the rest.
+
+Ready to send %, held-out speech (neither version trained on any of these passages):
+
+| Set | n | Quality v1 | Quality v2 | Light v1 | Light v2 |
+|---|---|---|---|---|---|
+| Realistic, Kokoro voices | 950 | 88.5 | 88.1 | 86.3 | 85.4 |
+| Realistic, unseen Chatterbox voices | 950 | 81.6 | 80.1 | 77.3 | 75.5 |
+| Directed | 292 | 86.0 | 87.3 | 84.2 | 82.5 |
+| Realistic, with a 300-term dictionary | 950 | 87.3 | 87.8 | 86.8 | 85.7 |
+| Directed, with a dictionary | 292 | 88.0 | 87.7 | 85.6 | 83.6 |
+
+The text test split (9,995 rows) does not compare the versions: v1 was trained before the
+dataset was split by passage, and its training pairs hold most of today's test passages (Quality
+v1, run ft6: 3,543 of 5,400; Light v1, ft5: 5,292). v1 reproduces details the dictation never
+said (an arXiv "Bose--Einstein", a quoted "major"); v2 saw none of them. On it v2 scores 70.3%
+(Quality) and 64.5% (Light), the first clean number for this split.
+
+Quality ties; Light trails by 1-2 points on every set. v2 ships (0.1.2): every model Utter
+ships is now reproducible from public data with `utter-train` (Tai: "the point of v2 is
+standardization").
 
 ---
 
