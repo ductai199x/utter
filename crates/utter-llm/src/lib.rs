@@ -97,6 +97,8 @@ pub struct LlamaServer {
     base_url: String,
     log: PathBuf,
     agent: ureq::Agent,
+    /// What it was started with, for a restart.
+    opts: ServerOptions,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -209,7 +211,7 @@ impl LlamaServer {
             .http_status_as_error(false)
             .build()
             .into();
-        let mut server = Self { child, base_url: format!("http://127.0.0.1:{port}"), log, agent };
+        let mut server = Self { child, base_url: format!("http://127.0.0.1:{port}"), log, agent, opts: opts.clone() };
         server.wait_ready(opts.start_timeout)?;
         tracing::info!(model = %opts.model.display(), url = %server.base_url, "llama-server ready");
         Ok(server)
@@ -235,12 +237,44 @@ impl LlamaServer {
         &self.base_url
     }
 
+    /// How its process ended, if it has (a crash, a GPU driver reset): `None` while it runs.
+    pub fn exited(&mut self) -> Option<String> {
+        match self.child.try_wait() {
+            Ok(Some(status)) => Some(status.to_string()),
+            Ok(None) => None,
+            Err(e) => Some(e.to_string()),
+        }
+    }
+
+    /// Starts a new server with the same options in this one's place (the old process is ended
+    /// first, so the two never hold the GPU's memory at once).
+    pub fn restart(&mut self) -> Result<(), LlmError> {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        *self = Self::start(&self.opts)?;
+        Ok(())
+    }
+
     pub fn log_path(&self) -> &Path {
         &self.log
     }
 
-    /// One chat completion, not streamed.
+    /// One chat completion, not streamed. A reply cut off at its length limit, or with no text,
+    /// is an error: not the whole answer.
     pub fn chat(&self, messages: &[Message], params: &ChatParams) -> Result<Completion, LlmError> {
+        let (reply, wall) = self.send(messages, params)?;
+        let choice = &reply["choices"][0];
+        if choice["finish_reason"].as_str() == Some("length") {
+            return Err(LlmError::Request("the reply was cut off at its length limit".into()));
+        }
+        let Some(text) = choice["message"]["content"].as_str() else {
+            return Err(LlmError::Request(format!("no text in the reply: {reply}")));
+        };
+        Ok(Completion { text: text.to_owned(), server: timings(&reply), wall })
+    }
+
+    /// Sends one completion request; returns the reply's JSON and the request's wall time.
+    fn send(&self, messages: &[Message], params: &ChatParams) -> Result<(serde_json::Value, Duration), LlmError> {
         let mut body = serde_json::json!({
             "messages": messages,
             "max_tokens": params.max_tokens,
@@ -266,27 +300,35 @@ impl LlamaServer {
         if status != 200 {
             return Err(LlmError::Request(format!("HTTP {status}: {text}")));
         }
-        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| LlmError::Request(e.to_string()))?;
-        let content = v["choices"][0]["message"]["content"].as_str().unwrap_or_default().to_owned();
-        let server = serde_json::from_value(v["timings"].clone()).unwrap_or_default();
-        Ok(Completion { text: content, server, wall })
+        let reply = serde_json::from_str(&text).map_err(|e| LlmError::Request(e.to_string()))?;
+        Ok((reply, wall))
     }
 }
 
+/// llama-server's timings in a reply (zero when it gave none).
+fn timings(reply: &serde_json::Value) -> ServerTimings {
+    serde_json::from_value(reply["timings"].clone()).unwrap_or_default()
+}
+
+/// The bench's (utter-cli llm-bench): the pipeline uses neither.
 impl LlamaServer {
-    /// Processes `messages` into the prompt cache without generating anything. Sent while the
-    /// user is still speaking, with the transcript so far, it leaves only the last words for
-    /// the request that follows key up: a later prompt that starts with the same tokens reuses
-    /// them.
+    /// Processes `messages` into the prompt cache without generating anything: a later prompt
+    /// that starts with the same tokens reuses them (llm-bench --prefill-fraction).
     pub fn prefill(&self, messages: &[Message]) -> Result<Completion, LlmError> {
-        self.chat(messages, &ChatParams { max_tokens: 0, ..ChatParams::default() })
+        self.complete_without_text(messages, 0)
     }
 
     /// One token, to keep the GPU and the server's threads from going idle: a request after
     /// a few idle seconds takes more than twice as long (docs/eval-results.md). `messages`
     /// should share the real request's system prompt, so the prompt cache keeps it.
     pub fn keep_warm(&self, messages: &[Message]) -> Result<Completion, LlmError> {
-        self.chat(messages, &ChatParams { max_tokens: 1, ..ChatParams::default() })
+        self.complete_without_text(messages, 1)
+    }
+
+    /// A request for at most `max_tokens`, whose text does not matter.
+    fn complete_without_text(&self, messages: &[Message], max_tokens: u32) -> Result<Completion, LlmError> {
+        let (reply, wall) = self.send(messages, &ChatParams { max_tokens, ..ChatParams::default() })?;
+        Ok(Completion { text: String::new(), server: timings(&reply), wall })
     }
 }
 

@@ -516,12 +516,14 @@ fn download(app: &AppHandle) {
     emit(DownloadProgress { done: total, total, stage: "loading", label: "", error: None, problem: None });
     app.state::<Downloading>().0.store(false, Ordering::Relaxed);
     // Dictation not running yet: it starts, and says when it is ready. Already running
-    // (a model change from Home needed the download): it takes the settings again and
-    // switches models, and the switch reports back (main.rs, Event::Applied). Running
-    // on the chosen model already (the person chose it back meanwhile): nothing to
-    // switch, so nothing would report back; setup is done.
+    // (a model change from Home needed the download, or an update downloaded while the
+    // earlier version ran): it takes the settings again and loads what was downloaded, and
+    // the switch reports back (main.rs, Event::Applied). Running on the chosen model's
+    // current files already (the person chose it back meanwhile): nothing to switch, so
+    // nothing would report back; setup is done.
     if !crate::start_pipeline(app) {
-        if app.state::<crate::home::Models>().running() == Some(chosen_model()) {
+        let models = app.state::<crate::home::Models>();
+        if models.running() == Some(chosen_model()) && !models.on_earlier() {
             ready(app);
         } else {
             crate::reapply_settings(app);

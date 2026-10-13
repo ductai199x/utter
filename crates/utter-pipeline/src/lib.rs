@@ -146,6 +146,15 @@ pub fn components_for(tier: Tier) -> Vec<&'static str> {
     ]
 }
 
+/// Where each component `tier` runs on is installed now (an earlier version's folder while an
+/// update downloads).
+fn installed_dirs(tier: Tier) -> Vec<std::path::PathBuf> {
+    components_for(tier)
+        .into_iter()
+        .filter_map(|id| utter_runtime::component(id).and_then(|c| c.installed_dir()).ok())
+        .collect()
+}
+
 /// Loads and warms the speech model, boosting `dictionary`, on its own worker thread.
 fn start_speech(model: SpeechModel, dictionary: &[String]) -> Result<Speech, PipelineError> {
     let mut asr = ParakeetTdt::load(&model.installed_dir()?, model.options())?;
@@ -237,8 +246,7 @@ fn start_cleaner(cfg: &PipelineConfig) -> Result<Option<Cleaner>, PipelineError>
     let system = cfg.prompt.clone().unwrap_or_else(|| cfg.tier.system_prompt().to_owned());
     // The first request after loading is slow; pay for it now.
     let ctx = cleanup_context(cfg);
-    let warm = "Um, this is a warm-up, no, a second warm-up.";
-    server.chat(&cleanup::messages_with(&system, warm, &cfg.dictionary, &ctx), &ChatParams::default())?;
+    server.chat(&cleanup::messages_with(&system, clean::WARM_UP, &cfg.dictionary, &ctx), &ChatParams::default())?;
     Ok(Some(Cleaner::start(server, system, cfg.dictionary.clone(), ctx)))
 }
 
@@ -704,6 +712,8 @@ struct Engine {
     vad: SileroVad,
     jobs: Sender<Job>,
     done: Receiver<Done>,
+    /// The folders of the components loaded (an update installs new ones beside them).
+    loaded: Vec<std::path::PathBuf>,
     cleaner: Option<Cleaner>,
     generation: u64,
     /// Holds the GPU at full clocks from key down to key up (see utter_runtime::gpu).
@@ -759,6 +769,7 @@ impl Pipeline {
         Ok(Self {
             mic,
             engine: Engine {
+                loaded: installed_dirs(cfg.tier),
                 cfg,
                 vad,
                 jobs: job_tx,
@@ -851,6 +862,7 @@ impl Pipeline {
             self.apply_settings(&mut on_event);
             self.prune_history(false);
             self.check_microphone(false, &mut on_event);
+            self.report_cleanup_health(&mut on_event);
             match self.input_rx.recv_timeout(SETTINGS_POLL) {
                 // A double tap arrives as Start and Cancel (the first tap, too short for a
                 // dictation), then HandsFree: the second press starts listening hands-free.
@@ -939,6 +951,19 @@ impl Pipeline {
         on_event(Event::Microphone(self.mic.level_meter()));
     }
 
+    /// Says on the Bar when the cleanup model's server went down and when it is back: in
+    /// between, dictations go in as they were heard.
+    fn report_cleanup_health(&mut self, on_event: &mut impl FnMut(Event)) {
+        let Some(cleaner) = &self.engine.cleaner else { return };
+        while let Some(health) = cleaner.try_health() {
+            let (text, ok) = match health {
+                clean::Health::Down { .. } => ("Cleanup stopped: restarting it", false),
+                clean::Health::Up => ("Cleanup is back", true),
+            };
+            on_event(Event::Notice { text: text.into(), ok });
+        }
+    }
+
     /// Applies History's retention when Utter starts, every hour, and when it changes (`now`).
     fn prune_history(&mut self, now: bool) {
         if !now && self.pruned.is_some_and(|t| t.elapsed() < PRUNE_EVERY) {
@@ -968,6 +993,7 @@ impl Pipeline {
                                 self.engine.done = done;
                             }
                             self.engine.cfg.tier = wanted.model.into();
+                            self.engine.loaded = installed_dirs(self.engine.cfg.tier);
                             None
                         }
                         Err(e) => Some(e),
@@ -1019,17 +1045,20 @@ impl Pipeline {
         }
         let tier: Tier = s.model.into();
         let loading_tier = self.loading.as_ref().map(|(w, _)| Tier::from(w.model));
+        // An update downloaded while the earlier version ran: the new files load like a model
+        // switch, beside the running ones.
+        let updated = tier == cfg.tier && installed_dirs(tier) != self.engine.loaded;
         if tier == cfg.tier && loading_tier.is_some() {
             // Changed back while the other model loads: it is dropped (and its server ended)
             // when it arrives to a closed channel.
             self.loading = None;
             on_event(Event::Applied { what: "model", error: None });
-        } else if !cfg.no_cleanup && tier != cfg.tier && loading_tier != Some(tier) {
+        } else if !cfg.no_cleanup && (tier != cfg.tier || updated) && loading_tier != Some(tier) {
             // The new model loads beside the old one, which serves until it is ready.
             let mut next = cfg.clone();
             next.tier = tier;
             next.prompt = None;
-            let new_speech = (speech_for(tier) != speech_for(cfg.tier)).then_some(speech_for(tier));
+            let new_speech = (speech_for(tier) != speech_for(cfg.tier) || updated).then_some(speech_for(tier));
             let (tx, rx) = mpsc::channel();
             let spawned = std::thread::Builder::new()
                 .name("utter-model-load".into())

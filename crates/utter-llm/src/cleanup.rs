@@ -99,9 +99,21 @@ pub const SERVER_ARGS: &[&str] = &[
     "6",
 ];
 
-/// The installed model file of `tier`, or an error naming how to install it.
+/// The installed model file of `tier`, or an error naming how to install it. While an update
+/// downloads, the earlier version stands in (utter_runtime's installed_dir), and its file has its
+/// own version's name: the folder's one GGUF file then.
 pub fn installed_model(tier: Tier) -> Result<PathBuf, LlmError> {
-    Ok(utter_runtime::component(tier.component())?.installed_dir()?.join(tier.model_file()))
+    let dir = utter_runtime::component(tier.component())?.installed_dir()?;
+    let file = dir.join(tier.model_file());
+    if file.is_file() {
+        return Ok(file);
+    }
+    let gguf = std::fs::read_dir(&dir)
+        .map_err(|source| LlmError::Io { path: dir.clone(), source })?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("gguf")));
+    Ok(gguf.unwrap_or(file))
 }
 
 /// Server options for `tier`'s installed model with its measured settings.

@@ -145,7 +145,9 @@ main action takes the focus when a step shows, except step 4, where the text box
 ## When Utter starts: three paths
 
 At every start, before anything else, Utter removes component versions that components.json
-no longer lists (an update leaves the old model behind: 5 GB), then checks each required
+no longer lists once their replacement is installed (an update leaves the old model behind:
+5 GB; until the new one is whole, the old one is what dictation runs on), then checks each
+required
 component: installed, and every file its receipt lists still there at its size (a quick check,
 no hashing). Then:
 
@@ -153,7 +155,7 @@ no hashing). Then:
 |---|---|
 | Everything is installed and intact | nothing: dictation starts, the tray says it is ready |
 | First run has not finished: nothing installed yet, or it was interrupted (no `setup-complete` file in the data folder, written once everything is installed) | First run, as above; the download resumes where it stopped |
-| A component has a new version (components.json changed with an update; the old version is still here) | the same window in **update mode**: the system check titled "Utter needs to download an update", then the download, then it closes itself once dictation is ready. No microphone or Try it steps. |
+| A component has a new version (components.json changed with an update; the old version is still here) | dictation starts on the old version, and the same window opens in **update mode**: the system check titled "Utter needs to download an update" ("Dictation keeps working on the current version until it is done"), then the download; the new version then loads beside the old, takes over, and the window closes itself. No microphone or Try it steps. |
 | A component is damaged, or gone with nothing it replaces | the same, titled "Some of Utter's files are missing or damaged" (**repair mode**) |
 | The model chosen in Settings is not downloaded yet, the other one is | dictation starts on the other model at once, and the window opens in **model mode**: "Utter needs to download the model you chose"; Utter switches when it is done. The same as choosing it while Utter runs. |
 | Dictation could not start | the same window in **problem mode** (below) |
@@ -206,6 +208,7 @@ and the Home window's microphone row says the saved one is not connected.
    downloads only that component again, and dictation starts.
 9. Starting while a game holds most of the GPU memory shows "Not enough free GPU memory" with
    the free amount; Retry after closing the game starts dictation.
-10. A components.json update (a new cleanup model) shows update mode, downloads only the new
-    component, removes the old one's folder, and needs no other step.
+10. A components.json update (a new cleanup model) shows update mode while dictation keeps
+    working on the old model, downloads only the new component, switches to it, removes the
+    old one's folder at the next start, and needs no other step.
 11. With the saved microphone unplugged, dictation starts on the default one.
