@@ -51,7 +51,7 @@ On the development machine (RTX 3090 Ti), in the app itself. Every figure is fro
 |---|---|
 | Key up to text in the app | **231-260 ms** (speech 48-71 ms, cleanup 131-158 ms, paste 47-61 ms) |
 | Launch to ready | **3.5-3.8 s** warm, 5.6-6.0 s right after a reboot |
-| Ready to send as typed, realistic dictation (Quality) | **89.3%**, 82.3% with voices the model never heard |
+| Ready to send as typed, realistic dictation (Quality) | **88.1%**, 80.1% with voices the model never heard |
 | Dictionary terms spelled right | **97.8%** |
 | GPU memory | Quality **4.8 GB**, Light **3.2 GB** |
 
