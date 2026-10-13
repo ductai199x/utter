@@ -178,6 +178,9 @@ impl Bar {
                     None => tracing::info!("{what} applied"),
                 }
                 let status = if error.is_some() { "error" } else { "ok" };
+                if what == "key" && error.is_none() {
+                    set_tray_status(self.window.app_handle(), &ready_status());
+                }
                 // A model switch setup downloaded for: setup closes once it took, or says why not.
                 if what == "model" {
                     let app = self.window.app_handle();
@@ -382,7 +385,7 @@ fn run_pipeline(
             if downloading {
                 models.set_on_earlier();
             }
-            set_tray_status(&app, "Utter: hold Right Ctrl to dictate");
+            set_tray_status(&app, &ready_status());
             // First run's or Retry's setup window learns dictation runs. One still downloading
             // (the chosen model, an update) is not done yet: it hears from the switch.
             if !downloading {
@@ -406,6 +409,11 @@ fn run_pipeline(
             }
         })
         .expect("spawn the pipeline");
+}
+
+/// The tray's tooltip while dictation runs, naming the key to hold.
+fn ready_status() -> String {
+    format!("Utter: hold {} to dictate", home::dictation_key_name())
 }
 
 /// Sets the tray's tooltip on the UI thread without waiting for it: a tray call from another
@@ -444,6 +452,7 @@ fn main() {
         .manage(setup::LastProblem::default())
         .invoke_handler(tauri::generate_handler![
             home::home_state,
+            home::dictation_key,
             home::save_settings,
             home::open_path,
             history::history_query,

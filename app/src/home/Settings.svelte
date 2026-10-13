@@ -329,10 +329,17 @@
       <h2>Shortcuts</h2>
       <div class="row">
         <div class="label">
-          <span class="label-text">Hold to talk</span>
+          <label for="key">Hold to talk</label>
           <span class="desc">Hold to dictate. Double-tap for hands-free; Esc cancels.</span>
+          {#if applied.key?.status === 'error'}<span class="row-error">{applied.key.error}</span>{/if}
         </div>
-        <kbd>Right Ctrl</kbd>
+        <select
+          id="key"
+          value={settings.dictation_key}
+          onchange={(e) => settings && save({ ...settings, dictation_key: e.currentTarget.value })}
+        >
+          {#each home?.dictationKeys ?? [] as k (k.id)}<option value={k.id}>{k.name}</option>{/each}
+        </select>
       </div>
       <div class="row">
         <div class="label">

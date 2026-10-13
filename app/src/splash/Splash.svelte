@@ -11,7 +11,7 @@
     { id: 'speech', label: 'Speech', status: 'Loading the speech model...' },
     { id: 'cleanup', label: 'Cleanup', status: 'Loading the cleanup model...' },
     { id: 'microphone', label: 'Microphone', status: 'Opening the microphone...' },
-    { id: 'ready', label: 'Ready', status: 'Ready. Hold Right Ctrl to dictate.' },
+    { id: 'ready', label: 'Ready', status: 'Ready. Hold {key} to dictate.' },
   ];
   const SHOWN_MS = 3000;
   const READY_HOLD_MS = 1200;
@@ -28,7 +28,9 @@
   let version = $state('');
   let canvas = $state<HTMLCanvasElement>();
   const startedAt = performance.now();
-  const status = $derived(current < 0 ? 'Starting...' : STAGES[current]!.status);
+  // The key held to dictate, named in the ready line.
+  let keyName = $state('Right Ctrl');
+  const status = $derived(current < 0 ? 'Starting...' : STAGES[current]!.status.replace('{key}', keyName));
 
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   // The card's drawing area: 640 x 400 inside a window with room for its shadow.
@@ -85,6 +87,9 @@
         }),
       );
       void import('@tauri-apps/api/app').then(({ getVersion }) => getVersion().then((v) => (version = v)));
+      void import('@tauri-apps/api/core').then(({ invoke }) =>
+        invoke<string>('dictation_key').then((k) => (keyName = k), () => {}),
+      );
     } else {
       version = '0.0.1';
     }

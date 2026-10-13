@@ -150,7 +150,10 @@
     {#key section}
       <div class="section-body" in:fade={{ duration: 160, easing: cubicOut }}>
         {#if section === 'history'}
-          <History historyOff={settings?.keep_history === 'off'} />
+          <History
+            historyOff={settings?.keep_history === 'off'}
+            keyName={home?.dictationKeys.find((k) => k.id === settings?.dictation_key)?.name ?? 'Right Ctrl'}
+          />
         {:else if section === 'dictionary'}
           <Dictionary bind:this={dictionary} {settings} {save} />
         {:else}

@@ -36,6 +36,10 @@
         ? "Some of Utter's files are missing or damaged"
         : 'Welcome to Utter';
 
+  // The key held to dictate, for the lines that say to hold it.
+  let keyName = $state('Right Ctrl');
+  void core.dictationKey().then((k) => (keyName = k));
+
   // Microphone.
   let mics = $state<string[]>([]);
   let device = $state('');
@@ -434,7 +438,7 @@
           {/if}
         {:else if view === 'try'}
           <h1>Try it</h1>
-          <p class="lede">Hold <kbd>Right Ctrl</kbd>, say this, then let go:</p>
+          <p class="lede">Hold <kbd>{keyName}</kbd>, say this, then let go:</p>
           <blockquote>{SENTENCE}</blockquote>
           <textarea bind:this={box} bind:value={typed} rows="3" aria-label="Your first dictation"></textarea>
           <div class="success" class:shown={arrived} aria-live="polite">
@@ -442,7 +446,7 @@
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
               <div>
                 {#if corrected}<p>You said "three, no, four", and Utter wrote "four".</p>{/if}
-                <p>Hold Right Ctrl in any app to dictate. Double-tap it to keep talking hands&#8209;free.</p>
+                <p>Hold {keyName} in any app to dictate. Double-tap it to keep talking hands&#8209;free.</p>
               </div>
             {/if}
           </div>
@@ -466,7 +470,7 @@
             <svg viewBox="0 0 20 20"><path d="M5.5 10.5l3 3 6-7" /></svg>
           </div>
           <h1>Utter is ready</h1>
-          <p class="lede">Hold Right Ctrl in any app to dictate.</p>
+          <p class="lede">Hold {keyName} in any app to dictate.</p>
         {/if}
       </section>
     {/key}

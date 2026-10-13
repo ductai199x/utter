@@ -6,7 +6,8 @@ use crate::splash::AUTOSTART_ARG;
 
 const USAGE: &str = "Usage: utter [--version | --help]
 
-Starts Utter: hold Right Ctrl, speak, and the text appears where you type.
+Starts Utter: hold the dictation key (Right Ctrl unless changed in Settings), speak, and the
+text appears where you type.
 
 Options:
   -V, --version  Print the version and exit
