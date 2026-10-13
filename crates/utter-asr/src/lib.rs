@@ -57,9 +57,15 @@ impl SpeechModel {
 
     /// How this build runs, memory-pattern planning off for both ([`ParakeetOptions`]). The
     /// float16 weights go outside the memory pool, which would round their 1.2 GB up to 2 GB;
-    /// the 8-bit ones stay in it, where the rounding leaves room the activations then use.
+    /// the 8-bit ones stay in it, where the rounding leaves room the activations then use. On the
+    /// Vulkan backend the encoder runs on WebGPU, which runs float16 faster than 8 bits
+    /// (docs/plan-vulkan.md); utter_pipeline::speech_for picks Fp16 there.
     pub fn options(self) -> ParakeetOptions {
-        let base = ParakeetOptions::default();
+        let encoder = match utter_runtime::backend() {
+            utter_runtime::Backend::Cuda => Device::Cuda,
+            utter_runtime::Backend::Vulkan => Device::WebGpu,
+        };
+        let base = ParakeetOptions { encoder, ..ParakeetOptions::default() };
         match self {
             SpeechModel::Fp16 => ParakeetOptions { weights_outside_pool: true, ..base },
             SpeechModel::W8 => base,

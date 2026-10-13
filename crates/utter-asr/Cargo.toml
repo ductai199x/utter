@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 utter-core.workspace = true
 utter-runtime.workspace = true
+utter-platform.workspace = true
 ndarray.workspace = true
 ort.workspace = true
 realfft.workspace = true
