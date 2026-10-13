@@ -367,11 +367,18 @@ fn run_pipeline(
                 since_launch(),
                 start.elapsed().as_secs_f64()
             );
-            app.state::<home::Models>().set_running(settings.model);
+            let models = app.state::<home::Models>();
+            models.set_running(settings.model);
+            // Started while something is still to download: on earlier versions (an update) or
+            // the other model; the download's end switches it.
+            let downloading = !setup::missing().is_empty();
+            if downloading {
+                models.set_on_earlier();
+            }
             set_tray_status(&app, "Utter: hold Right Ctrl to dictate");
-            // First run's or Retry's setup window learns dictation runs. One downloading the
-            // chosen model while this one stands in is not done yet: it hears from the switch.
-            if setup::fallback_model().is_none() {
+            // First run's or Retry's setup window learns dictation runs. One still downloading
+            // (the chosen model, an update) is not done yet: it hears from the switch.
+            if !downloading {
                 setup::ready(&app);
             }
             splash::stage(&app, "ready");
@@ -540,6 +547,12 @@ fn main() {
                 Some(_) if !repairing && setup::fallback_model().is_some() => {
                     start_pipeline(app.handle());
                     setup::open(app.handle(), setup::Mode::Model)?;
+                }
+                // An update: dictation runs on the versions here (utter_runtime keeps them until
+                // the new ones are whole), and switches when the download is done.
+                Some(setup::Mode::Update) if !repairing => {
+                    start_pipeline(app.handle());
+                    setup::open(app.handle(), setup::Mode::Update)?;
                 }
                 Some(mode) => {
                     let mode = if repairing && mode == setup::Mode::Update { setup::Mode::Repair } else { mode };

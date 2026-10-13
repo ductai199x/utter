@@ -181,12 +181,44 @@ impl Component {
     }
 
     /// The installed component's folder, or an error naming how to install it.
+    /// Where the loaders find this component: this version's folder, or while an update to it
+    /// downloads, the newest earlier version still whole ([`Component::previous_install`]), so
+    /// dictation keeps running on it.
     pub fn installed_dir(&self) -> Result<PathBuf, RuntimeError> {
         if self.is_installed() {
-            Ok(self.dir())
-        } else {
-            Err(RuntimeError::NotInstalled { id: self.id.clone(), version: self.version.clone() })
+            return Ok(self.dir());
         }
+        match self.previous_install() {
+            Some(dir) => {
+                tracing::info!(id = %self.id, dir = %dir.display(), "an earlier version stands in until this one is installed");
+                Ok(dir)
+            }
+            None => Err(RuntimeError::NotInstalled { id: self.id.clone(), version: self.version.clone() }),
+        }
+    }
+
+    /// The newest other version of this component installed with every file of its receipt,
+    /// if any: kept until this version is intact (prune), and used meanwhile.
+    pub fn previous_install(&self) -> Option<PathBuf> {
+        self.previous_install_in(&runtime_dir())
+    }
+
+    fn previous_install_in(&self, root: &Path) -> Option<PathBuf> {
+        let current = root.join(format!("{}-{}", self.id, self.version));
+        fs::read_dir(root)
+            .ok()?
+            .flatten()
+            .filter(|e| e.path() != current && owner(&e.file_name().to_string_lossy()).is_some_and(|c| c.id == self.id))
+            .filter_map(|e| {
+                let dir = e.path();
+                let receipt = fs::read_to_string(dir.join(RECEIPT)).ok()?;
+                let receipt: ReadReceipt = serde_json::from_str(&receipt).ok()?;
+                let whole = !receipt.files.is_empty() && receipt.files.iter().all(|f| dir.join(f).is_file());
+                let installed = fs::metadata(dir.join(RECEIPT)).and_then(|m| m.modified()).ok()?;
+                whole.then_some((installed, dir))
+            })
+            .max_by_key(|(installed, _)| *installed)
+            .map(|(_, dir)| dir)
     }
 
     /// Bytes to download.
@@ -317,6 +349,12 @@ fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
     }
 }
 
+/// The component a runtime folder (`<id>-<version>`) belongs to: the longest id it is named
+/// after ("parakeet-ultra-onnx-w8-..." is the w8 component's, not a shorter id's).
+fn owner(folder: &str) -> Option<&'static Component> {
+    components().iter().filter(|c| folder.starts_with(&format!("{}-", c.id))).max_by_key(|c| c.id.len())
+}
+
 /// Removes what an update left behind: component folders (and unfinished installs) of versions
 /// components.json no longer lists, and downloads that are not current. Returns the bytes freed.
 /// Only folders named `<known id>-<version>` are touched; anything else in the runtime folder
@@ -336,12 +374,7 @@ pub fn prune() -> u64 {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let text = name.to_string_lossy();
-            // The component a folder belongs to: the longest id it is named after.
-            let owner = components()
-                .iter()
-                .filter(|c| text.starts_with(&format!("{}-", c.id)))
-                .max_by_key(|c| c.id.len());
-            let replaced = owner.is_some_and(|c| c.is_intact());
+            let replaced = owner(&text).is_some_and(|c| c.is_intact());
             if replaced && !current.contains(&name) && entry.path().is_dir() {
                 let size = dir_size(&entry.path());
                 match fs::remove_dir_all(entry.path()) {
@@ -711,6 +744,36 @@ mod tests {
             assert_eq!(last, body.len() as u64, "progress counts what was there");
             let _ = fs::remove_dir_all(&dir);
         }
+    }
+
+    #[test]
+    fn a_folder_belongs_to_the_longest_id_it_is_named_after() {
+        assert_eq!(owner("parakeet-ultra-onnx-w8-0c71f044").map(|c| c.id.as_str()), Some("parakeet-ultra-onnx-w8"));
+        assert_eq!(owner("utter-quality-dc947f0c").map(|c| c.id.as_str()), Some("utter-quality"));
+        assert!(owner("notes").is_none());
+    }
+
+    #[test]
+    fn an_earlier_version_with_all_its_files_stands_in() {
+        let root = std::env::temp_dir().join(format!("utter-previous-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let c = component("utter-quality").unwrap();
+        let install = |version: &str, files: &[&str], present: &[&str]| {
+            let dir = root.join(format!("utter-quality-{version}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(RECEIPT), serde_json::json!({ "files": files }).to_string()).unwrap();
+            present.iter().for_each(|f| fs::write(dir.join(f), b"x").unwrap());
+            dir
+        };
+        assert_eq!(c.previous_install_in(&root), None);
+        let whole = install("old", &["utter-quality-v1-q4_0.gguf"], &["utter-quality-v1-q4_0.gguf"]);
+        // Newer, but a file is gone: not whole, so not used.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        install("broken", &["utter-quality-v1-q4_0.gguf"], &[]);
+        // The current version's own folder is never an earlier one.
+        install(&c.version, &["utter-quality-v2-q4_0.gguf"], &["utter-quality-v2-q4_0.gguf"]);
+        assert_eq!(c.previous_install_in(&root), Some(whole));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

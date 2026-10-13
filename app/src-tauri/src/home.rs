@@ -24,6 +24,8 @@ pub struct PipelineLink(pub Arc<Mutex<Option<Sender<Settings>>>>);
 pub struct Models {
     running: Mutex<Option<Model>>,
     failed: Mutex<Option<Model>>,
+    /// The running model's components are earlier versions (it started during an update).
+    on_earlier: Mutex<bool>,
 }
 
 impl Models {
@@ -35,6 +37,16 @@ impl Models {
     pub fn set_running(&self, model: Model) {
         *self.running.lock().expect("models lock") = Some(model);
         *self.failed.lock().expect("models lock") = None;
+        *self.on_earlier.lock().expect("models lock") = false;
+    }
+
+    /// What runs started while an update downloads, on the earlier versions.
+    pub fn set_on_earlier(&self) {
+        *self.on_earlier.lock().expect("models lock") = true;
+    }
+
+    pub fn on_earlier(&self) -> bool {
+        *self.on_earlier.lock().expect("models lock")
     }
 
     /// Dictation stopped: nothing runs until it starts again.
