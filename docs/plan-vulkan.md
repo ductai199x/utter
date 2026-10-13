@@ -47,6 +47,43 @@ against the CUDA provider, 60 clips of the AMI and VoxPopuli bench sets:
 - The plugin lists every adapter with its LUID and DXGI index (the 3090 Ti and the Radeon iGPU),
   which ties it to the probe and to llama.cpp's Vulkan device.
 
+## Built: the Vulkan backend in Utter (2026-10-13)
+
+Steps 2, 3 and 5 below are in the code; `UTTER_GPU_BACKEND=vulkan` runs it on an NVIDIA card
+and `UTTER_GPU_INDEX` picks another card in the high-performance order for llama-server.
+
+- `utter_runtime::backend()` picks once per process: CUDA when NVIDIA's driver answers, else
+  Vulkan. Each backend has its own runtime components (`utter_pipeline::runtime_for`), as LM
+  Studio ships a runtime per backend: on Vulkan onnxruntime 1.31 (CPU build) with the WebGPU
+  plugin 0.4.0 and the official llama.cpp Vulkan zip, 130 MB in all and nothing of CUDA.
+- The card is the first DXGI adapter in high-performance order (`utter_platform::gpu`). The
+  speech model's WebGPU device is that card's PCI device id; llama-server's `--device VulkanN`
+  is that card's name in `--list-devices` (307 ms, once per process). The WebGPU plugin 0.4.0
+  (the newest) ignores the device it is given, and its LUID options: it runs on Dawn's
+  high-performance adapter, the same card. Measured by forcing it: the Radeon iGPU runs the
+  encoder in 560 ms (`powerPreference=low-power`), the 3090 Ti in 34 ms, whichever device is
+  passed.
+- Speech on Vulkan runs the float16 encoder; first run, Settings and the problem screens
+  describe the card and the driver through DXGI on Vulkan.
+
+Measured in Utter itself on the 3090 Ti, with Utter 0.1.5 running on the same card:
+
+| | CUDA | Vulkan |
+|---|---|---|
+| Speech bench, encoder p50 / p95 (120 clips) | 19.7 / 30.6 ms | 50.8 / 75.6 ms |
+| Speech bench, transcripts identical / WER | - / 6.76% | 118 of 120 / 6.79% |
+| e2e Quality, key up to text p50 / p95 (80 dictations) | 180 / 361 ms | 234 / 429 ms |
+| e2e Light, key up to text p50 / p95 | - | 201 / 381 ms |
+| Peak GPU memory, Quality / Light | 4,550 / 3,085 MiB (Light: 2026-10-11) | 5,690 / 4,143 MiB |
+
+- The first Vulkan Quality run had two cleanups over 3 s (a 5.8 s prompt of 8 tokens, a 4.2 s
+  reply at 103 ms a token); a repeat of its AMI half had none (p50 137 / p95 197 ms, against
+  CUDA's 118 / 167). Not shader compilation, which would repeat: contention on the shared card,
+  to be watched for on real AMD and Intel cards.
+- `gpu_need` on Vulkan is these peaks rounded up (6.2 and 4.5 GB) until step 6.
+- Not done: step 4 (on an AMD or Intel card nothing holds the clocks up yet; the CUDA clock hold
+  turns itself off without NVIDIA's driver) and step 6, measuring on real AMD and Intel cards.
+
 ## Architecture
 
 - **Backends.** `cuda` (NVIDIA, as today) and `vulkan` (AMD, Intel; NVIDIA only if a

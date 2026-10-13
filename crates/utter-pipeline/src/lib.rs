@@ -7,6 +7,7 @@
 //! polls the microphone every [`POLL`] while listening. Every dictation's stage times are
 //! measured from key up, the moment the user starts waiting.
 
+pub mod card;
 mod clean;
 pub mod gate;
 pub mod history;
@@ -29,6 +30,7 @@ use utter_platform::focus::{self, Window};
 use utter_platform::hotkey::{self, Action, HotkeyConfig};
 use utter_platform::insert::{self, InsertError};
 use utter_platform::shortcut::{self, Shortcut};
+use utter_runtime::Backend;
 use utter_runtime::gpu::GpuWarmer;
 
 use crate::clean::Cleaner;
@@ -109,20 +111,28 @@ type Speech = (Sender<Job>, Receiver<Done>);
 /// speech model elsewhere; or why it could not start.
 type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
 
-/// Which speech build a tier runs: the 8-bit one for both. It transcribes the same as float16
-/// and takes 0.66 GB less GPU memory, for about 5 ms more a clip (Tai, 2026-10-11: cut memory
-/// as far as quality allows; small latency costs are fine).
+/// Which speech build a tier runs. On CUDA the 8-bit one for both: it transcribes the same as
+/// float16 and takes 0.66 GB less GPU memory, for about 5 ms more a clip (Tai, 2026-10-11: cut
+/// memory as far as quality allows; small latency costs are fine). On Vulkan float16: WebGPU
+/// runs 8 bits 34 ms slower a clip, not 5 (docs/plan-vulkan.md).
 pub fn speech_for(_tier: Tier) -> SpeechModel {
-    SpeechModel::W8
+    match utter_runtime::backend() {
+        Backend::Cuda => SpeechModel::W8,
+        Backend::Vulkan => SpeechModel::Fp16,
+    }
 }
 
-/// GPU memory a tier needs free to run, speech and cleanup together: the peak measured end to
-/// end (docs/eval-results.md, 2026-10-11: 4,572 and 3,085 MiB), rounded up.
+/// GPU memory a tier needs free to run, speech and cleanup together: on CUDA the peak measured
+/// end to end (docs/eval-results.md, 2026-10-11: 4,572 and 3,085 MiB), rounded up; on Vulkan
+/// the peak measured the same way on the 3090 Ti (docs/plan-vulkan.md, 2026-10-13: 5,690 and
+/// 4,143 MiB, the float16 encoder included), until AMD and Intel cards are measured.
 pub fn gpu_need(tier: Tier) -> u64 {
-    match tier {
-        Tier::Quality => 4_800_000_000,
-        Tier::Light => 3_250_000_000,
-        Tier::Reference => 18_000_000_000,
+    match (utter_runtime::backend(), tier) {
+        (Backend::Cuda, Tier::Quality) => 4_800_000_000,
+        (Backend::Cuda, Tier::Light) => 3_250_000_000,
+        (Backend::Vulkan, Tier::Quality) => 6_200_000_000,
+        (Backend::Vulkan, Tier::Light) => 4_500_000_000,
+        (_, Tier::Reference) => 18_000_000_000,
     }
 }
 
@@ -132,19 +142,23 @@ pub fn card_need(tier: Tier) -> u64 {
     gpu_need(tier) + 1_000_000_000
 }
 
-/// The runtime components a tier needs (crates/utter-runtime/components.json): onnxruntime,
-/// the CUDA runtime and cuDNN that llama-server and the speech model use, voice detection,
-/// llama-server, then the tier's two models.
+/// The runtime components a tier needs on this backend (crates/utter-runtime/components.json),
+/// as LM Studio ships a runtime per backend. On CUDA: onnxruntime, the CUDA runtime and cuDNN
+/// that llama-server and the speech model use, voice detection, llama-server, then the tier's
+/// two models. On Vulkan: onnxruntime with its WebGPU provider, voice detection, the Vulkan
+/// llama-server, then the models; nothing of CUDA.
 pub fn components_for(tier: Tier) -> Vec<&'static str> {
-    vec![
-        "onnxruntime-gpu",
-        "cuda-runtime",
-        "cudnn",
-        "silero-vad",
-        "llama-cpp",
-        speech_for(tier).component(),
-        tier.component(),
-    ]
+    let mut ids = runtime_for(utter_runtime::backend()).to_vec();
+    ids.extend([speech_for(tier).component(), tier.component()]);
+    ids
+}
+
+/// The runtime components (everything but the models) a backend runs on.
+pub fn runtime_for(backend: Backend) -> &'static [&'static str] {
+    match backend {
+        Backend::Cuda => &["onnxruntime-gpu", "cuda-runtime", "cudnn", "silero-vad", "llama-cpp"],
+        Backend::Vulkan => &["onnxruntime", "onnxruntime-ep-webgpu", "silero-vad", "llama-cpp-vulkan"],
+    }
 }
 
 /// Where each component `tier` runs on is installed now (an earlier version's folder while an

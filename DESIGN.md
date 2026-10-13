@@ -83,7 +83,7 @@ Phase 2 makes insertion robust.
 | Crate | Job |
 |---|---|
 | `utter-core` | Shared types, config, the event bus, tracing setup |
-| `utter-runtime` | The pinned runtime components (onnxruntime, CUDA, cuDNN, llama-server): download, SHA-256 check, install, locate |
+| `utter-runtime` | The pinned runtime components (onnxruntime, CUDA, cuDNN, llama-server, and the Vulkan backend's onnxruntime, WebGPU provider and llama-server): download, SHA-256 check, install, locate; which GPU backend runs |
 | `utter-audio` | Mic capture (`cpal`), a lock-free ring buffer, resampling to 16 kHz, levels for the waveform, noise suppression and gain (whisper mode), device hot-plug |
 | `utter-asr` | Speech recognition (Parakeet TDT on onnxruntime, section 6) and voice activity detection (Silero VAD and the segmenter that cuts at pauses) |
 | `utter-llm` | The llama-server client, its supervisor, prompts, the cleanup gate |
@@ -421,3 +421,4 @@ utter/
 | 2026-10-11 | Everything on the GPU for both models (Tai), and as little of it as quality allows: both run the 8-bit speech encoder (same transcripts as float16, about 5 ms slower), memory-pattern planning off, cleanup prompts processed 128 tokens at a time. Measured end to end: Quality 4.8 GB (was 5.6), Light 3.25 GB. Each model's need is utter_pipeline::gpu_need, and the card it is offered on adds 1 GB. Supersedes the speech-on-the-CPU plan for Light (736 ms a clip). | 6, docs/eval-results.md |
 | 2026-10-11 | Data lives where each platform keeps per-user app data: %LOCALAPPDATA%\Utter for an installed copy and Utter_dev beside it for dev builds and tools (~/.local/share/utter[_dev] on Linux), same layout, never shared. | 11, docs/local-setup.md |
 | 2026-10-12 | The cleanup models are v2, trained on the published dataset ductai199x/dictation-to-text with one recipe for both tiers (`utter-train`), so every shipped model is reproducible from public data. Quality v2 ties v1 on held-out speech, Light v2 trails by 1-2 points; standardization wins (Tai). Shipped in 0.1.2. | 6, docs/eval-results.md |
+| 2026-10-13 | AMD and Intel graphics cards run Utter on a Vulkan backend, chosen when NVIDIA's driver does not answer: llama.cpp's official Vulkan build with `--device` on the high-performance card, and the speech model's float16 encoder on onnxruntime's WebGPU plugin provider on the same card, each a pinned component of its own as LM Studio ships a runtime per backend. NVIDIA keeps CUDA: on the 3090 Ti Vulkan costs 54 ms of key up to text at p50. | 3, docs/plan-vulkan.md |

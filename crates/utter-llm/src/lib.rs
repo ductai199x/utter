@@ -2,7 +2,8 @@
 //! the pinned `llama-cpp` runtime component, never from another installed application.
 //!
 //! [`LlamaServer::start`] launches it on a free local port with the CUDA libraries of the
-//! `cuda-runtime` component, waits until `/health` answers, and logs its output to the rotating
+//! `cuda-runtime` component (or, on the Vulkan backend, the `llama-cpp-vulkan` build on the
+//! high-performance card), waits until `/health` answers, and logs its output to the rotating
 //! `<data_dir>/logs/llama-server.log` (utter_core::logs). Dropping the handle stops it. [`LlamaServer::chat`]
 //! sends one chat completion and returns the text with llama-server's own timings.
 //! [`cleanup`] builds the cleanup request.
@@ -13,8 +14,10 @@ use std::io::{BufRead, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+use utter_runtime::Backend;
 
 /// llama-server's log, shared by every server this process runs (two overlap while a model
 /// switch loads the new one beside the old).
@@ -63,6 +66,8 @@ pub enum LlmError {
     Exited(String, PathBuf),
     #[error("llama-server request: {0}")]
     Request(String),
+    #[error("graphics card: {0}")]
+    Device(String),
 }
 
 #[derive(Debug, Clone)]
@@ -160,14 +165,24 @@ impl LlamaServer {
     pub fn start(opts: &ServerOptions) -> Result<Self, LlmError> {
         // Development only: a llama-server built elsewhere (the eval on Linux, where Utter has no
         // runtime component yet), with the system's CUDA. The app never sets it.
-        let (exe, path) = match std::env::var_os("UTTER_LLAMA_SERVER") {
-            Some(exe) => (PathBuf::from(exe), None),
-            None => {
+        let backend = utter_runtime::backend();
+        let (exe, path) = match (std::env::var_os("UTTER_LLAMA_SERVER"), backend) {
+            (Some(exe), _) => (PathBuf::from(exe), None),
+            (None, Backend::Cuda) => {
                 let llama = utter_runtime::component("llama-cpp")?.installed_dir()?;
                 let cuda = utter_runtime::component("cuda-runtime")?.installed_dir()?;
                 // The CUDA runtime comes from Utter's component, for this child only.
                 (llama.join(SERVER_EXE), Some(prepend_path(&[llama, cuda])))
             }
+            // The Vulkan build needs nothing beside it but the driver's vulkan-1.dll.
+            (None, Backend::Vulkan) => {
+                let llama = utter_runtime::component("llama-cpp-vulkan")?.installed_dir()?;
+                (llama.join(SERVER_EXE), Some(prepend_path(&[llama])))
+            }
+        };
+        let device = match backend {
+            Backend::Vulkan => Some(vulkan_device(&exe)?),
+            Backend::Cuda => None,
         };
         if !opts.model.is_file() {
             return Err(LlmError::Io {
@@ -185,7 +200,19 @@ impl LlamaServer {
         // --no-warmup: the caller's first request warms it (cleanup sends a real one), so the
         // server's own empty pass only delays ready.
         cmd.args(["--parallel", "1", "--no-webui", "--jinja", "--no-warmup"]);
-        cmd.args(["--flash-attn", if opts.flash_attention { "on" } else { "off" }]);
+        // On Vulkan, flash attention where the card does it well: on some Intel cards it slows
+        // prompt processing (docs/plan-vulkan.md), and llama.cpp knows which.
+        let flash = match (opts.flash_attention, backend) {
+            (false, _) => "off",
+            (true, Backend::Cuda) => "on",
+            (true, Backend::Vulkan) => "auto",
+        };
+        cmd.args(["--flash-attn", flash]);
+        if let Some(device) = &device {
+            // Without it the Vulkan build splits the model across every GPU it sees, an
+            // integrated one too (docs/plan-vulkan.md).
+            cmd.args(["--device", device]);
+        }
         cmd.args(&opts.extra_args);
         if let Some(path) = path {
             cmd.env("PATH", path);
@@ -348,10 +375,58 @@ fn free_port() -> Result<u16, LlmError> {
     Ok(port)
 }
 
+/// The Vulkan device (`VulkanN`) that is the high-performance graphics card, the one the speech
+/// model runs on: llama.cpp numbers devices in Vulkan's order, which differs from DXGI's, so
+/// the card is found by name in `--list-devices`. Asked once per process (some 250-300 ms, a
+/// launch of llama-server); a restart reuses the answer.
+fn vulkan_device(exe: &Path) -> Result<String, LlmError> {
+    static DEVICE: OnceLock<Result<String, String>> = OnceLock::new();
+    DEVICE
+        .get_or_init(|| {
+            let adapter = utter_platform::gpu::high_performance_adapter().ok_or("no graphics card found")?;
+            let mut cmd = Command::new(exe);
+            cmd.arg("--list-devices").stdin(Stdio::null());
+            utter_platform::process::no_console_window(&mut cmd);
+            let t = Instant::now();
+            let out = cmd.output().map_err(|e| format!("{}: {e}", exe.display()))?;
+            let listed = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+            let device = find_vulkan_device(&listed, &adapter.name)
+                .ok_or_else(|| format!("llama.cpp's Vulkan does not offer {}", adapter.name))?;
+            tracing::info!(device, card = adapter.name, ms = t.elapsed().as_millis() as u64, "Vulkan device");
+            Ok(device)
+        })
+        .clone()
+        .map_err(LlmError::Device)
+}
+
+/// In `--list-devices` output (`  Vulkan0: NVIDIA GeForce RTX 3090 Ti (24309 MiB, ...)`), the
+/// first device of this name. Two identical cards are interchangeable.
+fn find_vulkan_device(listed: &str, name: &str) -> Option<String> {
+    listed.lines().find_map(|line| {
+        let (device, rest) = line.trim().split_once(": ")?;
+        let listed_name = rest.rsplit_once(" (").map_or(rest, |(n, _)| n);
+        (device.starts_with("Vulkan") && listed_name == name).then(|| device.to_string())
+    })
+}
+
 fn prepend_path(dirs: &[PathBuf]) -> std::ffi::OsString {
     let mut paths: Vec<PathBuf> = dirs.to_vec();
     if let Some(existing) = std::env::var_os("PATH") {
         paths.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(paths).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_vulkan_device;
+
+    #[test]
+    fn the_card_is_found_by_name_in_the_device_list() {
+        let listed = "Available devices:\n  Vulkan0: NVIDIA GeForce RTX 3090 Ti (24309 MiB, 23541 MiB free)\n  \
+                      Vulkan1: AMD Radeon(TM) Graphics (48825 MiB, 46383 MiB free)\n";
+        assert_eq!(find_vulkan_device(listed, "AMD Radeon(TM) Graphics").as_deref(), Some("Vulkan1"));
+        assert_eq!(find_vulkan_device(listed, "NVIDIA GeForce RTX 3090 Ti").as_deref(), Some("Vulkan0"));
+        assert_eq!(find_vulkan_device(listed, "NVIDIA GeForce RTX 3090"), None);
+    }
 }

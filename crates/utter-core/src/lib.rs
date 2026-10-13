@@ -96,8 +96,9 @@ fn move_if_new(from: &Path, to: &Path) -> bool {
 pub fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt};
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("warn,utter_core=info,utter_asr=info,utter_cli=info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("warn,utter_core=info,utter_runtime=info,utter_asr=info,utter_llm=info,utter_cli=info")
+    });
     let _ = fmt().with_env_filter(filter).with_writer(std::io::stderr).try_init();
 }
 

@@ -111,7 +111,7 @@ struct KeyOption {
 /// The GPU's memory, asked once: it does not change while Utter runs.
 fn gpu_memory() -> Option<u64> {
     static MEMORY: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
-    *MEMORY.get_or_init(|| utter_runtime::gpu::probe().ok().map(|g| g.memory_bytes))
+    *MEMORY.get_or_init(|| utter_pipeline::card::graphics_card().ok().map(|g| g.memory_bytes))
 }
 
 /// Bytes `tier` still needs downloaded (its components that are not installed and intact).

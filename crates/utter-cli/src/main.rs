@@ -29,7 +29,7 @@ struct Cli {
     #[arg(long, global = true)]
     model_dir: Option<PathBuf>,
     /// Where the encoder runs: the GPU (as both tiers do), or the CPU, for comparison.
-    #[arg(long, global = true, value_enum, default_value_t = DeviceArg::Cuda)]
+    #[arg(long, global = true, value_enum, default_value_t = DeviceArg::Gpu)]
     encoder_device: DeviceArg,
     /// Where the decoder and joint graphs run.
     #[arg(long, global = true, value_enum, default_value_t = DeviceArg::Cpu)]
@@ -100,14 +100,22 @@ impl From<TierArg> for utter_llm::cleanup::Tier {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum DeviceArg {
+    /// This machine's GPU backend: CUDA, or WebGPU on the Vulkan backend.
+    Gpu,
     Cuda,
+    Webgpu,
     Cpu,
 }
 
 impl From<DeviceArg> for Device {
     fn from(d: DeviceArg) -> Self {
         match d {
+            DeviceArg::Gpu => match utter_runtime::backend() {
+                utter_runtime::Backend::Cuda => Device::Cuda,
+                utter_runtime::Backend::Vulkan => Device::WebGpu,
+            },
             DeviceArg::Cuda => Device::Cuda,
+            DeviceArg::Webgpu => Device::WebGpu,
             DeviceArg::Cpu => Device::Cpu,
         }
     }
@@ -496,10 +504,16 @@ fn llm_bench(
             "gap_ms": pacing.gap_ms,
             "keepalive_ms": pacing.keepalive_ms,
             "warm_gpu": warm_gpu,
-            // The component's version, or the build UTTER_LLAMA_SERVER points at (the eval on Linux).
+            // The component's version (this backend's build), or the build UTTER_LLAMA_SERVER
+            // points at (the eval on Linux).
             "llama_cpp": match std::env::var("UTTER_LLAMA_SERVER") {
                 Ok(path) => path,
-                Err(_) => utter_runtime::component("llama-cpp")?.version.clone(),
+                Err(_) => utter_runtime::component(match utter_runtime::backend() {
+                    utter_runtime::Backend::Cuda => "llama-cpp",
+                    utter_runtime::Backend::Vulkan => "llama-cpp-vulkan",
+                })?
+                .version
+                .clone(),
             },
             "prompt": bench.prompt.as_ref().map_or("crates/utter-llm/prompts/cleanup.md".to_owned(), |p| p.display().to_string()),
         }))?,
@@ -593,7 +607,8 @@ fn llm_bench(
 
 fn setup(ids: &[String]) -> Result<()> {
     let chosen: Vec<&utter_runtime::Component> = if ids.is_empty() {
-        utter_runtime::components().iter().filter(|c| !c.optional).collect()
+        let theirs = other_backend_only();
+        utter_runtime::components().iter().filter(|c| !c.optional && !theirs.contains(&c.id.as_str())).collect()
     } else {
         ids.iter().map(|id| utter_runtime::component(id)).collect::<Result<_, _>>()?
     };
@@ -850,11 +865,23 @@ fn record(out: &Path, seconds: f64, device: Option<String>) -> Result<()> {
     Ok(())
 }
 
+/// The runtime components only the backend this machine does not run on needs: `setup` skips
+/// them, and they are not missing.
+fn other_backend_only() -> Vec<&'static str> {
+    use utter_runtime::Backend;
+    let mine = utter_runtime::backend();
+    let other = if mine == Backend::Cuda { Backend::Vulkan } else { Backend::Cuda };
+    let mine = utter_pipeline::runtime_for(mine);
+    utter_pipeline::runtime_for(other).iter().copied().filter(|id| !mine.contains(id)).collect()
+}
+
 fn doctor() -> Result<()> {
     println!("Data folder: {}", utter_core::data_dir().display());
+    println!("GPU backend: {:?}", utter_runtime::backend());
     println!("Runtime components:");
+    let theirs = other_backend_only();
     for c in utter_runtime::components() {
-        let state = match (c.is_installed(), c.optional) {
+        let state = match (c.is_installed(), c.optional || theirs.contains(&c.id.as_str())) {
             (true, _) => "installed".to_owned(),
             (false, true) => format!("optional (utter-cli setup {})", c.id),
             (false, false) => "MISSING (utter-cli setup)".to_owned(),
