@@ -14,6 +14,7 @@
     historyQuery,
     historyRestore,
     onHistoryChanged,
+    openPath,
     type Change,
     type HistoryEntry,
     type HistoryPage,
@@ -52,6 +53,8 @@
   let menu = $state<'status' | 'app' | 'time' | null>(null);
 
   let page = $state<HistoryPage | null>(null);
+  // Why History could not be read (the file is never written over then); null when it was.
+  let readError = $state<string | null>(null);
   let entries = $state<HistoryEntry[]>([]);
   let selectedId = $state<number | null>(null);
   let loading = false;
@@ -127,8 +130,15 @@
 
   async function reload() {
     const mine = ++reloads;
-    const p = await historyQuery(query(0));
+    let p: HistoryPage;
+    try {
+      p = await historyQuery(query(0));
+    } catch (e) {
+      if (mine === reloads) readError = String(e);
+      return;
+    }
     if (mine !== reloads) return;
+    readError = null;
     page = p;
     const arrived = p.entries.filter((e) => seen.size > 0 && !seen.has(e.id)).map((e) => e.id);
     fresh = new Set(arrived);
@@ -376,6 +386,12 @@
 
 <div class="history">
   <section class="list-col" aria-label="Dictations">
+    {#if readError}
+      <div class="banner" role="alert">
+        <span>History could not be read, so nothing was changed: {readError}</span>
+        <button onclick={() => void openPath('data').catch(() => {})}>Open folder</button>
+      </div>
+    {/if}
     <div class="top">
       <label class="search-field">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="M13.2 13.2L17 17" /></svg>
