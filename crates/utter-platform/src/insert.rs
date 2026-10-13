@@ -9,13 +9,16 @@
 //!   CF_DIB, are kept);
 //! - the clipboard is restored only if nothing else has changed it since the paste, so a copy
 //!   the user makes in the meantime is never overwritten;
+//! - one restore is pending at a time: a paste within the last one's keep time keeps the
+//!   clipboard that paste saved (the person's, not Utter's text) and restores it once, later;
 //! - the dictated text is marked to stay out of Windows' clipboard history and cloud clipboard.
 //!
 //! How an app pastes, and how long it needs the text on the clipboard, is its [`PasteRule`]:
 //! this platform's defaults ([`default_rules`]) with the person's changes over them.
 //! [`copy`] leaves text on the clipboard: the fallback when it cannot go in.
 
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::focus::{self, Window};
 
@@ -156,8 +159,15 @@ fn wait_quiet() -> bool {
 /// against none), and clipboard monitors read every new clipboard at once anyway, so a read
 /// could not be told from a paste.
 fn paste_by_clipboard(text: &str, keys: PasteKeys, keep: Keep) -> Result<(), InsertError> {
-    let start = std::time::Instant::now();
-    let saved = imp::save_all()?;
+    let start = Instant::now();
+    // A restore still pending holds the person's clipboard: while the clipboard is still that
+    // paste's text, saving it now would save Utter's text as theirs. This paste takes the
+    // snapshot over, and the restore with it.
+    let pending = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let saved = match pending {
+        Some(p) if imp::sequence() == p.ours => p.saved,
+        _ => imp::save_all()?,
+    };
     let save = start.elapsed();
     let ours = imp::put_text(text, true)?;
     let put = start.elapsed();
@@ -165,7 +175,7 @@ fn paste_by_clipboard(text: &str, keys: PasteKeys, keep: Keep) -> Result<(), Ins
         tracing::debug!("the clipboard was not quiet within {QUIET_WAIT:?}; pasting anyway");
     }
     let quiet = start.elapsed();
-    let sent = std::time::Instant::now();
+    let sent = Instant::now();
     imp::press(keys)?;
     tracing::debug!(
         save_ms = save.as_secs_f64() * 1e3,
@@ -175,15 +185,32 @@ fn paste_by_clipboard(text: &str, keys: PasteKeys, keep: Keep) -> Result<(), Ins
         "paste"
     );
     let Some(delay) = keep.restore_after() else { return Ok(()) };
+    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(Pending { saved, ours });
     std::thread::Builder::new()
         .name("utter-clipboard".into())
         .spawn(move || {
             std::thread::sleep(delay.saturating_sub(sent.elapsed()));
-            imp::restore(saved, ours);
+            // Still this paste's restore, unless a later paste took it over.
+            let mine = {
+                let mut slot = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+                if slot.as_ref().is_some_and(|p| p.ours == ours) { slot.take() } else { None }
+            };
+            if let Some(p) = mine {
+                imp::restore(p.saved, p.ours);
+            }
         })
         .map_err(|e| InsertError::Clipboard(e.to_string()))?;
     Ok(())
 }
+
+/// The clipboard a paste saved, waiting to go back, and the sequence number Utter's text left.
+struct Pending {
+    saved: imp::Snapshot,
+    ours: u32,
+}
+
+/// The one restore pending (paste_by_clipboard).
+static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
 /// Puts `text` on the clipboard and leaves it there, as an ordinary copy (in clipboard
 /// history, seen by clipboard managers): the person asked for it (History's Copy, copy last) or
@@ -442,13 +469,15 @@ mod imp {
         // sequence number itself, and the next try must not take that for the person's copy.
         let mut ours = our_sequence;
         let result = retrying(RESTORE_BUDGET, || {
-            // Checked on every try: a copy the person makes meanwhile is never overwritten.
-            // SAFETY: no arguments.
-            if unsafe { GetClipboardSequenceNumber() } != ours {
-                return Ok(false);
-            }
             let attempt = (|| {
                 let _cb = Clipboard::open()?;
+                // Checked on every try, with the clipboard open so nothing can change it
+                // between the check and the restore: a copy the person made meanwhile is
+                // never overwritten.
+                // SAFETY: no arguments.
+                if unsafe { GetClipboardSequenceNumber() } != ours {
+                    return Ok(false);
+                }
                 // SAFETY: the clipboard is open.
                 if unsafe { EmptyClipboard() } == 0 {
                     return Err(InsertError::Clipboard(format!("empty: {}", std::io::Error::last_os_error())));
@@ -862,6 +891,37 @@ mod live {
         // SAFETY: no arguments.
         imp::restore(saved, unsafe { GetClipboardSequenceNumber() });
         assert_eq!((missed, not_restored), (0, 0));
+    }
+
+    /// Two dictations within one keep time (Word, Outlook: 3 s): the clipboard the person had
+    /// before the first comes back after the second, not the first dictation.
+    #[test]
+    #[ignore]
+    fn back_to_back_pastes_restore_the_first_clipboard() {
+        let saved = imp::save_all().expect("read the clipboard");
+        let w = TestWindow::open("Utter back-to-back test", 200);
+        w.clear();
+        w.focus();
+        let target = focus::foreground().expect("the test window has the focus");
+        copy("THE PERSON'S CLIPBOARD").unwrap();
+        pump(Duration::from_millis(1000));
+        let keep = rule(PasteKeys::Primary, Keep::Seconds3);
+        for text in ["First dictation. ", "Second dictation."] {
+            let t = target.clone();
+            let job = std::thread::spawn(move || paste(&t, text, keep));
+            while !job.is_finished() {
+                pump(Duration::from_millis(2));
+            }
+            job.join().unwrap().expect("the paste");
+            pump(Duration::from_millis(500));
+        }
+        assert_eq!(w.text(), "First dictation. Second dictation.");
+        // The second paste's restore, 3 s after it, puts back what the person had.
+        pump(Duration::from_secs(3));
+        assert!(clipboard_becomes("THE PERSON'S CLIPBOARD"), "the clipboard has {:?}", clipboard_text());
+        drop(w);
+        // SAFETY: no arguments.
+        imp::restore(saved, unsafe { GetClipboardSequenceNumber() });
     }
 
     #[test]
