@@ -49,10 +49,11 @@ fn init_inner() -> Result<PathBuf, AsrError> {
     if !lib.is_file() {
         return Err(AsrError::Runtime(format!("{} does not exist", lib.display())));
     }
-    // The plugin's folder also holds the shader compiler it loads (dxcompiler.dll, dxil.dll).
-    let webgpu = match backend {
-        Backend::Vulkan => Some(component_dir(WEBGPU_COMPONENT)?),
-        Backend::Cuda => None,
+    // The plugin's folder also holds the shader compiler it loads (dxcompiler.dll, dxil.dll). A
+    // custom onnxruntime build brings its own providers.
+    let webgpu = match (backend, &custom) {
+        (Backend::Vulkan, None) => Some(component_dir(WEBGPU_COMPONENT)?),
+        _ => None,
     };
     if custom.is_none() {
         // Only the installed ones: a GPU session without them fails when it is created,
