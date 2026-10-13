@@ -224,9 +224,16 @@ impl Microphone {
 
         let stream_config: cpal::StreamConfig = supported.into();
         let failed = shared.clone();
+        // Only an error that means the device or the stream is gone fails the microphone; a
+        // glitch (an overrun, a busy moment) is noted and audio goes on.
         let err_fn = move |e: cpal::Error| {
-            tracing::warn!("audio stream: {e}");
-            failed.failed.store(true, Ordering::Relaxed);
+            use cpal::ErrorKind::{DeviceNotAvailable, HostUnavailable, PermissionDenied, StreamInvalidated};
+            if matches!(e.kind(), DeviceNotAvailable | HostUnavailable | PermissionDenied | StreamInvalidated) {
+                tracing::warn!("audio stream lost: {e}");
+                failed.failed.store(true, Ordering::Relaxed);
+            } else {
+                tracing::debug!("audio stream: {e}");
+            }
         };
         let stream = match format {
             SampleFormat::F32 => build::<f32>(&device, &stream_config, channels, producer, &shared, err_fn),
