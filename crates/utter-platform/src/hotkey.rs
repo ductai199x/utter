@@ -280,7 +280,8 @@ mod imp {
     }
 
     fn register(hwnd: HWND, flags: u32) -> bool {
-        let device = RAWINPUTDEVICE { usUsagePage: GENERIC_DESKTOP, usUsage: KEYBOARD, dwFlags: flags, hwndTarget: hwnd };
+        let device =
+            RAWINPUTDEVICE { usUsagePage: GENERIC_DESKTOP, usUsage: KEYBOARD, dwFlags: flags, hwndTarget: hwnd };
         // SAFETY: one device description, of its own size.
         unsafe { RegisterRawInputDevices(&device, 1, std::mem::size_of::<RAWINPUTDEVICE>() as u32) != 0 }
     }
