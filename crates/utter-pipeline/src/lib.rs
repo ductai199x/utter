@@ -203,7 +203,7 @@ const SETTINGS_POLL: Duration = Duration::from_millis(200);
 
 /// The context lines every cleanup request carries, from the settings.
 fn cleanup_context(cfg: &PipelineConfig) -> cleanup::Context {
-    cleanup::Context { lists_off: !cfg.lists, ..cleanup::Context::default() }
+    cleanup::Context { lists_off: !cfg.lists }
 }
 
 /// Starts the cleanup model's server and warms it (`None` with cleanup off).
