@@ -1582,6 +1582,21 @@ mod tests {
         assert!(needs_space(Some("e)"), "next"));
     }
 
+    /// What switching the dictation key does (Pipeline::switch_key): only one listener can
+    /// exist, so the old one must be gone before the new one starts.
+    #[test]
+    #[ignore = "registers for the keyboard's Raw Input (observes only: no key is sent)"]
+    fn the_key_listener_restarts_for_a_new_key() {
+        use super::Keys;
+        use utter_platform::hotkey::{HotkeyConfig, VK_F13};
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let first = Keys::start(HotkeyConfig::default(), tx.clone()).expect("the first listener");
+        assert!(Keys::start(HotkeyConfig::default(), tx.clone()).is_err(), "a second listener alongside");
+        drop(first);
+        let next = Keys::start(HotkeyConfig { key: VK_F13, ..HotkeyConfig::default() }, tx).expect("the new key's");
+        assert_eq!(next.cfg.key, VK_F13);
+    }
+
     #[test]
     fn a_paste_is_recognized_through_what_an_app_changes() {
         use super::alnum_tail;
