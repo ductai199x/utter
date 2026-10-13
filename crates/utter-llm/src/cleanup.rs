@@ -47,9 +47,9 @@ impl Tier {
 
     pub fn model_file(self) -> &'static str {
         match self {
-            Tier::Quality => "utter-quality-v1-q4_0.gguf",
+            Tier::Quality => "utter-quality-v2-q4_0.gguf",
             Tier::Reference => "gemma-4-26B_q4_0-it.gguf",
-            Tier::Light => "utter-light-v1-q4_0.gguf",
+            Tier::Light => "utter-light-v2-q4_0.gguf",
         }
     }
 

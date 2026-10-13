@@ -213,35 +213,35 @@
     },
     {
       "id": "utter-quality",
-      "version": "dc947f0c",
+      "version": "5844d969",
       "os": "any",
       "arch": "any",
       "files": [
         {
-          "name": "utter-quality-v1-q4_0.gguf",
-          "url": "https://huggingface.co/ductai199x/utter/resolve/dc947f0c4477621528bba5003471af9eb3fb0f17/utter-quality-v1-q4_0.gguf",
-          "sha256": "7e872c97e82eebc0f10060b8e082814d0e2cee3aa3f5179f51b39bc3ca143a9e",
+          "name": "utter-quality-v2-q4_0.gguf",
+          "url": "https://huggingface.co/ductai199x/utter/resolve/5844d9699579da296d5e2dd716f7dcfb72a79811/utter-quality-v2-q4_0.gguf",
+          "sha256": "3e7629c1d3b1a7124388ea3afb5210378ce429fc623e9330b994c351f17d2d58",
           "size": 5154940832
         }
       ],
       "license": "Apache-2.0 (Gemma 4 E4B fine-tuned by Utter, ductai199x/utter)",
-      "purpose": "Cleanup model, Quality (the default): Gemma 4 E4B fine-tuned for dictation cleanup, v1 (run ft6), Q4_0; about 3.3 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
+      "purpose": "Cleanup model, Quality (the default): Gemma 4 E4B fine-tuned for dictation cleanup, v2 (trained on ductai199x/dictation-to-text), Q4_0; about 3.3 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
     },
     {
       "id": "utter-light",
-      "version": "fb937c54",
+      "version": "5844d969",
       "os": "any",
       "arch": "any",
       "files": [
         {
-          "name": "utter-light-v1-q4_0.gguf",
-          "url": "https://huggingface.co/ductai199x/utter/resolve/fb937c54b81feeba0609639f2219629910362599/utter-light-v1-q4_0.gguf",
-          "sha256": "c8fec1b650cfacecf58e02631c86db892c956c78969daf371c26de8e3d2e6f6f",
+          "name": "utter-light-v2-q4_0.gguf",
+          "url": "https://huggingface.co/ductai199x/utter/resolve/5844d9699579da296d5e2dd716f7dcfb72a79811/utter-light-v2-q4_0.gguf",
+          "sha256": "ee5f74fa6e74b29547f2000b7a515939070e3a44ef7f81942d869de762bc434c",
           "size": 3349515808
         }
       ],
       "license": "Apache-2.0 (Gemma 4 E2B fine-tuned by Utter, ductai199x/utter)",
-      "purpose": "Cleanup model, Light: Gemma 4 E2B fine-tuned for dictation cleanup, v1, Q4_0; about 1.8 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
+      "purpose": "Cleanup model, Light: Gemma 4 E2B fine-tuned for dictation cleanup, v2 (trained on ductai199x/dictation-to-text), Q4_0; about 1.8 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
     },
     {
       "id": "gemma4-26b-a4b-qat",
