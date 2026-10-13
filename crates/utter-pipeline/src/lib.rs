@@ -40,8 +40,8 @@ pub const POLL: Duration = Duration::from_millis(30);
 /// While listening, a recognizer pass at least this often keeps the GPU's clocks up
 /// (docs/eval-results.md, "Idle GPU").
 const KEEPALIVE: Duration = Duration::from_millis(150);
-/// Audio the worker may still hold at key up: a resampler chunk (21 ms at 48 kHz) and change.
-const SETTLE: Duration = Duration::from_millis(25);
+/// How often the idle pipeline checks that the microphone delivers and is the one wanted.
+const MIC_CHECK: Duration = Duration::from_secs(2);
 
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineError {
@@ -164,6 +164,28 @@ fn start_speech(model: SpeechModel, dictionary: &[String]) -> Result<Speech, Pip
         .spawn(move || speech_worker(asr, job_rx, done_tx))
         .map_err(|_| PipelineError::WorkerGone)?;
     Ok((job_tx, done_rx))
+}
+
+/// Opens the microphone `cfg` names. A saved microphone that is not connected is no reason
+/// not to dictate: the system default stands in (Home shows the saved one as not connected),
+/// and the saved one is taken back when it returns (Pipeline::check_microphone).
+fn open_microphone(cfg: &MicConfig) -> Result<Microphone, PipelineError> {
+    match Microphone::open(cfg) {
+        Err(utter_audio::AudioError::NoDevice(_)) if cfg.device.is_some() => {
+            tracing::warn!(device = ?cfg.device, "saved microphone not connected; using the default");
+            Ok(Microphone::open(&MicConfig { device: None, ..cfg.clone() })?)
+        }
+        other => Ok(other?),
+    }
+}
+
+/// The device `cfg` wants, as connected now: the saved one if it is there, else the system
+/// default.
+fn wanted_microphone(cfg: &MicConfig) -> Option<String> {
+    cfg.device
+        .as_ref()
+        .and_then(|want| utter_audio::input_devices().into_iter().find(|name| name.contains(want.as_str())))
+        .or_else(utter_audio::default_input_device)
 }
 
 /// How long the paste waits for what is before the cursor: it was asked at key down, so it is
@@ -368,6 +390,14 @@ enum Input {
     Command(Command),
 }
 
+/// How a dictation began: when the key went down, and whether hands-free (the double tap's
+/// second press; it ends with a tap instead of the key's release).
+#[derive(Debug, Clone, Copy)]
+struct Start {
+    at: Instant,
+    hands_free: bool,
+}
+
 /// Where the app sends [`Command`]s (the tray menu).
 #[derive(Clone)]
 pub struct Commands(Sender<Input>);
@@ -516,11 +546,12 @@ fn join_parts(parts: &[String]) -> String {
 
 /// Where a dictation's audio comes from: the microphone, or a recording replayed in real time.
 pub trait AudioSource {
-    fn start(&mut self);
+    /// Starts the utterance at `at`, when the key went down.
+    fn start(&mut self, at: Instant);
     /// Samples since the last call.
     fn take_new(&mut self) -> Vec<f32>;
-    /// Ends the utterance; returns all of it.
-    fn stop(&mut self, settle: Duration) -> Vec<f32>;
+    /// Ends the utterance at `until`, when the key went up; returns all of it.
+    fn stop(&mut self, until: Instant) -> Vec<f32>;
     /// For a replay: the recording has all been delivered (the key goes up).
     fn ended(&self) -> bool {
         false
@@ -530,14 +561,14 @@ pub trait AudioSource {
 struct MicSource<'a>(&'a Microphone);
 
 impl AudioSource for MicSource<'_> {
-    fn start(&mut self) {
-        self.0.start();
+    fn start(&mut self, at: Instant) {
+        self.0.start(at);
     }
     fn take_new(&mut self) -> Vec<f32> {
         self.0.take_new()
     }
-    fn stop(&mut self, settle: Duration) -> Vec<f32> {
-        self.0.stop(settle)
+    fn stop(&mut self, until: Instant) -> Vec<f32> {
+        self.0.stop(until)
     }
 }
 
@@ -594,7 +625,7 @@ impl<'a> ReplaySource<'a> {
 }
 
 impl AudioSource for ReplaySource<'_> {
-    fn start(&mut self) {
+    fn start(&mut self, _at: Instant) {
         self.started = Some(Instant::now());
         self.given = 0;
     }
@@ -605,7 +636,7 @@ impl AudioSource for ReplaySource<'_> {
         self.given = due;
         new
     }
-    fn stop(&mut self, _settle: Duration) -> Vec<f32> {
+    fn stop(&mut self, _until: Instant) -> Vec<f32> {
         self.audio[..self.given].to_vec()
     }
     fn ended(&self) -> bool {
@@ -625,6 +656,9 @@ pub struct Pipeline {
     input_rx: Receiver<Input>,
     /// When History's retention was last applied.
     pruned: Option<Instant>,
+    /// When the microphone was last checked, and whether it is lost (said once on the Bar).
+    mic_checked: Instant,
+    mic_lost: bool,
 }
 
 /// Everything but the microphone: voice activity detection, the speech worker, the cleanup
@@ -676,15 +710,7 @@ impl Pipeline {
         let t = Instant::now();
         let vad = SileroVad::load_installed()?;
         let vad_ms = t.elapsed().as_secs_f64() * 1e3;
-        // A saved microphone that is not connected is no reason not to start: the system
-        // default stands in (the Home window shows the saved one as not connected).
-        let mic = match Microphone::open(&cfg.mic) {
-            Err(utter_audio::AudioError::NoDevice(_)) if cfg.mic.device.is_some() => {
-                tracing::warn!(device = ?cfg.mic.device, "saved microphone not connected; using the default");
-                Microphone::open(&MicConfig { device: None, ..cfg.mic.clone() })?
-            }
-            other => other?,
-        };
+        let mic = open_microphone(&cfg.mic)?;
         let mic_ms = t.elapsed().as_secs_f64() * 1e3 - vad_ms;
         let t = Instant::now();
         let cleaner = cleaner.join().map_err(|_| PipelineError::WorkerGone)??;
@@ -710,6 +736,8 @@ impl Pipeline {
             input_tx,
             input_rx,
             pruned: None,
+            mic_checked: Instant::now(),
+            mic_lost: false,
         })
     }
 
@@ -783,14 +811,22 @@ impl Pipeline {
         loop {
             self.apply_settings(&mut on_event);
             self.prune_history(false);
+            self.check_microphone(false, &mut on_event);
             match self.input_rx.recv_timeout(SETTINGS_POLL) {
                 // A double tap arrives as Start and Cancel (the first tap, too short for a
                 // dictation), then HandsFree: the second press starts listening hands-free.
-                Ok(Input::Key(action @ (Action::Start | Action::HandsFree), _)) => {
+                Ok(Input::Key(action @ (Action::Start | Action::HandsFree), at)) => {
+                    let test_audio = self.engine.cfg.test_audio.clone();
+                    if test_audio.is_none() && !self.check_microphone(true, &mut on_event) {
+                        on_event(Event::Notice {
+                            text: "No microphone: connect one, or choose one in Settings".into(),
+                            ok: false,
+                        });
+                        continue;
+                    }
                     let looked = Instant::now();
                     let target = focus::foreground();
                     tracing::debug!(ms = looked.elapsed().as_secs_f64() * 1e3, "key down: the focused app");
-                    let test_audio = self.engine.cfg.test_audio.clone();
                     let mut mic = MicSource(&self.mic);
                     let mut replay;
                     let source: &mut dyn AudioSource = match &test_audio {
@@ -801,14 +837,67 @@ impl Pipeline {
                         None => &mut mic,
                     };
                     let input = &self.input_rx;
-                    let hands_free = action == Action::HandsFree;
-                    self.engine.dictate(source, |t| next_key(input, t), target, hands_free, true, &mut on_event)?;
+                    let start = Start { at, hands_free: action == Action::HandsFree };
+                    self.engine.dictate(source, |t| next_key(input, t), target, start, true, &mut on_event)?;
                 }
                 Ok(Input::Command(c)) => self.engine.command(c, &mut on_event),
                 Ok(Input::Key(..)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
             }
         }
+    }
+
+    /// Keeps the microphone alive and the one wanted: reopens it when it stopped delivering
+    /// (unplugged, a headset asleep) or when the wanted device changed (a new system default,
+    /// the saved one plugged back in). Looks every [`MIC_CHECK`]; `now` (a key went down) tries
+    /// a dead one at once, and costs nothing when it is alive. Returns whether there is a
+    /// microphone to record from.
+    fn check_microphone(&mut self, now: bool, on_event: &mut impl FnMut(Event)) -> bool {
+        let alive = self.mic.alive();
+        // Back only once audio flows again: a device that opens but delivers nothing is not.
+        if alive && self.mic_lost && self.mic.delivered() {
+            self.mic_lost = false;
+            on_event(Event::Notice { text: "Microphone reconnected".into(), ok: true });
+        }
+        let due = self.mic_checked.elapsed() >= MIC_CHECK;
+        if alive && (now || !due) {
+            return true;
+        }
+        if !alive && !now && !due {
+            return false;
+        }
+        self.mic_checked = Instant::now();
+        if alive {
+            let wanted = wanted_microphone(&self.engine.cfg.mic);
+            if wanted.is_some_and(|w| w != self.mic.device_name()) {
+                match open_microphone(&self.engine.cfg.mic) {
+                    Ok(mic) => self.switch_microphone(mic, on_event),
+                    // Still delivering, only not the wanted one: keep it.
+                    Err(e) => tracing::debug!("the wanted microphone could not be opened: {e}"),
+                }
+            }
+            return true;
+        }
+        if !std::mem::replace(&mut self.mic_lost, true) {
+            tracing::warn!(device = self.mic.device_name(), "the microphone stopped delivering audio");
+            on_event(Event::Notice { text: "Microphone disconnected".into(), ok: false });
+        }
+        match open_microphone(&self.engine.cfg.mic) {
+            Ok(mic) => {
+                self.switch_microphone(mic, on_event);
+                true
+            }
+            Err(e) => {
+                tracing::debug!("no microphone to reopen: {e}");
+                false
+            }
+        }
+    }
+
+    fn switch_microphone(&mut self, mic: Microphone, on_event: &mut impl FnMut(Event)) {
+        tracing::info!(from = self.mic.device_name(), to = mic.device_name(), "microphone reopened");
+        self.mic = mic;
+        on_event(Event::Microphone(self.mic.level_meter()));
     }
 
     /// Applies History's retention when Utter starts, every hour, and when it changes (`now`).
@@ -879,7 +968,7 @@ impl Pipeline {
         let device = (!s.microphone.is_empty()).then(|| s.microphone.clone());
         if device != cfg.mic.device {
             let mic_cfg = MicConfig { device: device.clone(), ..cfg.mic.clone() };
-            match Microphone::open(&mic_cfg) {
+            match open_microphone(&mic_cfg) {
                 Ok(mic) => {
                     cfg.mic = mic_cfg;
                     self.mic = mic;
@@ -931,7 +1020,7 @@ impl Pipeline {
                 None
             },
             None,
-            false,
+            Start { at: Instant::now(), hands_free: false },
             false,
             &mut |_| {},
         )?;
@@ -999,18 +1088,17 @@ impl Engine {
         })
     }
 
-    /// One dictation, from the Start action (or HandsFree: `hands_free`, which ends with a tap
-    /// instead of the key's release): returns `None` if it was cancelled.
+    /// One dictation, from `start`: returns `None` if it was cancelled.
     fn dictate(
         &mut self,
         source: &mut dyn AudioSource,
         next_action: impl FnMut(Duration) -> Option<(Action, Instant)>,
         target: Option<Window>,
-        hands_free: bool,
+        start: Start,
         do_insert: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Option<Dictation>, PipelineError> {
-        let result = self.dictate_inner(source, next_action, target, hands_free, do_insert, on_event);
+        let result = self.dictate_inner(source, next_action, target, start, do_insert, on_event);
         // Whatever happened, the GPU goes back to idling.
         self.gpu.stop();
         result
@@ -1021,7 +1109,7 @@ impl Engine {
         source: &mut dyn AudioSource,
         mut next_action: impl FnMut(Duration) -> Option<(Action, Instant)>,
         target: Option<Window>,
-        hands_free: bool,
+        Start { at, hands_free }: Start,
         do_insert: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Option<Dictation>, PipelineError> {
@@ -1033,7 +1121,7 @@ impl Engine {
         // Live dictations only: a replay (the bench) is not the user's.
         let mut log = DictationLog::start(LogConfig { enabled: self.cfg.log.enabled && do_insert, ..self.cfg.log });
         log.push(Entry::Listening { hands_free });
-        source.start();
+        source.start(at);
         self.gpu.start();
         let target_handle = target.as_ref().map(|w| w.handle);
         on_event(Event::Listening { hands_free, target: target_handle });
@@ -1059,8 +1147,8 @@ impl Engine {
             }
             match next_action(POLL) {
                 Some((Action::Finish, at)) => break at,
-                Some((Action::Cancel, _)) => {
-                    let audio = source.stop(Duration::ZERO);
+                Some((Action::Cancel, at)) => {
+                    let audio = source.stop(at);
                     on_event(Event::Cancelled);
                     log.push(Entry::Cancelled);
                     log.finish(Finished {
@@ -1170,7 +1258,7 @@ impl Engine {
         self.gpu.stop();
         log.push(Entry::KeyUp);
         on_event(Event::Finishing);
-        let rest = source.stop(SETTLE);
+        let rest = source.stop(key_up);
         // `stop` returns the whole utterance; keep only what `take_new` had not delivered.
         if rest.len() > audio.len() {
             audio.extend_from_slice(&rest[audio.len()..]);
