@@ -206,7 +206,9 @@ pub fn setup_problem(state: tauri::State<'_, LastProblem>) -> Option<crate::prob
 #[tauri::command]
 pub fn setup_retry(app: AppHandle) {
     if !crate::start_pipeline(&app) {
-        // Running already: a model switch failed; send the settings again to retry it.
+        // Running already: a model switch failed. Its failure is forgotten (it would keep the
+        // running model in the settings sent, home::Models::for_pipeline), and it is tried again.
+        app.state::<crate::home::Models>().clear_failed();
         crate::reapply_settings(&app);
     }
 }

@@ -59,7 +59,7 @@ impl Models {
         *self.failed.lock().expect("models lock") = Some(model);
     }
 
-    fn clear_failed(&self) {
+    pub fn clear_failed(&self) {
         *self.failed.lock().expect("models lock") = None;
     }
 

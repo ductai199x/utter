@@ -209,8 +209,13 @@
     if (p.stage === 'error') started = false;
     if (p.stage === 'ready') {
       starting = false;
-      if (mode === 'first' && !repairing) setTimeout(() => view === 'download' && go(flow.indexOf('try')), 500);
-      else {
+      if (mode === 'first' && !repairing) {
+        // From the problem screen, after a Retry that worked: straight on to Try it.
+        if (special === 'problem') {
+          special = null;
+          void go(flow.indexOf('try'));
+        } else setTimeout(() => view === 'download' && go(flow.indexOf('try')), 500);
+      } else {
         // Update, repair or a retry: nothing more to ask. Say so briefly, then get out of the way.
         dir = 1;
         special = 'done';
