@@ -320,7 +320,8 @@ fn read_at(f: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
 /// Removes what an update left behind: component folders (and unfinished installs) of versions
 /// components.json no longer lists, and downloads that are not current. Returns the bytes freed.
 /// Only folders named `<known id>-<version>` are touched; anything else in the runtime folder
-/// is left alone.
+/// is left alone. An old version stays until the current one is intact: until then it is what
+/// the update replaces (setup offers an update, not a repair).
 pub fn prune() -> u64 {
     let current: std::collections::HashSet<std::ffi::OsString> = components()
         .iter()
@@ -330,14 +331,18 @@ pub fn prune() -> u64 {
         })
         .flatten()
         .collect();
-    let ids: Vec<String> = components().iter().map(|c| format!("{}-", c.id)).collect();
     let mut freed = 0;
     if let Ok(entries) = fs::read_dir(runtime_dir()) {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let text = name.to_string_lossy();
-            let ours = ids.iter().any(|prefix| text.starts_with(prefix.as_str()));
-            if ours && !current.contains(&name) && entry.path().is_dir() {
+            // The component a folder belongs to: the longest id it is named after.
+            let owner = components()
+                .iter()
+                .filter(|c| text.starts_with(&format!("{}-", c.id)))
+                .max_by_key(|c| c.id.len());
+            let replaced = owner.is_some_and(|c| c.is_intact());
+            if replaced && !current.contains(&name) && entry.path().is_dir() {
                 let size = dir_size(&entry.path());
                 match fs::remove_dir_all(entry.path()) {
                     Ok(()) => {
