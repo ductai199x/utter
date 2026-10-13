@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 236" width="880" height="236" role="img" aria-labelledby="title desc">
+  <title id="title">Where the quarter second goes</title>
+  <desc id="desc">While you speak, each pause is recognized and cleaned. After the key goes up: the last words are recognized (48 to 71 ms), the dictation is cleaned (131 to 158 ms) and pasted (47 to 61 ms): 231 to 260 ms in all, measured in the app.</desc>
+  <style>
+    .ink { fill: #161a2c; }
+    .muted { fill: #5f6582; }
+    .rule { stroke: rgba(30, 40, 110, 0.18); }
+    .speak { fill: rgba(74, 92, 240, 0.10); stroke: rgba(74, 92, 240, 0.35); }
+    .hatch { stroke: rgba(74, 92, 240, 0.30); }
+    .asr { fill: #8b98ff; }
+    .clean { fill: #4a5cf0; }
+    .paste { fill: #2b3a9e; }
+    .on { fill: #ffffff; }
+    .key { stroke: #4a5cf0; }
+    text { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #e8ebf7; }
+      .muted { fill: #8a90ad; }
+      .rule { stroke: rgba(150, 165, 255, 0.2); }
+      .speak { fill: rgba(127, 143, 255, 0.10); stroke: rgba(127, 143, 255, 0.35); }
+      .hatch { stroke: rgba(127, 143, 255, 0.30); }
+      .asr { fill: #a9b3ff; }
+      .clean { fill: #7f8fff; }
+      .paste { fill: #5363d8; }
+      .on { fill: #0b0e1a; }
+      .key { stroke: #7f8fff; }
+    }
+  </style>
+  <defs>
+    <pattern id="lines" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line class="hatch" x1="0" y1="0" x2="0" y2="8" stroke-width="2"/>
+    </pattern>
+  </defs>
+
+  <text class="ink" x="0" y="24" font-size="18" font-weight="600">Where the quarter second goes</text>
+  <text class="muted" x="0" y="46" font-size="13">A typical dictation, measured in the app on an RTX 3090 Ti (docs/eval-results.md).</text>
+
+  <!-- While speaking: not waited for. 0..240 px. -->
+  <rect class="speak" x="0.5" y="78.5" width="232" height="44" rx="8"/>
+  <rect x="0.5" y="78.5" width="232" height="44" rx="8" fill="url(#lines)"/>
+  <text class="ink" x="116" y="98" font-size="13" text-anchor="middle" font-weight="600">While you speak</text>
+  <text class="muted" x="116" y="114" font-size="12" text-anchor="middle">each pause recognized and cleaned</text>
+
+  <!-- Key up. -->
+  <line class="key" x1="248" y1="64" x2="248" y2="140" stroke-width="2" stroke-dasharray="4 4"/>
+  <text class="ink" x="248" y="58" font-size="12" text-anchor="middle" font-weight="600">key up</text>
+
+  <!-- After key up: 245 ms at 2.4 px per ms, from x = 256. -->
+  <rect class="asr" x="256" y="78" width="132" height="45" rx="8"/>
+  <text class="on" x="322" y="99" font-size="13" text-anchor="middle" font-weight="600">Last words</text>
+  <text class="on" x="322" y="115" font-size="12" text-anchor="middle">55 ms</text>
+
+  <rect class="clean" x="390" y="78" width="336" height="45" rx="8"/>
+  <text class="on" x="558" y="99" font-size="13" text-anchor="middle" font-weight="600">Cleanup</text>
+  <text class="on" x="558" y="115" font-size="12" text-anchor="middle">140 ms</text>
+
+  <rect class="paste" x="728" y="78" width="120" height="45" rx="8"/>
+  <text class="on" x="788" y="99" font-size="13" text-anchor="middle" font-weight="600">Paste</text>
+  <text class="on" x="788" y="115" font-size="12" text-anchor="middle">50 ms</text>
+
+  <!-- Scale. -->
+  <line class="rule" x1="256" y1="146" x2="848" y2="146" stroke-width="1"/>
+  <line class="rule" x1="256" y1="141" x2="256" y2="151" stroke-width="1"/>
+  <line class="rule" x1="496" y1="141" x2="496" y2="151" stroke-width="1"/>
+  <line class="rule" x1="736" y1="141" x2="736" y2="151" stroke-width="1"/>
+  <text class="muted" x="256" y="166" font-size="11" text-anchor="middle">0</text>
+  <text class="muted" x="496" y="166" font-size="11" text-anchor="middle">100 ms</text>
+  <text class="muted" x="736" y="166" font-size="11" text-anchor="middle">200 ms</text>
+
+  <text class="ink" x="848" y="196" font-size="15" text-anchor="end" font-weight="600">Text in your app: 231-260 ms after key up</text>
+  <text class="muted" x="848" y="218" font-size="12" text-anchor="end">Measured ranges: last words 48-71 ms, cleanup 131-158 ms, paste 47-61 ms.</text>
+</svg>

@@ -1,28 +1,124 @@
 <p align="center">
-  <img src="app/brand/icon.svg" width="96" alt="Utter">
+  <img src="app/brand/icon.svg" width="88" alt="Utter">
 </p>
 
 <h1 align="center">Utter</h1>
 
 <p align="center">
   <b>Hold a key, speak, and clean text appears in the app you are typing in.</b><br>
-  Voice dictation that runs entirely on your own computer.
+  Voice dictation that runs entirely on your own computer: fast, private, and open.
 </p>
 
 <p align="center">
-  <a href="https://github.com/ductai199x/utter/releases/latest">Download for Windows</a> ·
-  <a href="DESIGN.md">Design</a> ·
-  <a href="docs/eval-results.md">Eval results</a> ·
-  <a href="https://huggingface.co/ductai199x/utter">Models</a> ·
-  <a href="https://huggingface.co/datasets/ductai199x/dictation-to-text">Datasets</a>
+  <a href="https://github.com/ductai199x/utter/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/ductai199x/utter?label=release&color=4a5cf0"></a>
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-4a5cf0"></a>
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-4a5cf0">
+  <a href="https://huggingface.co/ductai199x/utter"><img alt="Models on Hugging Face" src="https://img.shields.io/badge/models-Hugging%20Face-4a5cf0"></a>
 </p>
 
----
+<p align="center">
+  <a href="https://github.com/ductai199x/utter/releases/latest"><b>Download for Windows</b></a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="docs/eval-results.md">Eval results</a> ·
+  <a href="DESIGN.md">Design</a>
+</p>
 
-Hold **Right Ctrl**, talk the way you talk, let go. "Hey Sarah, I can take three days off starting
-the fifteenth, no wait, fourteenth" becomes *Hey Sarah, I can take three days off starting the
-14th.* in your email, chat, editor or terminal, about a quarter of a second after you release
-the key. Nothing you say leaves the machine.
+<p align="center">
+  <img src="docs/media/demo.gif" width="880" alt="Holding Right Ctrl and saying 'hey sarah um yes I can take the release review on thursday no wait friday at ten'. The Bar at the bottom of the screen shows the words as they are heard, the correction is applied, and on release 'Hey Sarah, yes, I can take the release review on Friday at 10.' appears in the chat box.">
+</p>
+
+Talk the way you talk. Say "um", change your mind halfway through a sentence, list things off.
+Utter types what you meant, punctuated and corrected, into whatever has the cursor: email, chat,
+an editor, a terminal, an AI prompt. The text is there about a quarter of a second after you let
+go, and nothing you say ever leaves your machine.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <b>Private by construction</b><br>
+      Speech recognition and cleanup run on your graphics card. No account, no cloud, no
+      telemetry: Utter goes online only to download the models it runs on.
+    </td>
+    <td width="50%" valign="top">
+      <b>Fast enough to forget about</b><br>
+      231-260 ms from releasing the key to text in your app, measured in the app itself. Most
+      of the work happens while you are still talking.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>Writes like you meant it</b><br>
+      Fillers go, punctuation comes in, "three, no, four" becomes 4, spoken lists become bullets,
+      and your names and terms are spelled your way.
+    </td>
+    <td width="50%" valign="top">
+      <b>Open all the way down</b><br>
+      AGPL code, published models, and published training and test data, every row with its
+      source and license.
+    </td>
+  </tr>
+</table>
+
+## A quick tour
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/media/history-dark.png">
+        <img src="docs/media/history-light.png" alt="History: every dictation, searchable, with what Utter heard and what it changed">
+      </picture>
+      <p><b>History.</b> Every dictation, searchable by what was typed or what was heard, with
+      cleanup's changes marked word by word. On your computer only, kept as long as you choose.</p>
+    </td>
+    <td width="50%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/media/rules-dark.png">
+        <img src="docs/media/rules-light.png" alt="Paste rules: how each app pastes, with a one-click fix for an app where the last paste did not land">
+      </picture>
+      <p><b>Paste rules.</b> Terminals, Office and remote desktops each paste their own way,
+      and Utter knows them. When a paste does not land, Utter notices, keeps the text on the
+      clipboard, and offers the fix for that app in one click.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/media/setup-dark.png">
+        <img src="docs/media/setup-light.png" alt="First run: choose a model, with the one that fits your graphics card recommended">
+      </picture>
+      <p><b>First run.</b> Utter checks your computer, recommends the model that fits your
+      graphics card, tests your microphone, downloads what it needs, and ends with a test
+      dictation.</p>
+    </td>
+    <td width="50%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/media/shortcuts-dark.png">
+        <img src="docs/media/shortcuts-light.png" alt="Shortcuts: choose the key you hold to dictate">
+      </picture>
+      <p><b>Your key.</b> Hold Right Ctrl, or the key of your choice, to dictate; double-tap for
+      hands-free; Esc cancels. Alt+Shift+Z pastes the last dictation again.</p>
+    </td>
+  </tr>
+</table>
+
+## Measured, not claimed
+
+<img src="docs/media/latency.svg" width="880" alt="After the key goes up: the last words are recognized in 48-71 ms, the dictation is cleaned in 131-158 ms and pasted in 47-61 ms, 231-260 ms in all.">
+
+On the development machine (RTX 3090 Ti), in the app itself. Every figure comes from
+[docs/eval-results.md](docs/eval-results.md), where the method and the raw numbers live.
+
+| | |
+|---|---|
+| Key up to text in the app | **231-260 ms** |
+| Launch to ready | **3.5-3.8 s** warm, 5.6-6.0 s right after a reboot |
+| Ready to send as typed, realistic dictation (Quality) | **88.1%**, 80.1% with voices the model never heard |
+| Dictionary terms spelled right | **97.8%** |
+| GPU memory | Quality **4.8 GB**, Light **3.2 GB** |
+
+"Ready to send" is the share of dictations a careful writer would send exactly as typed, judged
+dictation by dictation against the intended text with a rubric checked against human review.
 
 ## What it does
 
@@ -34,74 +130,36 @@ the key. Nothing you say leaves the machine.
   A check in the code types the transcript itself if the model's output ever strays from it.
 - **Your words, spelled your way.** A dictionary of names and terms steers both recognition
   and cleanup.
-- **Never loses a dictation.** If the text cannot go in (the focus moved, an admin window), it
-  stays on the clipboard and the Bar says so. Alt+Shift+Z pastes the last dictation again. Your
-  clipboard is always put back.
-- **Fits the app.** Paste rules per app (terminals, remote desktops), automatic spacing when a
-  dictation continues text, hands-free mode with a double-tap, Esc to cancel.
-- **History.** Every dictation, searchable, with what Utter heard and what it changed. Kept on
-  your computer only, for as long as you choose, or not at all.
-
-## Measured, not claimed
-
-On the development machine (RTX 3090 Ti), in the app itself. Every figure is from
-[docs/eval-results.md](docs/eval-results.md), where the method and the raw numbers live.
-
-| | |
-|---|---|
-| Key up to text in the app | **231-260 ms** (speech 48-71 ms, cleanup 131-158 ms, paste 47-61 ms) |
-| Launch to ready | **3.5-3.8 s** warm, 5.6-6.0 s right after a reboot |
-| Ready to send as typed, realistic dictation (Quality) | **88.1%**, 80.1% with voices the model never heard |
-| Dictionary terms spelled right | **97.8%** |
-| GPU memory | Quality **4.8 GB**, Light **3.2 GB** |
-
-"Ready to send" is the share of dictations a careful writer would send exactly as typed, judged
-dictation by dictation against the intended text with a rubric checked against human review.
-
-## Install
-
-Download `Utter_<version>_x64-setup.exe` from the
-[latest release](https://github.com/ductai199x/utter/releases/latest) and run it. It installs
-for your user only. On first start Utter checks your computer, recommends a model for your
-graphics card, tests your microphone, downloads what it runs on, and ends with a test
-dictation.
-
-**Needs:** Windows 10 or 11 (64-bit), an NVIDIA graphics card with 4 GB of memory (6 GB for
-Quality) and driver 580 or newer, and about 10 GB of disk. macOS and Linux are planned.
-
-| Model | What it is | GPU memory |
-|---|---|---|
-| **Quality** | Gemma 4 E4B, fine-tuned for dictation cleanup | 4.8 GB |
-| **Light** | Gemma 4 E2B, fine-tuned the same way | 3.2 GB |
-
-Both share the speech model: Parakeet (the parakeet-ultra weights) in Utter's own ONNX
-runtime.
+- **Never loses a dictation.** If the text cannot go in (the focus moved, an admin window, an
+  app that ignores the paste), it stays on the clipboard and the Bar says so. Alt+Shift+Z
+  pastes the last dictation again, and Retry runs the last one through again after an error.
+  Your own clipboard is always put back.
+- **Keeps working when things change.** Unplug the microphone or switch the Windows default
+  and Utter follows; if the cleanup model ever crashes, it restarts on its own; model updates
+  download while you keep dictating on the current version.
+- **Fits the app.** Paste rules per app, automatic spacing when a dictation continues text,
+  hands-free mode with a double-tap, Esc to cancel.
 
 ## How it works
 
-```
- Right Ctrl down                                                        Right Ctrl up
-      │                                                                      │
-      ▼                                                                      ▼
-  mic (already open, 300 ms pre-roll) ──► voice detection cuts at pauses ──► last segment
-                                              │                                │
-                                              ▼                                ▼
-                               Parakeet on the GPU, segment by segment ──► full transcript
-                                              │                                │
-                                              ▼                                ▼
-                               the Bar shows the words live            cleanup model (llama.cpp)
-                                                                               │
-                                                                               ▼
-                                      paste into the window that had focus, clipboard restored
+```mermaid
+flowchart LR
+    key(["Hold the key"]) --> mic["Microphone<br/>always open, last 10 s kept"]
+    mic --> vad["Voice detection<br/>cuts at each pause"]
+    vad --> asr["Parakeet on the GPU<br/>each segment as you speak"]
+    asr --> llm["Cleanup model<br/>fine-tuned Gemma, llama.cpp"]
+    llm --> paste(["Pasted where the cursor is<br/>clipboard put back"])
+    asr -. "words as heard" .-> bar["The Bar"]
+    llm -. "cleaned text" .-> bar
 ```
 
-- **One process, no hops.** Audio, the hotkey, speech recognition, insertion and storage run in
-  the Rust core inside the app. The cleanup model is llama.cpp's server as a child process, kept
-  warm, ended by Windows if Utter ever dies.
 - **Most of the work happens while you talk.** Each pause sends the finished speech to the
-  recognizer, so at key up only the last few words are left.
-- **The GPU is kept awake.** An idle GPU drops its clocks and a cold pass is 5 times slower, so
-  Utter warms it at key down and holds the memory clock up until key up.
+  recognizer and the cleanup model, so at key up only the last few words are left.
+- **One process, no hops.** Audio, the hotkey, speech recognition, insertion and storage run in
+  the Rust core inside the app. The cleanup model is llama.cpp's server as a supervised child
+  process, kept warm and restarted if it ever dies.
+- **The GPU is kept awake.** An idle GPU drops its clocks and a cold pass is five times slower,
+  so Utter warms it at key down and holds it up until key up.
 - **Standalone.** Utter uses nothing installed on the machine but the GPU driver. onnxruntime,
   CUDA, cuDNN, llama.cpp and the models are pinned components with SHA-256 checksums
   ([components.json](crates/utter-runtime/components.json)), downloaded on first run and
@@ -115,52 +173,38 @@ runtime.
 or slower without a measurement, and a change that costs latency for a small gain in quality is
 not made.
 
-**Evals decide, not impressions.** Models are chosen by measurement on our own bench, never by
-reputation. The cleanup model is judged on dictation built from real written text: everyday
-messages, emails, notes and AI prompts, Stack Exchange answers, Wikipedia, arXiv abstracts and
-chat logs, spoken in seven ways
-(plain, with fillers, self-corrected, as commands, with far-back edits, with spoken punctuation,
-in broken grammar), voiced by text-to-speech, and recognized by the same Parakeet the app runs.
-The answer key is known by construction. Every change to a model, prompt or setting is run
-against it and logged in [docs/eval-results.md](docs/eval-results.md), regressions included.
+**Evals decide, not impressions.** The cleanup model is judged on dictation built from real
+written text (everyday messages, emails and AI prompts, Stack Exchange, Wikipedia, arXiv,
+chat logs), spoken in seven ways (plain, with fillers, self-corrected, as commands, with
+far-back edits, with spoken punctuation, in broken grammar), voiced by text-to-speech and
+recognized by the same Parakeet the app runs. The answer key is known by construction. Every
+change to a model, prompt or setting is run against it and logged in
+[docs/eval-results.md](docs/eval-results.md), regressions included.
+
+**Reproducible from public data.** The models Utter ships are trained by one recipe on the
+published dataset, so anyone can rebuild them:
+
+| | What it is |
+|---|---|
+| [dictation-to-text](https://huggingface.co/datasets/ductai199x/dictation-to-text) | 89k pairs of what the recognizer heard and the text that was meant, split by passage, balanced across sources, domains and kinds |
+| [dictation-speech](https://huggingface.co/datasets/ductai199x/dictation-speech) | The spoken audio behind them (16 kHz FLAC), plus eval sets in voices the training data never uses |
+| [utter](https://huggingface.co/ductai199x/utter) | The cleanup models: **Quality** (Gemma 4 E4B) and **Light** (Gemma 4 E2B), fine-tuned, Q4_0 GGUF, with their LoRA adapters |
 
 **Specs before code.** Every surface (the [Bar](docs/ux/bar.md), [first run](docs/ux/first-run.md),
 [Home](docs/ux/home.md), [History](docs/ux/history.md), [insertion](docs/ux/insertion.md)) has a
-spec with its layout, states, motion, copy, keyboard behavior and acceptance checks. It is done
-when every check passes on the real machine.
+spec with its layout, states, motion, copy, keyboard behavior and acceptance checks, and is done
+when every check passes on the real machine. [DESIGN.md](DESIGN.md) is the source of truth for
+scope and architecture, with a decisions log that records each choice and the measurement
+behind it.
 
-**Decisions are written down.** [DESIGN.md](DESIGN.md) is the source of truth for scope and
-architecture, and its decisions log records each choice with the measurement behind it.
+## Install
 
-**Done means done.** A feature ships when it meets its latency budget, its eval numbers and its
-UX checks, not when it first works.
+Download `Utter_<version>_x64-setup.exe` from the
+[latest release](https://github.com/ductai199x/utter/releases/latest) and run it. It installs for
+your user only, and an update installs over it with your models and settings kept.
 
-**Open data.** The training and test data for the cleanup models is published:
-
-| Dataset | What is in it |
-|---|---|
-| [dictation-to-text](https://huggingface.co/datasets/ductai199x/dictation-to-text) | 89k pairs of what the recognizer heard and the text that was meant, 80k train / 10k test, balanced across sources, domains and kinds |
-| [dictation-speech](https://huggingface.co/datasets/ductai199x/dictation-speech) | The spoken audio behind them (16 kHz FLAC), plus the eval sets, with voices the training data never uses |
-
-Both carry only openly licensed text (CC0, CC-BY-SA, public domain), with the source and license
-on every row.
-
-## Repository
-
-```
-crates/
-  utter-core        data folder, logs, tracing
-  utter-runtime     pinned components: download, verify, install, repair
-  utter-audio       microphone capture, ring buffer, resampling, levels
-  utter-asr         Parakeet on onnxruntime, Silero voice detection, segmenting
-  utter-llm         the llama.cpp server, the cleanup prompt and its guards
-  utter-platform    everything OS-specific, behind traits: hotkey, insertion, focus, caret
-  utter-pipeline    the dictation loop, settings, history
-  utter-cli         benches and tools: transcribe, clean, dictate, e2e-bench, llm-bench
-app/                Tauri 2 shell (src-tauri/) and the Svelte 5 windows (src/)
-tools/              Python, never shipped: eval harness, datasets, training, benchmarks
-docs/               UX specs, eval results, research notes, local setup
-```
+**Needs:** Windows 10 or 11 (64-bit), an NVIDIA graphics card with 4 GB of memory (6 GB for
+Quality) and driver 580 or newer, and about 10 GB of disk.
 
 ## Building from source
 
@@ -178,21 +222,42 @@ npx tauri dev
 ```
 
 [docs/local-setup.md](docs/local-setup.md) has the details: where data lives, the Python tools
-environment (uv), and every bench and eval command.
+(`utter-eval`, `utter-train`, `utter-data`, `utter-bench`, `utter-speech`) and every bench
+command.
+
+<details>
+<summary>Repository layout</summary>
+
+```
+crates/
+  utter-core        data folder, logs, tracing
+  utter-runtime     pinned components: download, verify, install, repair, updates
+  utter-audio       microphone capture, 10 s history, resampling, levels
+  utter-asr         Parakeet on onnxruntime, Silero voice detection, segmenting
+  utter-llm         the llama.cpp server, the cleanup prompt and its guards
+  utter-platform    everything OS-specific, behind traits: hotkey, insertion, focus, caret
+  utter-pipeline    the dictation loop, settings, history
+  utter-cli         benches and tools: transcribe, clean, dictate, e2e-bench, llm-bench
+app/                Tauri 2 shell (src-tauri/) and the Svelte 5 windows (src/)
+tools/              Python, never shipped: eval, training, datasets, benchmarks, media
+docs/               UX specs, eval results, research notes, local setup
+```
+
+</details>
 
 ## Status
 
-Windows, English. Next: context from the text around the cursor, styles per app, Command Mode,
-then Linux (GNOME) and macOS. Vietnamese, with switching between the two mid-sentence, is
-planned.
+Windows, English, NVIDIA graphics. Next: Vulkan, so AMD and Intel graphics cards run Utter too;
+then Android. After that: context from the text around the cursor, styles per app, Command
+Mode, Linux (GNOME) and macOS, and Vietnamese with switching between the two mid-sentence.
 
 ## License
 
 Copyright (C) 2026 Tai Duc Nguyen.
 
-Utter's code is licensed under the [GNU Affero General Public License v3.0](LICENSE): you may use,
-study, change and share it, and if you distribute a modified version or run it as a service,
-you must publish its source under the same license.
+Utter's code is licensed under the [GNU Affero General Public License v3.0](LICENSE): you may
+use, study, change and share it, and if you distribute a modified version or run it as a
+service, you must publish its source under the same license.
 
 The models and datasets carry their own licenses, stated on their pages: the speech model's
 weights are CC-BY-4.0, and the datasets are CC-BY-SA with the source and license of every row.
