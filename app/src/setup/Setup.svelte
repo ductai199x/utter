@@ -316,6 +316,9 @@
               say leaves it.
             {:else if checks && mode === 'model'}
               {gb(checks.downloadBytes)} GB to download. Dictation keeps the current model until it is done.
+            {:else if checks && mode === 'update'}
+              {gb(checks.downloadBytes)} GB to download. Dictation keeps working on the current version until it is
+              done.
             {:else if checks}
               {gb(checks.downloadBytes)} GB to download. Dictation starts again as soon as it is done.
             {:else}
@@ -485,7 +488,13 @@
       {#if failed}
         <button class="primary" bind:this={primary} onclick={startDownload}>Retry</button>
       {:else}
-        <p class="note">Closing this window pauses the download; it resumes next time.</p>
+        <p class="note">
+          {#if mode === 'model' || mode === 'update'}
+            Closing this window keeps the download going.
+          {:else}
+            Closing this window pauses the download; it resumes next time.
+          {/if}
+        </p>
       {/if}
     {:else if view === 'try'}
       <button class="text" onclick={core.finish}>Skip</button>
