@@ -28,6 +28,25 @@ the CUDA build Utter ships:
 - The 2-CU iGPU runs it correctly but far too slowly: integrated graphics this small are not a
   target. A real AMD or Intel card is needed to measure the target.
 
+Speech: Utter's Parakeet encoder exports on onnxruntime 1.31 with the WebGPU plugin provider
+(`onnxruntime-ep-webgpu` 0.4.0, Dawn over D3D12; PyPI wheel 13,149,847 bytes, sha256 checked),
+against the CUDA provider, 60 clips of the AMI and VoxPopuli bench sets:
+
+| Encoder | CUDA p50 / p95 | WebGPU p50 / p95 | Transcripts identical to CUDA |
+|---|---|---|---|
+| fp16 | 20.0 / 24.5 ms | 47.8 / 76.3 ms | 59 of 60 |
+| 8-bit (MatMulNBits) | 24.8 / 28.3 ms | 81.3 / 106.8 ms | 59 of 60 |
+
+- The one differing clip is the same in both and a borderline word ("L label" / "Label").
+- WebGPU is about 2.5 times slower than CUDA on this NVIDIA card at steady state (33.9 against
+  13.5 ms for 500 frames), and a new input length costs nothing extra (pipelines are reused across
+  lengths). Validation mode and the buffer cache mode change nothing.
+- The 8-bit encoder is slower on WebGPU than fp16: **WebGPU runs the fp16 encoder.**
+- About 900 nodes stay on the CPU, as with CUDA: shape arithmetic and the padding amounts of
+  each layer's convolution, all small integer tensors; no audio data crosses.
+- The plugin lists every adapter with its LUID and DXGI index (the 3090 Ti and the Radeon iGPU),
+  which ties it to the probe and to llama.cpp's Vulkan device.
+
 ## Architecture
 
 - **Backends.** `cuda` (NVIDIA, as today) and `vulkan` (AMD, Intel; NVIDIA only if a
