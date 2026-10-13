@@ -484,7 +484,7 @@ fn llm_bench(
             &system,
             text,
             dictionary,
-            &cleanup::Context { lists_off, ..cleanup::Context::default() },
+            &cleanup::Context { lists_off },
         )
     };
     let mut opts = ServerOptions::new(gguf);
