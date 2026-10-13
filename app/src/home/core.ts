@@ -21,6 +21,8 @@ export interface Settings {
   dictionary: string[];
   lists: boolean;
   start_at_login: boolean;
+  /** The key held to dictate, by its name in settings.toml ("right-ctrl"). */
+  dictation_key: string;
   microphone: string;
   model: Model;
   keep_history: KeepHistory;
@@ -40,13 +42,15 @@ export interface HomeState {
   /** GPU memory each model needs, speech included, and the smallest card it runs on (bytes). */
   gpuNeed: Record<Model, number>;
   cardNeed: Record<Model, number>;
+  /** The keys one can dictate with: the id settings.toml uses, the name people read. */
+  dictationKeys: { id: string; name: string }[];
   version: string;
   dataDir: string;
   settingsPath: string;
 }
 
 export interface Applied {
-  what: 'dictionary' | 'lists' | 'microphone' | 'model';
+  what: 'dictionary' | 'lists' | 'microphone' | 'model' | 'key';
   status: 'loading' | 'ok' | 'error';
   error?: string;
 }
@@ -60,6 +64,7 @@ const mock: HomeState = {
     dictionary: ['Supabase', 'Kubernetes', 'Nguyen'],
     lists: true,
     start_at_login: true,
+    dictation_key: 'right-ctrl',
     microphone: '',
     model: 'quality',
     keep_history: 'forever',
@@ -74,6 +79,13 @@ const mock: HomeState = {
   downloadBytes: { quality: 0, light: 4.14e9 },
   gpuNeed: { quality: 4.8e9, light: 3.25e9 },
   cardNeed: { quality: 5.8e9, light: 4.25e9 },
+  dictationKeys: [
+    { id: 'right-ctrl', name: 'Right Ctrl' },
+    { id: 'left-ctrl', name: 'Left Ctrl' },
+    { id: 'right-shift', name: 'Right Shift' },
+    { id: 'scroll-lock', name: 'Scroll Lock' },
+    { id: 'f13', name: 'F13' },
+  ],
   version: '0.0.1',
   dataDir: 'C:\\Users\\you\\AppData\\Local\\Utter',
   settingsPath: 'C:\\Users\\you\\AppData\\Local\\Utter\\settings.toml',

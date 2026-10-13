@@ -27,6 +27,10 @@ lists = true
 # Start Utter in the tray when you sign in.
 start_at_login = true
 
+# The key you hold to dictate: \"right-ctrl\", \"left-ctrl\", \"right-shift\", \"scroll-lock\", or
+# \"f13\" to \"f24\" (extra keys on some keyboards). Double-tap it for hands-free.
+dictation_key = \"right-ctrl\"
+
 # The microphone: part of its name, or \"\" for the system default.
 microphone = \"\"
 
@@ -65,6 +69,7 @@ pub struct Settings {
     pub dictionary: Vec<String>,
     pub lists: bool,
     pub start_at_login: bool,
+    pub dictation_key: DictationKey,
     /// Part of the input device's name; empty for the system default.
     pub microphone: String,
     pub model: Model,
@@ -75,6 +80,75 @@ pub struct Settings {
     pub keep_logs: bool,
     /// The person's paste rules: each replaces Utter's default for its program.
     pub paste: Vec<PasteOverride>,
+}
+
+/// The key held to dictate. Only keys that do nothing on their own when pressed alone: not Alt
+/// (letting it go opens an app's menu), Caps Lock or Insert (they toggle), or the mouse's side
+/// buttons (Back and Forward). Utter only listens: the key still reaches the app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DictationKey {
+    #[default]
+    RightCtrl,
+    LeftCtrl,
+    RightShift,
+    ScrollLock,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+}
+
+impl DictationKey {
+    pub const ALL: [DictationKey; 16] = [
+        DictationKey::RightCtrl,
+        DictationKey::LeftCtrl,
+        DictationKey::RightShift,
+        DictationKey::ScrollLock,
+        DictationKey::F13,
+        DictationKey::F14,
+        DictationKey::F15,
+        DictationKey::F16,
+        DictationKey::F17,
+        DictationKey::F18,
+        DictationKey::F19,
+        DictationKey::F20,
+        DictationKey::F21,
+        DictationKey::F22,
+        DictationKey::F23,
+        DictationKey::F24,
+    ];
+
+    /// Its virtual-key code, as the hotkey listener reports keys.
+    pub fn vk(self) -> u32 {
+        use utter_platform::hotkey::{VK_F13, VK_LCONTROL, VK_RCONTROL, VK_RSHIFT, VK_SCROLL};
+        match self {
+            DictationKey::RightCtrl => VK_RCONTROL,
+            DictationKey::LeftCtrl => VK_LCONTROL,
+            DictationKey::RightShift => VK_RSHIFT,
+            DictationKey::ScrollLock => VK_SCROLL,
+            f => VK_F13 + (f as u32 - DictationKey::F13 as u32),
+        }
+    }
+
+    /// Its name as people read it ("Right Ctrl", "F13").
+    pub fn name(self) -> String {
+        match self {
+            DictationKey::RightCtrl => "Right Ctrl".into(),
+            DictationKey::LeftCtrl => "Left Ctrl".into(),
+            DictationKey::RightShift => "Right Shift".into(),
+            DictationKey::ScrollLock => "Scroll Lock".into(),
+            f => format!("F{}", 13 + (f as u32 - DictationKey::F13 as u32)),
+        }
+    }
 }
 
 /// How long History keeps dictations (docs/ux/history.md).
@@ -210,6 +284,7 @@ impl Default for Settings {
             dictionary: Vec::new(),
             lists: true,
             start_at_login: true,
+            dictation_key: DictationKey::RightCtrl,
             microphone: String::new(),
             model: Model::Quality,
             keep_history: KeepHistory::Forever,
@@ -264,6 +339,7 @@ impl Settings {
         set(&mut doc, "dictionary", toml_edit::Value::Array(terms));
         set(&mut doc, "lists", self.lists.into());
         set(&mut doc, "start_at_login", self.start_at_login.into());
+        set(&mut doc, "dictation_key", word(&self.dictation_key).into());
         set(&mut doc, "microphone", self.microphone.as_str().into());
         let model = match self.model {
             Model::Quality => "quality",
@@ -297,6 +373,7 @@ impl Settings {
     pub fn apply(&self, cfg: &mut PipelineConfig) {
         cfg.dictionary = self.dictionary.clone();
         cfg.lists = self.lists;
+        cfg.hotkey.key = self.dictation_key.vk();
         cfg.mic.device = (!self.microphone.is_empty()).then(|| self.microphone.clone());
         cfg.tier = self.model.into();
         cfg.paste = self.paste.clone();
@@ -382,6 +459,7 @@ mod tests {
             dictionary: vec!["Supabase".into(), "Nguyen".into()],
             lists: false,
             start_at_login: false,
+            dictation_key: DictationKey::F13,
             microphone: "USB".into(),
             model: Model::Light,
             keep_history: KeepHistory::Days30,
@@ -425,6 +503,16 @@ mod tests {
         assert_eq!(paste_rule(&[], "notepad.exe"), PasteRule::default());
         #[cfg(windows)]
         assert_eq!(paste_rule(&[], "mintty.exe").keys, PasteKeys::ShiftInsert);
+    }
+
+    #[test]
+    fn every_dictation_key_has_its_own_code_and_name() {
+        let codes: std::collections::HashSet<u32> = DictationKey::ALL.iter().map(|k| k.vk()).collect();
+        assert_eq!(codes.len(), DictationKey::ALL.len());
+        assert_eq!(DictationKey::F24.vk(), 0x87);
+        assert_eq!(DictationKey::F24.name(), "F24");
+        assert_eq!(word(&DictationKey::RightShift), "right-shift");
+        assert_eq!(Settings::parse("dictation_key = \"f13\"").unwrap().dictation_key, DictationKey::F13);
     }
 
     #[test]

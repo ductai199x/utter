@@ -1,5 +1,5 @@
-//! The dictation hotkey (DESIGN.md section 4.1): hold Right Ctrl to talk, double-tap it for
-//! hands-free, Esc to cancel.
+//! The dictation hotkey (DESIGN.md section 4.1): hold the key (Right Ctrl unless the person
+//! chose another) to talk, double-tap it for hands-free, Esc to cancel.
 //!
 //! Two layers:
 //! - [`HotkeyMachine`]: pure logic from key events to dictation actions, unit-tested;
@@ -22,6 +22,11 @@ pub struct KeyEvent {
 }
 
 pub const VK_RCONTROL: u32 = 0xA3;
+pub const VK_LCONTROL: u32 = 0xA2;
+pub const VK_RSHIFT: u32 = 0xA1;
+pub const VK_SCROLL: u32 = 0x91;
+/// F13; F14 to F24 follow it.
+pub const VK_F13: u32 = 0x7C;
 pub const VK_ESCAPE: u32 = 0x1B;
 
 /// What the dictation pipeline should do.
@@ -202,7 +207,9 @@ mod imp {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_CONTROL, VK_LCONTROL, VK_RCONTROL};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        VK_CONTROL, VK_LCONTROL, VK_LSHIFT, VK_RCONTROL, VK_RSHIFT, VK_SHIFT,
+    };
     use windows_sys::Win32::UI::Input::{
         GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RID_INPUT, RIDEV_INPUTSINK, RIDEV_REMOVE,
         RIM_TYPEKEYBOARD, RegisterRawInputDevices,
@@ -222,6 +229,8 @@ mod imp {
     const KEYBOARD: u16 = 0x06;
     /// The prefix of Pause's fake Ctrl, which is not a Ctrl press.
     const RI_KEY_E1: u32 = 4;
+    /// Right Shift's scan code (Left Shift's is 0x2A).
+    const RIGHT_SHIFT_SCAN: u16 = 0x36;
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -250,10 +259,15 @@ mod imp {
         if flags & RI_KEY_E1 != 0 || k.VKey == 0xFF {
             return None;
         }
-        // Raw Input reports either Ctrl as VK_CONTROL; the E0 prefix marks the right one.
+        // Raw Input reports either Ctrl as VK_CONTROL, the E0 prefix marking the right one, and
+        // either Shift as VK_SHIFT, told apart by scan code. A Shift with the E0 prefix is one
+        // the keyboard fakes around other keys (arrows with Num Lock on): no key was pressed.
         let vk = match k.VKey {
             VK_CONTROL if flags & RI_KEY_E0 != 0 => VK_RCONTROL,
             VK_CONTROL => VK_LCONTROL,
+            VK_SHIFT if flags & RI_KEY_E0 != 0 => return None,
+            VK_SHIFT if k.MakeCode == RIGHT_SHIFT_SCAN => VK_RSHIFT,
+            VK_SHIFT => VK_LSHIFT,
             vk => vk,
         };
         Some(KeyEvent {
