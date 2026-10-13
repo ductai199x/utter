@@ -89,6 +89,9 @@ pub struct PasteRules {
     pub recent_apps: Vec<AppRow>,
     /// The app the last dictation went to: the quick path when a paste did not work.
     pub last_app: Option<AppRow>,
+    /// The last dictation did not paste where it went (the keys went but nothing showed, or
+    /// they could not be sent): a paste rule may fix that app.
+    pub last_failed: bool,
 }
 
 fn words(rule: PasteRule) -> (String, String) {
@@ -136,6 +139,7 @@ pub fn paste_rules(overrides: Vec<PasteOverride>) -> PasteRules {
             .iter()
             .map(|a| AppRow { exe: a.exe.clone(), name: a.name.clone(), dictations: a.count })
             .collect(),
+        last_failed: last.as_ref().is_some_and(|e| matches!(e.not_inserted.as_deref(), Some("unconfirmed" | "failed"))),
         last_app: last.filter(|e| !e.app_exe.is_empty()).map(|e| AppRow {
             dictations: used(&e.app_exe),
             exe: e.app_exe,

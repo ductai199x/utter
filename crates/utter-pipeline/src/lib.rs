@@ -24,6 +24,7 @@ use utter_asr::{ParakeetTdt, SpeechModel};
 use utter_audio::{MicConfig, Microphone};
 use utter_llm::cleanup::{self, Tier};
 use utter_llm::{ChatParams, LlamaServer};
+use utter_platform::caret;
 use utter_platform::focus::{self, Window};
 use utter_platform::hotkey::{self, Action, HotkeyConfig};
 use utter_platform::insert::{self, InsertError};
@@ -203,6 +204,37 @@ const CARET_WAIT: Duration = Duration::from_millis(20);
 /// The same for paste last, which asks only when its keys are pressed.
 const CARET_WAIT_COMMAND: Duration = Duration::from_millis(150);
 
+/// How long a paste has to show in the app's text, and how often it is looked at meanwhile.
+const LANDED_WAIT: Duration = Duration::from_millis(400);
+const LANDED_POLL: Duration = Duration::from_millis(40);
+/// Letters and digits of the paste's end that must be before the cursor after it.
+const LANDED_TAIL: usize = 16;
+
+/// Whether `pasted` shows before the cursor of the focused control within [`LANDED_WAIT`]:
+/// the end of its letters and digits (case, spacing and quotes aside, which an app may change
+/// as it pastes) ends what the app holds before the cursor.
+fn landed(pasted: &str) -> bool {
+    let tail = alnum_tail(pasted, LANDED_TAIL);
+    let reach = (pasted.chars().count() as i32).clamp(LANDED_TAIL as i32, 256);
+    let deadline = Instant::now() + LANDED_WAIT;
+    loop {
+        if caret::before_cursor(reach).get(LANDED_POLL).is_some_and(|now| alnum_tail(&now, usize::MAX).ends_with(&tail))
+        {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(LANDED_POLL);
+    }
+}
+
+/// The last `n` letters and digits of `s`, lower-cased.
+fn alnum_tail(s: &str, n: usize) -> String {
+    let chars: Vec<char> = s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+    chars[chars.len().saturating_sub(n)..].iter().collect()
+}
+
 /// `text` as it goes in after `before` (the characters before the cursor, `None` when the
 /// app does not say): with a space in front when it continues a word or a sentence, the way
 /// one types it (docs/ux/insertion.md, "Spacing").
@@ -327,6 +359,8 @@ pub enum NotInserted {
     FocusMoved,
     /// The app runs as administrator: the OS drops keys Utter sends it.
     Refused,
+    /// The paste keys went, but the app's text shows no dictation (an app that ignores them).
+    Unconfirmed,
     Failed(String),
     /// A replayed recording (the bench): insertion is off.
     Replay,
@@ -340,6 +374,7 @@ impl NotInserted {
             NotInserted::NoWindow => "no-window",
             NotInserted::FocusMoved => "focus-moved",
             NotInserted::Refused => "refused",
+            NotInserted::Unconfirmed => "unconfirmed",
             NotInserted::Failed(_) => "failed",
             NotInserted::Replay => "replay",
         }
@@ -347,7 +382,14 @@ impl NotInserted {
 
     /// Whether the text should be left on the clipboard instead.
     fn copy_instead(&self) -> bool {
-        matches!(self, NotInserted::NoWindow | NotInserted::FocusMoved | NotInserted::Refused | NotInserted::Failed(_))
+        matches!(
+            self,
+            NotInserted::NoWindow
+                | NotInserted::FocusMoved
+                | NotInserted::Refused
+                | NotInserted::Unconfirmed
+                | NotInserted::Failed(_)
+        )
     }
 
     /// What the Bar says (`copied`: the text is on the clipboard).
@@ -356,6 +398,7 @@ impl NotInserted {
         match (self, copied) {
             (NotInserted::Nothing, _) => "Didn't catch that".to_owned(),
             (NotInserted::Refused, true) => format!("Copied: this app runs as administrator. Press {keys}"),
+            (NotInserted::Unconfirmed, true) => format!("It didn't paste here. Copied: press {keys}"),
             (_, true) => format!("Copied: press {keys} to paste"),
             (_, false) => "Couldn't paste or copy it: it is in History".to_owned(),
         }
@@ -369,6 +412,7 @@ impl std::fmt::Display for NotInserted {
             NotInserted::NoWindow => write!(f, "no window had the focus"),
             NotInserted::FocusMoved => write!(f, "the focus moved to another window"),
             NotInserted::Refused => write!(f, "the app runs as administrator"),
+            NotInserted::Unconfirmed => write!(f, "the app's text does not show the paste"),
             NotInserted::Failed(e) => write!(f, "{e}"),
             NotInserted::Replay => write!(f, "insertion off (replay)"),
         }
@@ -494,12 +538,6 @@ fn next_key(input: &Receiver<Input>, timeout: Duration) -> Option<(Action, Insta
             Err(_) => return None,
         }
     }
-}
-
-/// Where paste last and retry last paste: the focused window, unless it is the taskbar (the
-/// tray menu was used), which has nothing to paste into.
-fn command_target() -> Option<Window> {
-    focus::foreground().filter(|w| !(w.title.is_empty() && w.app.exe.eq_ignore_ascii_case("explorer.exe")))
 }
 
 fn log_target(target: &Option<Window>) -> Option<(String, u32)> {
@@ -1161,8 +1199,8 @@ impl Engine {
         }
         // The shortcut fires with its keys down; paste keys sent now would reach the app with them.
         shortcut::wait_for_modifiers_released(MODIFIER_WAIT);
-        let Some(w) = command_target() else { return copy(on_event, Some(NotInserted::NoWindow)) };
-        let before = utter_platform::caret::before_cursor().get(CARET_WAIT_COMMAND);
+        let Some(w) = focus::foreground() else { return copy(on_event, Some(NotInserted::NoWindow)) };
+        let before = caret::before_cursor(caret::BEFORE_CHARS).get(CARET_WAIT_COMMAND);
         let text = spaced(before.as_deref(), &text);
         match insert::paste(&w, &text, settings::paste_rule(&self.cfg.paste, &w.app.exe)) {
             Ok(()) => on_event(Event::Notice { text: "Pasted".into(), ok: true }),
@@ -1180,7 +1218,7 @@ impl Engine {
         shortcut::wait_for_modifiers_released(MODIFIER_WAIT);
         let mut source = WholeSource::new(&audio);
         let start = Start { at: Instant::now(), hands_free: false };
-        if let Err(e) = self.dictate(&mut source, |_| None, command_target(), start, true, &mut |e| on_event(e)) {
+        if let Err(e) = self.dictate(&mut source, |_| None, focus::foreground(), start, true, &mut |e| on_event(e)) {
             tracing::warn!("retry: {e}");
             on_event(Event::Notice { text: format!("Couldn't retry it: {e}"), ok: false });
         }
@@ -1238,7 +1276,7 @@ impl Engine {
         let generation = self.generation;
         // What is before the cursor, read while the person speaks: a dictation that continues
         // text gets a space (needs_space).
-        let caret = do_insert.then(utter_platform::caret::before_cursor);
+        let caret = do_insert.then(|| caret::before_cursor(caret::BEFORE_CHARS));
         // Live dictations only: a replay (the bench) is not the user's.
         let mut log = DictationLog::start(LogConfig { enabled: self.cfg.log.enabled && do_insert, ..self.cfg.log });
         log.push(Entry::Listening { hands_free });
@@ -1474,7 +1512,12 @@ impl Engine {
                 let before = caret.as_ref().and_then(|c| c.get(CARET_WAIT));
                 let pasted = spaced(before.as_deref(), &text);
                 tracing::debug!(?before, spaced = pasted.len() != text.len(), "before the cursor");
-                insert::paste(w, &pasted, settings::paste_rule(&self.cfg.paste, &w.app.exe)).map_err(NotInserted::from)
+                insert::paste(w, &pasted, settings::paste_rule(&self.cfg.paste, &w.app.exe))
+                    .map_err(NotInserted::from)
+                    // An app that says what is before the cursor shows whether the text went in.
+                    .and_then(
+                        |()| if before.is_none() || landed(&pasted) { Ok(()) } else { Err(NotInserted::Unconfirmed) },
+                    )
             }
         };
         // A dictation is never lost: what could not go in is left on the clipboard.
@@ -1537,6 +1580,19 @@ mod tests {
         assert!(needs_space(Some("rd"), "and more"));
         assert!(needs_space(Some("?\""), "Then"));
         assert!(needs_space(Some("e)"), "next"));
+    }
+
+    #[test]
+    fn a_paste_is_recognized_through_what_an_app_changes() {
+        use super::alnum_tail;
+        let pasted = " Let's meet at \"4 PM\".";
+        // Smart quotes, a doubled space, a trailing space: the same letters and digits.
+        let shown = "Hi.  Let\u{2019}s meet at \u{201C}4 PM\u{201D}. ";
+        assert!(alnum_tail(shown, usize::MAX).ends_with(&alnum_tail(pasted, 16)));
+        assert!(!alnum_tail("Hi there", usize::MAX).ends_with(&alnum_tail(pasted, 16)));
+        // A long paste is matched by its end only.
+        let long = "word ".repeat(40) + "and the last words.";
+        assert_eq!(alnum_tail(&long, 16), "dandthelastwords");
     }
 
     #[test]

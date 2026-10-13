@@ -133,7 +133,7 @@ export interface HistoryEntry {
   text: string;
   heard: string;
   inserted: boolean;
-  notInserted?: 'focus-moved' | 'no-window' | 'refused' | 'failed';
+  notInserted?: 'focus-moved' | 'no-window' | 'refused' | 'failed' | 'unconfirmed';
   words: number;
   speechS: number;
   readyMs: number;
@@ -225,6 +225,8 @@ export interface PasteRules {
   /** Apps dictated into, most used first. */
   recentApps: AppRow[];
   lastApp: AppRow | null;
+  /** The last dictation did not paste in `lastApp`: a rule may fix that app. */
+  lastFailed: boolean;
 }
 
 export const pasteRules = (overrides: PasteOverride[]) =>
@@ -292,8 +294,8 @@ export const withoutRule = (paste: PasteOverride[], g: RuleGroup) =>
   paste.filter((o) => !g.apps.some((a) => sameApp(o.app, a)));
 
 /** The person's rules with a new one for `exe` (Ctrl+V, Normal until they change it). */
-export const withApp = (paste: PasteOverride[], exe: string): PasteOverride[] =>
-  paste.some((o) => sameApp(o.app, exe)) ? paste : [...paste, { app: exe, with: 'ctrl-v', keep: 'normal' }];
+export const withApp = (paste: PasteOverride[], exe: string, how: PasteWith = 'ctrl-v'): PasteOverride[] =>
+  paste.some((o) => sameApp(o.app, exe)) ? paste : [...paste, { app: exe, with: how, keep: 'normal' }];
 
 // The stand-in core's History: a believable week of dictations, so the page can be reviewed
 // in a browser. Mock only; the app's History comes from history.rs.
@@ -449,5 +451,6 @@ function mockRules(overrides: PasteOverride[]): PasteRules {
     ],
     recentApps: recent,
     lastApp: recent.find((a) => a.exe === 'slack.exe') ?? null,
+    lastFailed: true,
   };
 }

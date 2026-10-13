@@ -127,13 +127,17 @@
     pickEl?.focus();
   }
 
-  async function addApp(exe: string) {
+  /** Whether `exe` has a rule already: Utter's default or the person's. */
+  const hasRule = (exe: string) => rules?.rules.some((r) => r.app.toLowerCase() === exe.toLowerCase()) ?? false;
+
+  /** Adds a rule for `exe` pasting `how`, or shows the rule it has: never one over a default. */
+  async function addApp(exe: string, how: PasteWith = 'ctrl-v') {
     if (!settings || !exe) return;
     picker = false;
-    await save(withApp(settings.paste, exe));
+    if (!hasRule(exe)) await save(withApp(settings.paste, exe, how));
     added = exe.toLowerCase();
     await tick();
-    document.querySelector(`[data-app="${CSS.escape(added)}"]`)?.scrollIntoView({ block: 'nearest' });
+    document.querySelector('.tr.added')?.scrollIntoView({ block: 'nearest' });
     setTimeout(() => (added = ''), 1600);
   }
 
@@ -337,6 +341,18 @@
   </div>
 
   {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if rules?.lastFailed && rules.lastApp}
+    {@const app = rules.lastApp}
+    <div class="banner" role="status">
+      <span>
+        Your last dictation, in {app.name}, did not paste.
+        {hasRule(app.exe) ? 'Try another way to paste in its rule.' : 'Typing it out works in most apps that ignore the paste keys.'}
+      </span>
+      <button onclick={() => void addApp(app.exe, 'type')}>
+        {hasRule(app.exe) ? 'Show its rule' : `Type it out in ${app.name}`}
+      </button>
+    </div>
+  {/if}
 
   <div class="table" role="table" aria-label="Paste rules">
     <div class="tr th" role="row">
@@ -539,6 +555,22 @@
   .error {
     color: var(--home-error);
     margin: 0 0 10px;
+  }
+
+  .banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 14px;
+    margin: 0 0 10px;
+    border-radius: 8px;
+    background: var(--home-error-bg);
+    color: var(--home-error);
+  }
+
+  .banner button {
+    flex: none;
   }
 
   .table {

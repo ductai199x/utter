@@ -59,14 +59,16 @@ mod imp {
         QueryFullProcessImageNameW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumChildWindows, EnumWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowTextLengthW, GetWindowTextW,
-        GetWindowThreadProcessId, IsWindowVisible,
+        EnumChildWindows, EnumWindows, GW_OWNER, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowTextLengthW,
+        GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
     };
 
     use super::{App, Window};
 
     /// Parts of Windows that can be in front without a text box to paste into.
     const NO_TEXT: &[&str] = &["TextInputHost.exe", "LockApp.exe"];
+    /// The same, by window class: the taskbars (the tray menu was used) and the desktop.
+    const NO_TEXT_CLASSES: &[&str] = &["Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW"];
 
     /// A Store app's windows belong to this host; the app's own process is a child window's.
     const FRAME_HOST: &str = "ApplicationFrameHost.exe";
@@ -105,6 +107,13 @@ mod imp {
             // touch-keyboard panels) or the lock screen in front: no text box to paste into,
             // and a paste there vanishes. No window, so the text is copied instead.
             if NO_TEXT.iter().any(|exe| app.exe.eq_ignore_ascii_case(exe)) {
+                return None;
+            }
+            // The taskbar or the desktop: a paste goes nowhere and would read as done.
+            let mut class = [0u16; 64];
+            let len = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32).max(0) as usize;
+            let class = String::from_utf16_lossy(&class[..len]);
+            if NO_TEXT_CLASSES.contains(&class.as_str()) {
                 return None;
             }
             Some(Window { handle: hwnd as isize, process_id: app_pid, title: String::from_utf16_lossy(&buf[..n]), app })
