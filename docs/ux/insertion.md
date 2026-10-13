@@ -49,9 +49,10 @@ only, not into History. Paste last (Alt+Shift+Z) follows the same rule. Checked 
 | Why | What Utter does | The Bar says |
 |---|---|---|
 | The focus moved to another window before the text was ready | leaves the text on the clipboard | "Copied: press Ctrl+V to paste" |
-| No window had the focus, or Windows' own input overlay or lock screen did (a paste there vanishes) | leaves it on the clipboard | "Copied: press Ctrl+V to paste" |
+| No window had the focus, or the taskbar, the desktop, Windows' own input overlay or the lock screen did (a paste there vanishes) | leaves it on the clipboard | "Copied: press Ctrl+V to paste" |
 | The app runs as administrator (Windows drops keys Utter sends it) | leaves it on the clipboard, does not press keys | "Copied: this app runs as administrator. Press Ctrl+V" |
 | The paste keys could not be sent | leaves it on the clipboard | "Copied: press Ctrl+V to paste" |
+| The keys went, but the app's text does not show the dictation (Confirming the paste) | leaves it on the clipboard | "It didn't paste here. Copied: press Ctrl+V" |
 | Nothing was heard | nothing | "Didn't catch that" |
 
 - "Left on the clipboard" means the old clipboard is not restored: the dictation stays until
@@ -61,6 +62,17 @@ only, not into History. Paste last (Alt+Shift+Z) follows the same rule. Checked 
 - The message uses this platform's paste keys (Cmd+V on macOS).
 - The Bar holds an error message for 2.5 s (`ERROR_HOLD`), as today.
 - History marks the entry **Not inserted**, with the reason.
+
+## Confirming the paste
+
+An app that says what is before the cursor (the same reading as Spacing) shows whether a
+paste went in: for up to 400 ms after the keys, Utter reads it again, and the last 16 letters
+and digits of the dictation must end it. Only letters and digits count, so an app that turns
+quotes curly, adds a space or changes case still counts as pasted. When they do not show, the
+dictation is copied as above, History marks it Not inserted ("The app did not take the
+paste"), and the Paste rules window opens with a line on it: "Your last dictation, in Slack,
+did not paste", and one button that adds a rule for that app typing the text out (or shows
+the rule it has). An app that does not say what is before the cursor is not second-guessed.
 
 ## Paste and copy the last dictation
 
