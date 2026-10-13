@@ -15,6 +15,7 @@ differ: it reads the outputs, it writes none. Every step resumes: what is on dis
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -88,16 +89,18 @@ def _made_from(folder: Path, source: dict) -> bool:
     return marker.is_file() and json.loads(marker.read_text()) == source
 
 
-def make_sets(text_ref: str | None, speech_ref: str | None) -> list[str]:
+def make_sets(text_ref: str | None, speech_ref: str | None, limit: int = 0) -> list[str]:
     """The eval sets from the datasets at those revisions (default: main), as `utter-cli bench`
-    reads them: a manifest of dataset rows and, for speech, a WAV per clip. Returns their names."""
+    reads them: a manifest of dataset rows and, for speech, a WAV per clip; with `limit`, the
+    first rows of each. Returns their names."""
     text_rev = common.revision(common.TEXT_REPO, text_ref)
     speech_rev = common.revision(common.SPEECH_REPO, speech_ref)
     folder = common.eval_dir() / TEXT_SET
-    source = {"repo": common.TEXT_REPO, "revision": text_rev}
+    source = {"repo": common.TEXT_REPO, "revision": text_rev, "limit": limit}
     if not _made_from(folder, source):
         columns = [c for c in schema.TEXT.names if c != "messages"]
         rows = common.text_rows(text_rev, "test", columns)
+        rows = rows[:limit] if limit else rows
         common.write_jsonl(folder / "manifest.jsonl", rows)
         common.write_jsonl(
             results("asr", "dictated", TEXT_SET),
@@ -111,12 +114,13 @@ def make_sets(text_ref: str | None, speech_ref: str | None) -> list[str]:
             continue
         names.append(collection)
         folder = common.eval_dir() / collection
-        source = {"repo": common.SPEECH_REPO, "revision": speech_rev}
+        source = {"repo": common.SPEECH_REPO, "revision": speech_rev, "limit": limit}
         if _made_from(folder, source):
             continue
         folder.mkdir(parents=True, exist_ok=True)
         rows = []
-        for r in common.speech_rows(speech_rev, collection, "test"):
+        clips = common.speech_rows(speech_rev, collection, "test")
+        for r in itertools.islice(clips, limit or None):
             audio, rate = sf.read(io.BytesIO(r["audio"]["bytes"]), dtype="int16")
             wav = f"{r['rendition_id']}.wav"
             sf.write(folder / wav, audio, rate, subtype="PCM_16")
@@ -183,7 +187,10 @@ def ready_to_send(eval_set: str, run: str, chat: llm.Chat, judge: str, workers: 
     gold = {r["id"]: r["final_text"] for r in manifest(eval_set)}
     outputs = common.read_jsonl(results("llm", run, eval_set))
     path = results("judge", f"{run}--{judge}", eval_set)
+    # A verdict holds the output it judged: one for an output since changed is not reused.
     verdicts = {v["id"]: v for v in common.read_jsonl(path)}
+    current = {o["id"]: o["output"] for o in outputs}
+    verdicts = {i: v for i, v in verdicts.items() if v.get("output") == current.get(i)}
     todo = [o for o in outputs if o["id"] not in verdicts and not _same(o["output"], gold[o["id"]])]
     system = common.prompt("judge")
 
@@ -192,6 +199,7 @@ def ready_to_send(eval_set: str, run: str, chat: llm.Chat, judge: str, workers: 
         reply = chat.ask(system, user, VERDICT, seed=0, max_tokens=600)
         return {
             "id": o["id"],
+            "output": o["output"],
             **(reply or {"verdict": "needs_edit", "cause": "other", "note": "unreadable"}),
         }
 
@@ -235,11 +243,12 @@ def main(
     workers: int = typer.Option(8, help="Judge requests at once (64 suits vLLM)."),
     text_ref: str = typer.Option(None, help="dictation-to-text revision (default: main)."),
     speech_ref: str = typer.Option(None, help="dictation-speech revision (default: main)."),
+    limit: int = typer.Option(0, help="Only the first rows of each set, for a quick run (0: all)."),
 ) -> None:
     """How often each cleanup model types what the speaker meant, on the datasets' test splits."""
     models = _models(model)
     judge = judge or ("vllm-26b" if judge_url else "local-26b")
-    sets = make_sets(text_ref, speech_ref)
+    sets = make_sets(text_ref, speech_ref, limit)
     # (set, recognizer run, run suffix, dictionary) for every column of the table.
     runs: list[tuple[str, str, str, Path | None]] = [(TEXT_SET, "dictated", "", None)]
     for s in sets[1:]:
