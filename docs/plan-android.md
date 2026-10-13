@@ -28,6 +28,42 @@ cannot be assumed.
     keeps Gboard, but inserts through accessibility actions, needs a Play Store policy
     declaration, and OEMs sometimes drop the connection ([Wispr Flow docs][wispr]).
 
+## Measured on the test phone (2026-10-13)
+
+Tai's phone as he uses it: warm, other apps open, plugged in with the screen on. Cleanups are
+paced 10 s apart as real dictations are; llama.cpp b11535 built for arm64 (Armv9.2 with int8
+matrix instructions), 4 threads; 30 cases of the kokoro-real eval through `utter-cli llm-bench`
+with the app's prompt and server settings.
+
+- **Cleanup, Light v2 (Gemma 4 E2B) on the CPU:** p50 2.6 s, p95 3.7 s, against 0.28 s on the
+  3090 Ti; 29 of 30 outputs identical. Prompt 10.5 ms a token, reply 37 ms a token with n-gram
+  drafting (49-token replies at p50).
+- **Flash attention must be off on the CPU:** on, prompt processing at a warm cache (768 tokens)
+  falls from 90 to 8.6 tokens/s.
+- **Smaller models, llama-bench at the real request shape** (68-token prompt on a 768-token cache,
+  49-token reply, no drafting):
+
+  | Model | Prompt tokens/s | Reply tokens/s |
+  |---|---|---|
+  | Gemma 4 E2B Q4_0 (Light v2) | 102 | 17 |
+  | Gemma 3 1B Q4_0 | 286 | 36 |
+  | Gemma 3 270M Q8_0 | 898 | 90 |
+
+- **The GPU through llama.cpp's Vulkan backend is slower than the CPU.** The GPU is a PowerVR
+  DXT-48-1536, which has float16 but no int8 dot product and no matrix cores. Gemma 3 1B ran at
+  26 prompt tokens/s at Q4_0, and at 33 prompt and 3.8 reply tokens/s at float16, against the
+  CPU's 286 and 36. The first use also spent 10 minutes compiling shaders. ggml's Vulkan kernels
+  are not tuned for this GPU; LiteRT's GPU backend (OpenCL) is the GPU path to measure next.
+- **Speech, the desktop's encoder exports on the CPU** (onnxruntime 1.31 for Android, 4 threads,
+  60 clips): 8-bit encoder p50 2.4 s (AMI 1.0 s, VoxPopuli 3.8 s a clip), float16 3.1 s. Both
+  keep float16 activations, which suit a GPU; a CPU export (int8 weights, float32 activations)
+  is next. The process aborts at exit in onnxruntime's teardown ("pthread_mutex_lock called on
+  a destroyed mutex"), to be fixed before the app.
+- **Utter's Rust CLI builds for aarch64-linux-android unchanged** and runs the speech bench on
+  the phone, which supports sharing the Rust core.
+- **Memory:** 16 GB, but with Tai's apps open about 6 GB is free; Light's 3.1 GB model loaded in
+  51 s while memory was short (swap full).
+
 ## Architecture (proposed)
 
 - **A Kotlin app around Utter's Rust core.** The core is shared through JNI: the segmenter,
@@ -53,23 +89,18 @@ cannot be assumed.
    - memory, sustained speed over 50 dictations (thermal throttling), and battery per dictation.
 2. **Choose the runtime per stage** from those numbers, and set the Android latency budget
    (DESIGN.md section 5) from what the phone can do.
-3. **Decide insertion** (keyboard or bubble), then write docs/ux/android.md: hold-to-talk on
+3. **Write docs/ux/android.md** for the bubble: hold-to-talk on
    the screen, the live text, errors, first run.
 4. **Build:** the Rust core for aarch64-linux-android behind JNI, the Kotlin app, first-run
    download, dictation, insertion, History; then the latency, eval and UX checks of DESIGN.md
    section 12, measured on the phone.
 
-## Decisions needed from Tai
+## Decided (Tai, 2026-10-13)
 
-1. **Insertion: keyboard or bubble.** The bubble keeps Gboard and is what Wispr ships; the
-   keyboard is the sturdier API. My recommendation: the bubble, since keeping your keyboard is
-   the point of a dictation app, with the keyboard as the fallback if accessibility insertion
-   proves unreliable on the Pixel.
-2. **Share the Rust core through JNI** (recommended) rather than reimplementing it in Kotlin.
-3. **Set up the measurement:**
-   - turn on developer options and USB debugging on the phone, and connect it to this PC;
-   - let me install the Android command-line tools and NDK (development only; nothing ships
-     to the desktop app).
+1. **Insertion: the bubble**, with a keyboard as the fallback if accessibility insertion proves
+   unreliable on the Pixel.
+2. **The Rust core is shared through JNI**; Kotlin owns the UI, audio capture and insertion.
+3. **A smaller cleanup model for the phone** is on the table (Tai): the measurements above size it.
 
 [tensor-sdk]: https://developers.googleblog.com/en/google-tensor-sdk-beta-with-litert/
 [e2b]: https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
