@@ -1,8 +1,9 @@
 //! Loading ONNX Runtime, which `ort` loads at run time (`load-dynamic`), from Utter's own
-//! runtime components (`utter-runtime`): onnxruntime's GPU build, the CUDA runtime with
-//! cuBLAS, and cuDNN, each pinned and checksummed. Nothing is taken from other applications
-//! or from the system beyond the GPU driver: verified by transcribing with a PATH holding only
-//! Windows' own folders.
+//! runtime components (`utter-runtime`), each pinned and checksummed. On the CUDA backend:
+//! onnxruntime's GPU build, the CUDA runtime with cuBLAS, and cuDNN. On the Vulkan backend
+//! (AMD, Intel; docs/plan-vulkan.md): onnxruntime's CPU build and its WebGPU plugin provider,
+//! registered here. Nothing is taken from other applications or from the system beyond the GPU
+//! driver: verified by transcribing with a PATH holding only Windows' own folders.
 //!
 //! `UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build or for
 //! platforms without pinned components yet (Linux, e.g. a GPU cluster): that build then finds its CUDA
@@ -10,6 +11,8 @@
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
+
+use utter_runtime::Backend;
 
 use crate::AsrError;
 
@@ -23,6 +26,11 @@ const ORT_LIB: &str = "libonnxruntime.so";
 /// transcripts came out identical (2026-10-09).
 pub const CUDA_COMPONENTS: &[&str] = &["cuda-runtime", "cudnn"];
 
+/// The WebGPU plugin provider's component, its library, and the name sessions ask for it by.
+pub const WEBGPU_COMPONENT: &str = "onnxruntime-ep-webgpu";
+const WEBGPU_LIB: &str = "onnxruntime_providers_webgpu.dll";
+pub const WEBGPU_EP: &str = "WebGpuExecutionProvider";
+
 static INIT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 
 /// Loads ONNX Runtime once per process and returns the library's path.
@@ -31,23 +39,40 @@ pub fn init() -> Result<PathBuf, AsrError> {
 }
 
 fn init_inner() -> Result<PathBuf, AsrError> {
+    let backend = utter_runtime::backend();
     let custom = std::env::var_os("UTTER_ORT_DYLIB").map(PathBuf::from);
-    let lib = match &custom {
-        Some(path) => path.clone(),
-        None => component_dir("onnxruntime-gpu")?.join(ORT_LIB),
+    let lib = match (&custom, backend) {
+        (Some(path), _) => path.clone(),
+        (None, Backend::Cuda) => component_dir("onnxruntime-gpu")?.join(ORT_LIB),
+        (None, Backend::Vulkan) => component_dir("onnxruntime")?.join(ORT_LIB),
     };
     if !lib.is_file() {
         return Err(AsrError::Runtime(format!("{} does not exist", lib.display())));
     }
+    // The plugin's folder also holds the shader compiler it loads (dxcompiler.dll, dxil.dll).
+    let webgpu = match backend {
+        Backend::Vulkan => Some(component_dir(WEBGPU_COMPONENT)?),
+        Backend::Cuda => None,
+    };
     if custom.is_none() {
-        // Only the installed ones: the speech model on the CPU (the light tier) needs
-        // neither, and a GPU session without them fails when it is created, saying so.
-        let dirs: Vec<PathBuf> = CUDA_COMPONENTS.iter().filter_map(|id| component_dir(id).ok()).collect();
+        // Only the installed ones: a GPU session without them fails when it is created,
+        // saying so.
+        let dirs: Vec<PathBuf> = match &webgpu {
+            Some(dir) => vec![dir.clone()],
+            None => CUDA_COMPONENTS.iter().filter_map(|id| component_dir(id).ok()).collect(),
+        };
         prepend_library_path(&dirs)?;
     }
     let builder = ort::init_from(&lib).map_err(|e| AsrError::Runtime(format!("{}: {e}", lib.display())))?;
     builder.with_name("utter").commit();
-    tracing::info!(lib = %lib.display(), "onnxruntime loaded");
+    if let Some(dir) = webgpu {
+        let plugin = dir.join(WEBGPU_LIB);
+        // Registered for the life of the process; the returned handle only unregisters it.
+        ort::environment::Environment::current()?
+            .register_ep_library(WEBGPU_EP, &plugin)
+            .map_err(|e| AsrError::Runtime(format!("{}: {e}", plugin.display())))?;
+    }
+    tracing::info!(lib = %lib.display(), ?backend, "onnxruntime loaded");
     Ok(lib)
 }
 

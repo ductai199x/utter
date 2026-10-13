@@ -21,8 +21,15 @@ pub struct Problem {
     pub actions: Vec<&'static str>,
 }
 
-const OUT_OF_MEMORY: &[&str] =
-    &["out of memory", "outofmemory", "cudaerrormemoryallocation", "failed to allocate", "cuda_error_out_of_memory"];
+const OUT_OF_MEMORY: &[&str] = &[
+    "out of memory",
+    "outofmemory",
+    "cudaerrormemoryallocation",
+    "failed to allocate",
+    "cuda_error_out_of_memory",
+    "erroroutofdevicememory",
+    "vk_error_out_of_device_memory",
+];
 const DRIVER: &[&str] = &[
     "insufficient driver",
     "driver version is insufficient",
@@ -31,6 +38,16 @@ const DRIVER: &[&str] = &[
     "cuda_error_no_device",
     "cudaerrornodevice",
     "nvcuda",
+    // The Vulkan backend: Vulkan and WebGPU's own words, and the card matching (utter-asr,
+    // utter-llm) finding no device.
+    "errorincompatibledriver",
+    "vk_error_incompatible_driver",
+    "errordevicelost",
+    "vk_error_device_lost",
+    "vulkan-1.dll",
+    "no graphics card found",
+    "webgpu does not offer",
+    "vulkan does not offer",
 ];
 const DAMAGED: &[&str] = &[
     "protobuf",
@@ -75,7 +92,7 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
         detail: detail.clone(),
         actions,
     };
-    let free = utter_runtime::gpu::probe().ok().and_then(|g| g.free_bytes);
+    let free = utter_pipeline::card::graphics_card().ok().and_then(|g| g.free_bytes);
     let need = utter_pipeline::gpu_need(tier);
 
     if matches!(e, PipelineError::Audio(utter_audio::AudioError::NoDevice(_))) {
@@ -111,7 +128,11 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
         return problem(
             "driver",
             "The graphics driver could not run Utter",
-            "Update the NVIDIA driver, restart the computer, then retry.".into(),
+            match utter_runtime::backend() {
+                utter_runtime::Backend::Cuda => "Update the NVIDIA driver, restart the computer, then retry.",
+                utter_runtime::Backend::Vulkan => "Update the graphics driver, restart the computer, then retry.",
+            }
+            .into(),
             vec!["retry", "logs", "quit"],
         );
     }

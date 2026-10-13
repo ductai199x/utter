@@ -21,12 +21,16 @@ use ort::value::{Tensor, TensorRef};
 
 use crate::boost::{BoostConfig, PhraseBoost, State};
 use crate::frontend::MelFrontEnd;
+use crate::runtime::WEBGPU_EP;
 use crate::{AsrError, ModelConfig, Vocab};
 
 /// Where a graph runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Device {
     Cuda,
+    /// onnxruntime's WebGPU plugin provider on the high-performance graphics card, the one
+    /// llama-server runs on: the Vulkan backend's GPU (crate::runtime).
+    WebGpu,
     Cpu,
 }
 
@@ -154,8 +158,8 @@ impl ParakeetTdt {
             small.map_err(|_| AsrError::Model("creating the decoder sessions panicked".into()))??;
         tracing::info!(runtime_ms, encoder_ms, decoder_joint_ms, "speech sessions");
         let step = match opts.decoder {
-            Device::Cuda => Some(session(&dir.join("step.onnx"), Device::Cuda, &opts)?),
             Device::Cpu => None,
+            gpu => Some(session(&dir.join("step.onnx"), gpu, &opts)?),
         };
         let hidden = cfg.decoder_hidden;
         tracing::info!(dir = %dir.display(), ?opts, "parakeet loaded");
@@ -370,6 +374,25 @@ fn session(path: &Path, device: Device, opts: &ParakeetOptions) -> Result<Sessio
     let mut builder = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
         .with_memory_pattern(opts.memory_pattern)?;
+    if device == Device::WebGpu {
+        // The card is matched by its PCI device id, which the plugin reports as DXGI does.
+        // Plugin 0.4.0 then runs on Dawn's high-performance adapter whatever device it is
+        // given (its LUID options too, 2026-10-13): the same card, the first in DXGI's
+        // high-performance order, unless UTTER_GPU_INDEX picks another for testing. Like CUDA,
+        // no card is an error, never a silent fall back to the CPU.
+        let adapter = utter_platform::gpu::high_performance_adapter()
+            .ok_or_else(|| AsrError::Runtime("no graphics card found".into()))?;
+        let env = ort::environment::Environment::current()?;
+        let devices: Vec<_> = env
+            .devices()
+            .filter(|d| d.ep().is_ok_and(|ep| ep == WEBGPU_EP) && d.hardware_device().id() == adapter.device_id)
+            .take(1)
+            .collect();
+        if devices.is_empty() {
+            return Err(AsrError::Runtime(format!("WebGPU does not offer {}", adapter.name)));
+        }
+        builder = builder.with_devices(devices, None)?;
+    }
     if device == Device::Cuda {
         // A failed CUDA registration is an error, never a silent fall back to the CPU.
         let search = match opts.conv_search {

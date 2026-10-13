@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use utter_llm::cleanup::Tier;
 use utter_pipeline::Settings;
+use utter_pipeline::card::Driver;
 use utter_runtime::Component;
 
 /// Room left on the drive beyond the download, for extraction and logs.
@@ -159,7 +160,7 @@ pub struct ModelCard {
 #[tauri::command]
 pub fn setup_models() -> Vec<ModelCard> {
     use utter_pipeline::settings::Model;
-    let memory = utter_runtime::gpu::probe().map(|g| g.memory_bytes).unwrap_or(0);
+    let memory = utter_pipeline::card::graphics_card().map(|g| g.memory_bytes).unwrap_or(0);
     let fits = |tier: Tier| memory >= utter_pipeline::card_need(tier);
     let recommended = if fits(Tier::Quality) || !Tier::Light.available() { Tier::Quality } else { Tier::Light };
     let chosen = chosen_tier();
@@ -317,7 +318,7 @@ pub struct Check {
 #[serde(rename_all = "camelCase")]
 pub struct Checks {
     checks: Vec<Check>,
-    /// No NVIDIA GPU at all: nothing to fix here.
+    /// No graphics card at all: nothing to fix here.
     no_gpu: bool,
     download_bytes: u64,
 }
@@ -328,7 +329,7 @@ fn gb(bytes: u64) -> String {
 
 #[tauri::command]
 pub fn setup_check(before_choice: bool) -> Checks {
-    let gpu = utter_runtime::gpu::probe();
+    let gpu = utter_pipeline::card::graphics_card();
     // Before first run's model step the person can still pick the smaller model: the disk
     // must hold the smallest download on offer (the model step checks the chosen one).
     let need: u64 = if before_choice {
@@ -365,13 +366,18 @@ pub fn setup_check(before_choice: bool) -> Checks {
                     format!("Utter needs a graphics card with {} GB of memory or more.", smallest.div_ceil(1 << 30))
                 }),
             });
-            let ok = g.driver_cuda >= utter_runtime::gpu::MIN_DRIVER_CUDA;
-            checks.push(Check {
-                id: "driver",
-                ok,
-                value: format!("CUDA {}.{}", g.driver_cuda / 1000, g.driver_cuda % 1000 / 10),
-                fix: (!ok).then(|| "Update the NVIDIA driver to version 580 or newer, then check again.".into()),
-            });
+            let ok = g.driver.ok();
+            let (value, fix) = match g.driver {
+                Driver::Cuda(v) => (
+                    format!("CUDA {}.{}", v / 1000, v % 1000 / 10),
+                    "Update the NVIDIA driver to version 580 or newer, then check again.",
+                ),
+                Driver::Vulkan(present) => (
+                    if present { "Vulkan" } else { "No Vulkan" }.to_owned(),
+                    "Update the graphics driver from your card maker's site, then check again.",
+                ),
+            };
+            checks.push(Check { id: "driver", ok, value, fix: (!ok).then(|| fix.into()) });
         }
         Err(e) => {
             tracing::info!("no usable GPU: {e}");

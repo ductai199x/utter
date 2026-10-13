@@ -20,6 +20,40 @@
       "purpose": "Runs the speech model (ONNX graphs) on the GPU."
     },
     {
+      "id": "onnxruntime",
+      "version": "1.31.0",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-1.31.0.zip",
+      "sha256": "3958d8a44984160692c1b4ffd0de3cb48f8c39f9d34bb31e433db06e30b82195",
+      "size": 82887349,
+      "extract": [
+        "*/lib/onnxruntime.dll",
+        "*/lib/onnxruntime_providers_shared.dll",
+        "*/LICENSE",
+        "*/ThirdPartyNotices.txt"
+      ],
+      "license": "MIT (Microsoft)",
+      "purpose": "Runs the speech model (ONNX graphs) on the Vulkan backend (AMD, Intel), with the WebGPU provider."
+    },
+    {
+      "id": "onnxruntime-ep-webgpu",
+      "version": "0.4.0",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://files.pythonhosted.org/packages/d7/a4/c98a9e9433b3eeb576977b26c5c1cd0364f15ba9d198bb16101e7563ab06/onnxruntime_ep_webgpu-0.4.0-py3-none-win_amd64.whl",
+      "sha256": "7db646669d1a2390551da675115ea125e68cb3d4d2c3a2d6e463372bf8d6ea87",
+      "size": 13149847,
+      "extract": [
+        "onnxruntime_ep_webgpu/onnxruntime_providers_webgpu.dll",
+        "onnxruntime_ep_webgpu/dxcompiler.dll",
+        "onnxruntime_ep_webgpu/dxil.dll",
+        "onnxruntime_ep_webgpu-*.dist-info/licenses/*"
+      ],
+      "license": "MIT (Microsoft's own PyPI package)",
+      "purpose": "onnxruntime's WebGPU plugin provider (Dawn over D3D12): the speech model on AMD and Intel graphics cards."
+    },
+    {
       "id": "cuda-runtime",
       "version": "13.4",
       "os": "windows",
@@ -73,6 +107,30 @@
       ],
       "license": "MIT (ggml-org)",
       "purpose": "llama-server, which runs the cleanup and Command Mode model as Utter's child process."
+    },
+    {
+      "id": "llama-cpp-vulkan",
+      "version": "b11535",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/llama-b11535-bin-win-vulkan-x64.zip",
+      "sha256": "30f30bb96683c5a6d2140ce5d67e45015539fa403d65037fe6e8415b14e5c51d",
+      "size": 33459069,
+      "extract": [
+        "**llama-server.exe",
+        "**llama-server-impl.dll",
+        "**llama-common.dll",
+        "**llama.dll",
+        "**mtmd.dll",
+        "**ggml.dll",
+        "**ggml-base.dll",
+        "**ggml-vulkan.dll",
+        "**ggml-cpu-*.dll",
+        "**libomp.dll",
+        "**LICENSE*"
+      ],
+      "license": "MIT (ggml-org)",
+      "purpose": "llama-server built for Vulkan (shaders inside; needs only the driver's vulkan-1.dll): the cleanup model on AMD and Intel graphics cards."
     },
     {
       "id": "silero-vad",

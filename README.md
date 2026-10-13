@@ -204,7 +204,9 @@ Download `Utter_<version>_x64-setup.exe` from the
 your user only, and an update installs over it with your models and settings kept.
 
 **Needs:** Windows 10 or 11 (64-bit), an NVIDIA graphics card with 4 GB of memory (6 GB for
-Quality) and driver 580 or newer, and about 10 GB of disk.
+Quality) and driver 580 or newer, and about 10 GB of disk. AMD and Intel graphics cards run
+Utter through Vulkan, as a preview: 6 GB of memory (8 GB for Quality), measured so far only on
+an NVIDIA card made to run the Vulkan path.
 
 ## Building from source
 
@@ -247,8 +249,8 @@ docs/               UX specs, eval results, research notes, local setup
 
 ## Status
 
-Windows, English, NVIDIA graphics. Next: Vulkan, so AMD and Intel graphics cards run Utter too;
-then Android. After that: context from the text around the cursor, styles per app, Command
+Windows, English, NVIDIA graphics, with AMD and Intel graphics through Vulkan in preview until
+they are measured on real AMD and Intel cards. Next: Android. After that: context from the text around the cursor, styles per app, Command
 Mode, Linux (GNOME) and macOS, and Vietnamese with switching between the two mid-sentence.
 
 ## License

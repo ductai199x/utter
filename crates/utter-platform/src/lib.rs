@@ -7,6 +7,7 @@ pub mod caret;
 pub mod console;
 pub mod disk;
 pub mod focus;
+pub mod gpu;
 pub mod hotkey;
 pub mod insert;
 pub mod overlay;

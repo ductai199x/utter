@@ -27,7 +27,7 @@ hex = "0.4.3"
 hound = "3.5.1"
 # onnxruntime is loaded at run time (load-dynamic) from the pinned component utter-runtime
 # installs (crates/utter-runtime/components.json).
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "cuda"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "cuda", "api-22"] }
 sha2 = "0.11.0"
 windows-sys = "0.61.2"
 ureq = { version = "3.4.2", features = ["json"] }
