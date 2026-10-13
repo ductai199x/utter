@@ -784,7 +784,9 @@ impl Pipeline {
             self.apply_settings(&mut on_event);
             self.prune_history(false);
             match self.input_rx.recv_timeout(SETTINGS_POLL) {
-                Ok(Input::Key(Action::Start, _)) => {
+                // A double tap arrives as Start and Cancel (the first tap, too short for a
+                // dictation), then HandsFree: the second press starts listening hands-free.
+                Ok(Input::Key(action @ (Action::Start | Action::HandsFree), _)) => {
                     let looked = Instant::now();
                     let target = focus::foreground();
                     tracing::debug!(ms = looked.elapsed().as_secs_f64() * 1e3, "key down: the focused app");
@@ -799,7 +801,8 @@ impl Pipeline {
                         None => &mut mic,
                     };
                     let input = &self.input_rx;
-                    self.engine.dictate(source, |t| next_key(input, t), target, true, &mut on_event)?;
+                    let hands_free = action == Action::HandsFree;
+                    self.engine.dictate(source, |t| next_key(input, t), target, hands_free, true, &mut on_event)?;
                 }
                 Ok(Input::Command(c)) => self.engine.command(c, &mut on_event),
                 Ok(Input::Key(..)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -929,6 +932,7 @@ impl Pipeline {
             },
             None,
             false,
+            false,
             &mut |_| {},
         )?;
         Ok(d.expect("a replay is never cancelled"))
@@ -995,16 +999,18 @@ impl Engine {
         })
     }
 
-    /// One dictation, from the Start action: returns `None` if it was cancelled.
+    /// One dictation, from the Start action (or HandsFree: `hands_free`, which ends with a tap
+    /// instead of the key's release): returns `None` if it was cancelled.
     fn dictate(
         &mut self,
         source: &mut dyn AudioSource,
         next_action: impl FnMut(Duration) -> Option<(Action, Instant)>,
         target: Option<Window>,
+        hands_free: bool,
         do_insert: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Option<Dictation>, PipelineError> {
-        let result = self.dictate_inner(source, next_action, target, do_insert, on_event);
+        let result = self.dictate_inner(source, next_action, target, hands_free, do_insert, on_event);
         // Whatever happened, the GPU goes back to idling.
         self.gpu.stop();
         result
@@ -1015,6 +1021,7 @@ impl Engine {
         source: &mut dyn AudioSource,
         mut next_action: impl FnMut(Duration) -> Option<(Action, Instant)>,
         target: Option<Window>,
+        hands_free: bool,
         do_insert: bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Option<Dictation>, PipelineError> {
@@ -1025,11 +1032,11 @@ impl Engine {
         let caret = do_insert.then(utter_platform::caret::before_cursor);
         // Live dictations only: a replay (the bench) is not the user's.
         let mut log = DictationLog::start(LogConfig { enabled: self.cfg.log.enabled && do_insert, ..self.cfg.log });
-        log.push(Entry::Listening { hands_free: false });
+        log.push(Entry::Listening { hands_free });
         source.start();
         self.gpu.start();
         let target_handle = target.as_ref().map(|w| w.handle);
-        on_event(Event::Listening { hands_free: false, target: target_handle });
+        on_event(Event::Listening { hands_free, target: target_handle });
         self.vad.reset();
         let mut segmenter = Segmenter::new(SegmenterConfig::default());
         let mut audio: Vec<f32> = Vec::new();
@@ -1066,11 +1073,8 @@ impl Engine {
                     });
                     return Ok(None);
                 }
-                Some((Action::HandsFree, _)) => {
-                    log.push(Entry::Listening { hands_free: true });
-                    on_event(Event::Listening { hands_free: true, target: target_handle });
-                }
-                Some((Action::Start, _)) | None => {}
+                // Neither comes while listening: the hotkey sends them only from idle.
+                Some((Action::Start | Action::HandsFree, _)) | None => {}
             }
             // Results that came back while speaking: show them.
             let mut words_changed = false;
