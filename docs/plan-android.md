@@ -106,10 +106,27 @@ each), judged with Light v2 by `utter-eval` (26B judge) on all 25,469 held-out d
 - **The 270M is out**: 25 points behind Light even fully trained, and its replies on hard
   dictations are often wrong, not only long.
 - **The 1B is the candidate**: about 1 s a cleanup on the phone's CPU (estimated from llama-bench;
-  Light takes 2.6 s), 7 points behind Light on real speech, and still 39 cut-offs (0.15%), where
-  the bar is none. Next: more training (a higher learning rate, two epochs), then, as a last
-  line for every model, a retry that forbids the runaway start, counted only where the judge
-  accepts its output.
+  Light takes 2.6 s), 7 points behind Light on real speech, and 39 cut-offs (0.15%), where the
+  bar is none.
+
+**The retry guard and more training (2026-10-14).** The app now retries a reply that runs away
+(`utter_llm::cleanup::chat`): once more, with a grammar that forbids a leading list marker and a
+mild repetition penalty. Judged on the same 25,469 dictations, the retried outputs included:
+
+| Model | Kokoro real | Unseen voices | Text test | Runaways (retried) | Cut off after the retry |
+|---|---|---|---|---|---|
+| Light v2 | **85.7** | **74.6** | **64.3** | 3 | **0** |
+| 1B full, 2 epochs, lr 2e-5 | 79.7 | 67.0 | 51.9 | 18 | 1 |
+| 1B full, 1 epoch, lr 2e-5 | 78.0 | 67.8 | 52.8 | 39 | 3 |
+| 1B full, 1 epoch, lr 5e-5 | 77.7 | 66.4 | 49.5 | 35 | 10 |
+| 1B full, 2 epochs, lr 5e-5 | 76.9 | 65.2 | 48.2 | 26 | 7 |
+
+- The guard brings Light to no cut-off at all, and its scores do not move.
+- Two epochs at lr 2e-5 halve the 1B's runaways at the same quality; a higher learning rate is
+  worse on both. The one cut-off left is a restart over a passage whose numbers the recognizer
+  lost ("Drogden Sill depth of sets a limit...").
+- The 1B stays 6 points behind Light on real speech: the size of model the phone can run fast
+  on its CPU costs that much, so far.
 
 ## Architecture (proposed)
 
