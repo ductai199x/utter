@@ -84,6 +84,33 @@ with the app's prompt and server settings.
 - **Memory:** 16 GB, but with Tai's apps open about 6 GB is free; Light's 3.1 GB model loaded in
   51 s while memory was short (swap full).
 
+## A cleanup model for the phone (2026-10-14)
+
+Gemma 3 270M and 1B (Google's QAT checkpoints) trained on v2's data (`utter-train`, one A6000
+each), judged with Light v2 by `utter-eval` (26B judge) on all 25,469 held-out dictations:
+
+| Model | Ready to send, Kokoro real | Unseen voices (Chatterbox real) | Text test | Replies cut off |
+|---|---|---|---|---|
+| Light v2 (Gemma 4 E2B, LoRA) | **85.7** | **74.6** | **64.3** | 3 |
+| Gemma 3 1B, full fine-tune | 78.0 | 67.8 | 52.8 | 39 |
+| Gemma 3 1B, LoRA (Light's recipe) | 75.0 | 63.6 | 50.7 | 806 |
+| Gemma 3 270M, full fine-tune | 60.0 | 49.7 | 34.7 | 564 |
+| Gemma 3 270M, LoRA | 46.5 | 36.3 | 24.1 | 3,294 |
+
+- **A cut-off reply** (one that never stops: the app would type the raw text) is how a small model
+  fails. It starts a bullet list on plain prose ("- name: Ubuntu / - version: 18 / ...") and
+  loops. The dataset is not the cause: its list targets all come from dictations that enumerate
+  items, and the failures spread evenly over every domain and dictation style. A rank-16 LoRA
+  leaves a small model its pretrained habits; training every weight (`--full`) cuts the 1B's
+  cut-offs twenty-fold.
+- **The 270M is out**: 25 points behind Light even fully trained, and its replies on hard
+  dictations are often wrong, not only long.
+- **The 1B is the candidate**: about 1 s a cleanup on the phone's CPU (estimated from llama-bench;
+  Light takes 2.6 s), 7 points behind Light on real speech, and still 39 cut-offs (0.15%), where
+  the bar is none. Next: more training (a higher learning rate, two epochs), then, as a last
+  line for every model, a retry that forbids the runaway start, counted only where the judge
+  accepts its output.
+
 ## Architecture (proposed)
 
 - **A Kotlin app around Utter's Rust core.** The core is shared through JNI: the segmenter,
