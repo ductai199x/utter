@@ -97,9 +97,10 @@ class Collator:
 
 
 def save_merged(model, tokenizer, merged_dir: Path, base: str, revision: str) -> None:
-    """Folds the LoRA into the weights and writes the full model where the converter reads it;
-    `base` at `revision` is the model it was trained from."""
-    merged = model.merge_and_unload()
+    """Writes the full model where the converter reads it, a LoRA folded into the weights first
+    (a fully fine-tuned model is written as it is); `base` at `revision` is the model it was
+    trained from."""
+    merged = model.merge_and_unload() if hasattr(model, "merge_and_unload") else model
     merged.save_pretrained(merged_dir, safe_serialization=True)
     tokenizer.save_pretrained(merged_dir)
     # The converter wants the processor and chat template files beside the weights, and Gemma 3's
@@ -136,6 +137,11 @@ def main(
     max_length: int = 1024,
     seed: int = 0,
     base: str = typer.Option("e4b", help=f"The model to train from: {', '.join(BASES)}."),
+    full: bool = typer.Option(
+        False,
+        help="Train every weight instead of a LoRA (rank and alpha unused): what a small model "
+        "needs, as a LoRA leaves its pretrained habits in place (docs/plan-android.md).",
+    ),
 ) -> None:
     import torch
     from peft import LoraConfig, get_peft_model
@@ -160,21 +166,24 @@ def main(
     model = model_class.from_pretrained(
         repo,
         revision=revision,
-        dtype=torch.bfloat16,
+        # Full training keeps float32 weights so small updates are not rounded away; the math
+        # still runs in bfloat16 (bf16=True below).
+        dtype=torch.float32 if full else torch.bfloat16,
         device_map={"": f"cuda:{local_rank}"} if local_rank >= 0 else "cuda",
         attn_implementation="sdpa",
     )
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    model.enable_input_require_grads()
-    lora = LoraConfig(
-        r=rank,
-        lora_alpha=alpha,
-        lora_dropout=0.05,
-        target_modules=TEXT_TARGETS if text_only else TARGETS,
-        task_type="CAUSAL_LM",
-    )
-    model = get_peft_model(model, lora)
-    model.print_trainable_parameters()
+    if not full:
+        model.enable_input_require_grads()
+        lora = LoraConfig(
+            r=rank,
+            lora_alpha=alpha,
+            lora_dropout=0.05,
+            target_modules=TEXT_TARGETS if text_only else TARGETS,
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, lora)
+        model.print_trainable_parameters()
 
     args = TrainingArguments(
         output_dir=str(out / "checkpoints"),
@@ -195,7 +204,7 @@ def main(
         seed=seed,
         remove_unused_columns=False,
         dataloader_num_workers=0,
-        # Only the LoRA weights train, and all of them every step.
+        # The trained weights (the LoRA's, or all of them) all get a gradient every step.
         ddp_find_unused_parameters=False,
     )
     trainer = Trainer(
@@ -209,7 +218,8 @@ def main(
     if not trainer.is_world_process_zero():
         return
 
-    model.save_pretrained(out / "adapter")
+    if not full:
+        model.save_pretrained(out / "adapter")
     save_merged(model, tokenizer, out / "merged", repo, revision)
     record = {
         "base": repo,
@@ -218,8 +228,9 @@ def main(
         "rows": len(train_rows),
         "epochs": epochs,
         "lr": lr,
-        "rank": rank,
-        "alpha": alpha,
+        "full": full,
+        "rank": None if full else rank,
+        "alpha": None if full else alpha,
         "batch": batch,
         "grad_accum": grad_accum,
         "max_length": max_length,
