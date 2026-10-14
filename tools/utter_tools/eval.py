@@ -258,7 +258,15 @@ def ready_to_send(eval_set: str, run: str, chat: llm.Chat, judge: str, workers: 
     for v in verdicts.values():
         if v["verdict"] == "needs_edit":
             causes[v["cause"]] = causes.get(v["cause"], 0) + 1
-    return {"ready_pct": 100 * ready / max(1, len(outputs)), "n": len(outputs), "causes": causes}
+    # Replies that never stopped (llm-bench's "error"): typed as the raw text, so a failed
+    # cleanup however the judge sees it.
+    cut_off = sum("error" in o for o in outputs)
+    return {
+        "ready_pct": 100 * ready / max(1, len(outputs)),
+        "n": len(outputs),
+        "causes": causes,
+        "cut_off": cut_off,
+    }
 
 
 # ---------------------------------------------------------------------------------------------
@@ -305,15 +313,22 @@ def main(
             clean(s, name + suffix, gguf, asr_run, dictionary)
 
     lines = ["| Set | n | " + " | ".join(models) + " |", "|---|---|" + "---|" * len(models)]
+    cut_off = dict.fromkeys(models, 0)
+    total = 0
     with llm.connect(judge_url, slots=workers) as chat:
         for s, _, suffix, dictionary in runs:
             cells, n = [], 0
             for name in models:
                 result = ready_to_send(s, name + suffix, chat, judge, workers)
                 cells.append(f"{result['ready_pct']:.1f}")
+                cut_off[name] += result["cut_off"]
                 n = result["n"]
+            total += n
             label = f"{s} + dictionary" if dictionary else s
             lines.append(f"| {label} | {n} | " + " | ".join(cells) + " |")
+    lines.append(
+        f"| Replies cut off (of {total}) | | " + " | ".join(str(cut_off[m]) for m in models) + " |"
+    )
     table = "Ready to send %:\n\n" + "\n".join(lines) + "\n"
     out = common.eval_dir() / "results" / f"eval--{'--'.join(models)}--{judge}.md"
     out.write_text(table, encoding="utf-8", newline="\n")
