@@ -142,6 +142,13 @@ def main(
         help="Train every weight instead of a LoRA (rank and alpha unused): what a small model "
         "needs, as a LoRA leaves its pretrained habits in place (docs/plan-android.md).",
     ),
+    checkpointing: bool = typer.Option(
+        True,
+        help="Recompute activations in the backward pass to save GPU memory, at about 30% more "
+        "compute; a small model fits without it.",
+    ),
+    eval_steps: int = typer.Option(200, help="Steps between passes over the eval data."),
+    eval_rows: int = typer.Option(0, help="Evaluate on the first N eval rows only (0: all)."),
 ) -> None:
     import torch
     from peft import LoraConfig, get_peft_model
@@ -157,7 +164,9 @@ def main(
     text_only = base in TEXT_ONLY
     tokenizer = AutoTokenizer.from_pretrained(repo, revision=revision)
     train_rows = _load(data, tokenizer, max_length)
-    eval_rows = _load(eval_data, tokenizer, max_length) if eval_data else None
+    held_out = _load(eval_data, tokenizer, max_length) if eval_data else None
+    if held_out and eval_rows:
+        held_out = held_out[:eval_rows]
 
     # Under torchrun (data parallel, one process per GPU) each process loads its copy straight
     # onto its own GPU, so host memory holds no full copy per process.
@@ -172,7 +181,8 @@ def main(
         device_map={"": f"cuda:{local_rank}"} if local_rank >= 0 else "cuda",
         attn_implementation="sdpa",
     )
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    if checkpointing:
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     if not full:
         model.enable_input_require_grads()
         lora = LoraConfig(
@@ -196,8 +206,8 @@ def main(
         gradient_accumulation_steps=grad_accum,
         bf16=True,
         logging_steps=10,
-        eval_strategy="steps" if eval_rows else "no",
-        eval_steps=200,
+        eval_strategy="steps" if held_out else "no",
+        eval_steps=eval_steps,
         save_strategy="epoch",
         save_total_limit=2,
         report_to="none",
@@ -211,7 +221,7 @@ def main(
         model=model,
         args=args,
         train_dataset=train_rows,
-        eval_dataset=eval_rows,
+        eval_dataset=held_out,
         data_collator=Collator(tokenizer.pad_token_id),
     )
     trainer.train()
