@@ -59,6 +59,26 @@ with the app's prompt and server settings.
   keep float16 activations, which suit a GPU; a CPU export (int8 weights, float32 activations)
   is next. The process aborts at exit in onnxruntime's teardown ("pthread_mutex_lock called on
   a destroyed mutex"), to be fixed before the app.
+- **Speech, every export on the CPU** (encoder p50 / p95 over 60 clips, WER against the
+  desktop's 6.82%): float32 1.6 / 3.9 s (6.82%); int8 weights and activations (dynamic
+  quantization) 1.3 / 6.1 s (6.76%); the desktop's 8-bit 1.4 / 4.0 s (6.82%); 8-bit weights with
+  float32 activations 5.2 / 6.1 s. Accuracy holds at every precision, but the 0.6B encoder is
+  compute-bound on the CPU: speech needs the TPU or the GPU too.
+- **LiteRT-LM 0.18 on the TPU and GPU** (Google's Gemma 4 E2B builds for the phone's chip and for GPU,
+  through a test app; stock Gemma ignores the short cleanup prompt and writes long replies, so
+  only speeds count here):
+
+  | Gemma 4 E2B | Prompt tokens/s | First token | Reply tokens/s | Engine load |
+  |---|---|---|---|---|
+  | TPU (the phone's chip build) | 1,102 | 0.15 s | 19.9 | 1.2 s |
+  | TPU, speculative decoding on | ~1,000 | 0.14 s | ~36 | 2.2 s |
+  | GPU (OpenCL build) | 286 | 0.48 s | 15.5 | 5.7 s |
+
+  The TPU solves the prompt (ten times the CPU), and with speculative decoding replies run
+  about twice the CPU's speed: a 49-token cleanup in about 1.4 s against 2.6 s. The GPU build
+  also did not stop its replies (about 4,000 tokens). The TPU runtime is a plain Maven library
+  (`com.google.ai.edge.litert:litert-npu-runtime-google-tensor`), no Play delivery needed to test.
+  Running our fine-tuned model there needs it converted and compiled for the phone's chip.
 - **Utter's Rust CLI builds for aarch64-linux-android unchanged** and runs the speech bench on
   the phone, which supports sharing the Rust core.
 - **Memory:** 16 GB, but with Tai's apps open about 6 GB is free; Light's 3.1 GB model loaded in
