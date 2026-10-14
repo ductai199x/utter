@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use crate::{LlmError, Message, ServerOptions};
+use crate::{ChatParams, Completion, LlamaServer, LlmError, Message, ServerOptions};
 
 /// The cleanup system prompt.
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
@@ -184,6 +184,41 @@ const FUNCTION_WORDS: &[&str] = &[
     "into", "over", "after", "before", "s", "t", "ll", "re", "ve", "d", "m", "don", "didn", "doesn", "isn", "aren",
     "wasn", "weren", "won",
 ];
+
+/// The reply limit for cleaning `transcript`: a cleanup is about as long as its input (half its
+/// characters is about twice its tokens), so a model that starts answering instead stops soon.
+pub fn max_tokens(transcript: &str) -> u32 {
+    (transcript.len() as u32 / 2).max(64)
+}
+
+/// A cleanup reply, and whether it took the guarded second try.
+pub struct Cleanup {
+    pub completion: Completion,
+    pub retried: bool,
+}
+
+/// Cleans with one guarded second try. A reply that runs to its limit has looped: it opened a
+/// bullet list on plain prose, or repeats itself (docs/plan-android.md). The second try may not
+/// open with a list marker and is mildly penalized for repeating its last words, which is how
+/// such a run starts; a reply that still runs away is the error.
+pub fn chat(server: &LlamaServer, messages: &[Message], params: &ChatParams) -> Result<Cleanup, LlmError> {
+    match server.chat(messages, params) {
+        Ok(completion) => Ok(Cleanup { completion, retried: false }),
+        Err(LlmError::CutOff) => {
+            let mut guarded = params.clone();
+            guarded.extra.insert("grammar".into(), NO_LIST_START.into());
+            guarded.extra.insert("repeat_penalty".into(), 1.15.into());
+            guarded.extra.insert("repeat_last_n".into(), 32.into());
+            let completion = server.chat(messages, &guarded)?;
+            Ok(Cleanup { completion, retried: true })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// A grammar (llama.cpp GBNF) for any text that does not open with a list marker ("-", "*",
+/// "1." or "1)") or blank space.
+const NO_LIST_START: &str = r#"root ::= ( [^-*0-9 \t\n] | [0-9]+ [^.)0-9] ) [^\x00]*"#;
 
 /// What a model returns, minus wrapping some models add despite the prompt: a leading
 /// "Cleaned:" label, or quotes around the whole text.

@@ -521,7 +521,7 @@ fn llm_bench(
     // Cleanup output is about as long as its input; a cap stops a model that starts
     // answering instead of cleaning from running on.
     let warmer = warm_gpu.then(utter_runtime::gpu::GpuWarmer::new);
-    let params = |input: &str| ChatParams { max_tokens: (input.len() as u32 / 2).max(64), ..ChatParams::default() };
+    let params = |input: &str| ChatParams { max_tokens: cleanup::max_tokens(input), ..ChatParams::default() };
     for warm in ["Um, this is a warm-up.", "The the second warm-up, no, third."] {
         // Only warms the server: a reply cut off at its limit does that too.
         match server.chat(&messages(warm, &[], false), &params(warm)) {
@@ -582,10 +582,15 @@ fn llm_bench(
                 }
             }
             let start = std::time::Instant::now();
-            let out = match server.chat(&messages(&input, &dictionary, lists_off), &params(&input)) {
-                Ok(out) => out,
-                // A model that does not stop: the app types the raw text instead, so the case
-                // counts with that output, marked.
+            let out = match cleanup::chat(&server, &messages(&input, &dictionary, lists_off), &params(&input)) {
+                Ok(out) => {
+                    if out.retried {
+                        row.insert("retried".into(), true.into());
+                    }
+                    out.completion
+                }
+                // Even the guarded second try ran away: the app types the raw text instead, so
+                // the case counts with that output, marked.
                 Err(utter_llm::LlmError::CutOff) => {
                     row.insert("output".into(), input.clone().into());
                     row.insert("error".into(), utter_llm::LlmError::CutOff.to_string().into());
