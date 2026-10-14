@@ -48,7 +48,7 @@ def write_data(folder: Path, ref: str | None) -> dict:
 
 def main(
     name: str = typer.Option("", help="The run's name, in <data dir>/train/<name>/."),
-    base: str = typer.Option("e4b", help="e4b (Quality) or e2b (Light)."),
+    base: str = typer.Option("e4b", help="e4b (Quality), e2b (Light), g3-1b or g3-270m (phone)."),
     gpus: int = typer.Option(1, help="GPUs on this machine."),
     ref: str = typer.Option(None, help="dictation-to-text revision (default: main)."),
     gguf: Path = typer.Option(None, help="Export to this file (utter-<tier>-v<N>-q4_0.gguf)."),

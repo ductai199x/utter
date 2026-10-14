@@ -1,4 +1,4 @@
-"""Fine-tunes the cleanup model: LoRA on Gemma 4 E4B (Google's unquantized QAT checkpoint, so
+"""Fine-tunes the cleanup model: LoRA on a Gemma model (Google's unquantized QAT checkpoint, so
 the result quantizes back to Q4_0 the way the shipped model was trained to), on pairs of
 (what the recognizer heard, what the speaker meant to type).
 
@@ -26,7 +26,8 @@ from pathlib import Path
 import typer
 
 # The models a cleanup model is trained from, pinned: E4B for Quality, E2B for Light (its GPU part
-# is half of E4B's: docs/eval-results.md).
+# is half of E4B's: docs/eval-results.md), and Gemma 3's text-only 1B and 270M for the phone
+# (docs/plan-android.md). All are Google's unquantized QAT checkpoints.
 BASES = {
     "e4b": (
         "google/gemma-4-e4b-it-qat-q4_0-unquantized",
@@ -36,11 +37,23 @@ BASES = {
         "google/gemma-4-E2B-it-qat-q4_0-unquantized",
         "6befbaca7398925921802abd1f277b495b78b738",
     ),
+    "g3-1b": (
+        "google/gemma-3-1b-it-qat-q4_0-unquantized",
+        "a6692c1945954f4aa39a17b8dfba4a7e62db3d4f",
+    ),
+    "g3-270m": (
+        "google/gemma-3-270m-it-qat-q4_0-unquantized",
+        "8f726c6a497fd439f0d6f726e52f8e3b439a26e5",
+    ),
 }
+# Gemma 3's 1B and 270M are text-only models; Gemma 4's carry vision and audio towers.
+TEXT_ONLY = {"g3-1b", "g3-270m"}
 
-# Attention and MLP projections of the language model only; the vision and audio towers stay
-# untouched.
-TARGETS = r".*language_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)"
+# Attention and MLP projections of the language model only; Gemma 4's vision and audio towers
+# stay untouched.
+PROJECTIONS = r"\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)"
+TARGETS = r".*language_model.*" + PROJECTIONS
+TEXT_TARGETS = r".*layers.*" + PROJECTIONS
 
 
 def encode(tokenizer, row: dict, max_length: int) -> dict | None:
@@ -89,12 +102,17 @@ def save_merged(model, tokenizer, merged_dir: Path, base: str, revision: str) ->
     merged = model.merge_and_unload()
     merged.save_pretrained(merged_dir, safe_serialization=True)
     tokenizer.save_pretrained(merged_dir)
-    # The converter wants the processor and chat template files beside the weights.
+    # The converter wants the processor and chat template files beside the weights, and Gemma 3's
+    # SentencePiece model (tokenizer.model), from which it reads the vocabulary.
     from huggingface_hub import snapshot_download
 
-    src = Path(snapshot_download(base, revision=revision, allow_patterns=["*.json", "*.jinja"]))
+    src = Path(
+        snapshot_download(
+            base, revision=revision, allow_patterns=["*.json", "*.jinja", "tokenizer.model"]
+        )
+    )
     for f in src.iterdir():
-        if f.suffix in (".json", ".jinja") and not (merged_dir / f.name).exists():
+        if f.suffix in (".json", ".jinja", ".model") and not (merged_dir / f.name).exists():
             shutil.copy(f, merged_dir / f.name)
 
 
@@ -121,9 +139,16 @@ def main(
 ) -> None:
     import torch
     from peft import LoraConfig, get_peft_model
-    from transformers import AutoModelForImageTextToText, AutoTokenizer, Trainer, TrainingArguments
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoModelForImageTextToText,
+        AutoTokenizer,
+        Trainer,
+        TrainingArguments,
+    )
 
     repo, revision = BASES[base]
+    text_only = base in TEXT_ONLY
     tokenizer = AutoTokenizer.from_pretrained(repo, revision=revision)
     train_rows = _load(data, tokenizer, max_length)
     eval_rows = _load(eval_data, tokenizer, max_length) if eval_data else None
@@ -131,7 +156,8 @@ def main(
     # Under torchrun (data parallel, one process per GPU) each process loads its copy straight
     # onto its own GPU, so host memory holds no full copy per process.
     local_rank = int(os.environ.get("LOCAL_RANK", "-1"))
-    model = AutoModelForImageTextToText.from_pretrained(
+    model_class = AutoModelForCausalLM if text_only else AutoModelForImageTextToText
+    model = model_class.from_pretrained(
         repo,
         revision=revision,
         dtype=torch.bfloat16,
@@ -141,7 +167,11 @@ def main(
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
     lora = LoraConfig(
-        r=rank, lora_alpha=alpha, lora_dropout=0.05, target_modules=TARGETS, task_type="CAUSAL_LM"
+        r=rank,
+        lora_alpha=alpha,
+        lora_dropout=0.05,
+        target_modules=TEXT_TARGETS if text_only else TARGETS,
+        task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()

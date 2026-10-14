@@ -68,6 +68,8 @@ pub enum LlmError {
     Request(String),
     #[error("graphics card: {0}")]
     Device(String),
+    #[error("the reply was cut off at its length limit")]
+    CutOff,
 }
 
 #[derive(Debug, Clone)]
@@ -292,7 +294,7 @@ impl LlamaServer {
         let (reply, wall) = self.send(messages, params)?;
         let choice = &reply["choices"][0];
         if choice["finish_reason"].as_str() == Some("length") {
-            return Err(LlmError::Request("the reply was cut off at its length limit".into()));
+            return Err(LlmError::CutOff);
         }
         let Some(text) = choice["message"]["content"].as_str() else {
             return Err(LlmError::Request(format!("no text in the reply: {reply}")));
