@@ -153,15 +153,18 @@ impl Worker {
 
     fn clean(&self, job: Job) -> Cleaned {
         let started = Instant::now();
-        let params = ChatParams { max_tokens: (job.raw.len() as u32 / 2).max(64), ..ChatParams::default() };
+        let params = ChatParams { max_tokens: cleanup::max_tokens(&job.raw), ..ChatParams::default() };
         let messages = {
             let (dictionary, ctx) = &*self.prompt.lock().expect("cleanup prompt lock");
             cleanup::messages_with(&self.system, &job.raw, &crate::gate::relevant_terms(&job.raw, dictionary), ctx)
         };
-        let text = self
-            .server
-            .chat(&messages, &params)
-            .map(|out| cleanup::tidy_output(&out.text))
+        let text = cleanup::chat(&self.server, &messages, &params)
+            .map(|out| {
+                if out.retried {
+                    tracing::warn!("the cleanup reply ran away; the guarded second try answered");
+                }
+                cleanup::tidy_output(&out.completion.text)
+            })
             .map_err(|e| e.to_string())
             // A reply instead of the dictation: the transcript is typed instead (logged as an error).
             .and_then(|text| {
