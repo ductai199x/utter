@@ -153,15 +153,25 @@ backend is Apache-licensed.
 
   | Encoder | Transcripts identical | Per 5 s clip |
   |---|---|---|
-  | GPU float16, LayerNorm rewritten | 15 of 15 | 325 ms (433 ms to 1.4 s in later runs) |
+  | GPU float16, LayerNorm rewritten | 15 of 15 | 325 ms |
   | GPU float32 | 15 of 15 | 573 ms |
   | GPU float16, stock | 2 of 15 | 328 ms |
   | CPU (LiteRT, XNNPACK, float32) | - | 1,030 ms |
 
-- **Open:** the GPU clock swings between 396 MHz and 1,094 MHz (governor `precise_ondemand`),
-  which moves the time between 325 ms and 1.4 s a clip; sustained-performance mode is not
-  supported on this phone. The first load takes 52-107 s (the 2.35 GB float32 model converted
-  and its programs compiled), and LiteRT's program cache did not shorten later loads yet.
+- **Quality, 100 real clips** (50 AMI, 50 VoxPopuli, up to 10 s, a 1,000-frame model with
+  float16 weights): 97 of 100 transcripts identical to Transformers, the other three differing in
+  a comma or a filler; WER against what was said 9.26% on the phone and 9.26% in Transformers.
+  373 ms per 10 s clip.
+- **Run as the bubble will** (a foreground service, another app in front, the screen on, 1-2 s
+  between runs): float16 steady at 310-373 ms per 5 s clip, float32 495-569 ms. The slower runs
+  above (433 ms to 1.4 s) came only from the test activity in its own window, restarted
+  repeatedly; not reproduced as a service.
+- **Load time.** Weights stored as float16 at export (ai-edge-quantizer's float casting; 2.35 GB
+  -> 1.18 GB), and LiteRT's on-phone cache of compiled programs and GPU-ready weights: 52-107 s
+  -> 15.8 s for the first load, 8.1-9.1 s after. The rest is reading the 1.18 GB cache back to
+  the GPU. 8-bit weights (595 MB) crash LiteRT 2.3.0's GPU accelerator (a null read in
+  libLiteRtClGlAccelerator.so, with or without allowSrcQuantizedFcConvOps) and run only on the
+  CPU, 960 ms. So the app loads the encoder once when its service starts and keeps it resident.
 
 ## Architecture (proposed)
 
