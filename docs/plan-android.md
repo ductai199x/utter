@@ -127,6 +127,10 @@ mild repetition penalty. Judged on the same 25,469 dictations, the retried outpu
   lost ("Drogden Sill depth of sets a limit...").
 - The 1B stays 6 points behind Light on real speech: the size of model the phone can run fast
   on its CPU costs that much, so far.
+- **Measured on the phone** (2026-10-15, the same 30 real cases, app settings, drafting, paced
+  10 s apart, the phone as Tai uses it): the 1B (2 epochs) cleans up in 1.49 s p50 / 1.98 s p95,
+  Light in 2.69 / 3.81 s. Prompt 5.1 ms a token, reply 18.5 ms a token (Light: 10.5 and 37.4).
+- The retry guard shipped to the desktop in 0.1.7.
 
 ## Architecture (proposed)
 
