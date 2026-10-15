@@ -171,7 +171,8 @@ backend is Apache-licensed.
   -> 15.8 s for the first load, 8.1-9.1 s after. The rest is reading the 1.18 GB cache back to
   the GPU. 8-bit weights (595 MB) crash LiteRT 2.3.0's GPU accelerator (a null read in
   libLiteRtClGlAccelerator.so, with or without allowSrcQuantizedFcConvOps) and run only on the
-  CPU, 960 ms. So the app loads the encoder once when its service starts and keeps it resident.
+  CPU, 960 ms (reported upstream with a one-layer reproducer: google-ai-edge/LiteRT#10934). So
+  the app loads the encoder once when its service starts and keeps it resident.
 
 ## Architecture (proposed)
 
