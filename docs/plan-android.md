@@ -132,6 +132,37 @@ mild repetition penalty. Judged on the same 25,469 dictations, the retried outpu
   Light in 2.69 / 3.81 s. Prompt 5.1 ms a token, reply 18.5 ms a token (Light: 10.5 and 37.4).
 - The retry guard shipped to the desktop in 0.1.7.
 
+## Speech on the phone's GPU (2026-10-15)
+
+Not the TPU: compiling for it takes Google's Tensor ML SDK, whose terms forbid distributing what
+it builds without Google's written permission and publishing Tensor performance data (4.16-4.18),
+which an open, published Utter cannot accept (Tai agreed to try the GPU first). LiteRT's GPU
+backend is Apache-licensed.
+
+- **Conversion** (`litert-torch` 0.9, Transformers' Parakeet encoder and joint projection, one
+  fixed input length per model, 500 mel frames = 5 s here): the stock graph has boolean and int64
+  mask tensors, length arithmetic and 48 masked fills, so LiteRT's GPU took 48 of 3,499 ops and
+  failed. Rewritten float-only (the masks are float inputs, one per subsampling stage; attention
+  masking an added bias; the convolution module's a multiply): every op on the GPU, 1.4e-4 from
+  Transformers on the valid frames.
+- **Float16 needed one more exact rewrite.** On real speech the encoder's LayerNorm inputs reach
+  |x| 7,320 and a mean square of 355,518, past float16's 65,504, so float16 broke the output
+  (2 of 15 transcripts). LayerNorm(x) = LayerNorm(x / c) with eps / c^2; with c = 64 the mean
+  square stays under 100.
+- **Measured** (15 real AMI clips under 5 s, transcripts against Transformers):
+
+  | Encoder | Transcripts identical | Per 5 s clip |
+  |---|---|---|
+  | GPU float16, LayerNorm rewritten | 15 of 15 | 325 ms (433 ms to 1.4 s in later runs) |
+  | GPU float32 | 15 of 15 | 573 ms |
+  | GPU float16, stock | 2 of 15 | 328 ms |
+  | CPU (LiteRT, XNNPACK, float32) | - | 1,030 ms |
+
+- **Open:** the GPU clock swings between 396 MHz and 1,094 MHz (governor `precise_ondemand`),
+  which moves the time between 325 ms and 1.4 s a clip; sustained-performance mode is not
+  supported on this phone. The first load takes 52-107 s (the 2.35 GB float32 model converted
+  and its programs compiled), and LiteRT's program cache did not shorten later loads yet.
+
 ## Architecture (proposed)
 
 - **A Kotlin app around Utter's Rust core.** The core is shared through JNI: the segmenter,
