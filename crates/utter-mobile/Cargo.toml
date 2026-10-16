@@ -1,0 +1,32 @@
+[package]
+name = "utter-mobile"
+description = "Utter's core on Android: the dictation session behind the app's JNI calls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+# cdylib: libutter_mobile.so, loaded by the Android app; rlib: the replay example and tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+utter-core.workspace = true
+utter-asr.workspace = true
+utter-audio.workspace = true
+utter-llm.workspace = true
+utter-pipeline.workspace = true
+utter-platform.workspace = true
+jni.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+hound.workspace = true
+anyhow.workspace = true
+
+[target.'cfg(target_os = "android")'.dev-dependencies]
+libc = "0.2.190"

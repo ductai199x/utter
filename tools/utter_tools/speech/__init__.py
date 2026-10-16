@@ -3,6 +3,7 @@
 utter-speech export      the checkpoint to the ONNX graphs the Rust core runs
 utter-speech quantize    the encoder's weights in 8 bits, as the app runs it
 utter-speech check       the export against Transformers, token for token
+utter-speech export-litert   the encoder for Android's GPU (LiteRT)
 """
 
 from __future__ import annotations
@@ -39,6 +40,20 @@ def quantize_cmd(
     from utter_tools.speech.export import quantize
 
     quantize(src, dst, bits, block_size)
+
+
+@app.command("export-litert")
+def export_litert_cmd(
+    out: Path = typer.Option(..., help="The .tflite to write (its .json is written beside it)."),
+    frames: str = typer.Option(
+        "500,1000,2000,3000", help="Input lengths in mel frames of 10 ms, one signature each."
+    ),
+    weights: str = typer.Option("moondream/parakeet-ultra", help="ParakeetForTDT checkpoint."),
+) -> None:
+    """Export the encoder to LiteRT for Android's GPU (envs/litert; in WSL on Windows)."""
+    from utter_tools.speech.litert import export_litert
+
+    export_litert(out, frames, weights)
 
 
 @app.command("check")

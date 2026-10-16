@@ -16,12 +16,24 @@ pub mod logs;
 /// Development means a build running from a cargo `target` folder; the Python tools resolve
 /// the development folder too (`tools/utter_tools/config.py`). The two never share state, so a model
 /// or setting under development cannot reach the installed app. `docs/local-setup.md`
-/// describes the layout.
+/// describes the layout. On Android the app gives its own files folder ([`set_data_dir`]).
 pub fn data_dir() -> PathBuf {
+    if let Some(dir) = DATA_DIR.get() {
+        return dir.clone();
+    }
     if let Some(dir) = std::env::var_os("UTTER_DATA_DIR") {
         return PathBuf::from(dir);
     }
     platform_dir().join(folder_name(is_development_build()))
+}
+
+static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Makes `dir` Utter's data folder for this process, as `UTTER_DATA_DIR` does: Android's app
+/// files folder, where the environment cannot be set safely (the JVM's threads read it). Call
+/// it before anything asks for the folder; later calls do nothing.
+pub fn set_data_dir(dir: PathBuf) {
+    let _ = DATA_DIR.set(dir);
 }
 
 /// Whether this program runs from a cargo `target` folder (a development build).

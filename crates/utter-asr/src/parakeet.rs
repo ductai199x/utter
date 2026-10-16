@@ -21,6 +21,7 @@ use ort::value::{Tensor, TensorRef};
 
 use crate::boost::{BoostConfig, PhraseBoost, State};
 use crate::frontend::MelFrontEnd;
+use crate::litert::{Accelerator, LiteRtEncoder};
 use crate::runtime::WEBGPU_EP;
 use crate::{AsrError, ModelConfig, Vocab};
 
@@ -32,6 +33,8 @@ pub enum Device {
     /// llama-server runs on: the Vulkan backend's GPU (crate::runtime).
     WebGpu,
     Cpu,
+    /// LiteRT (crate::litert), for the encoder only: Android's GPU, or its CPU on the emulator.
+    LiteRt(Accelerator),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -117,11 +120,19 @@ pub struct Transcript {
     pub timings: Timings,
 }
 
+/// The encoder with the joint's encoder projection: features in, projected frames out.
+enum Encoder {
+    /// `encoder.onnx`.
+    Onnx(Session),
+    /// `encoder.tflite`, its compiled GPU programs cached in `gpu-cache/` beside it.
+    LiteRt(Box<LiteRtEncoder>),
+}
+
 pub struct ParakeetTdt {
     cfg: ModelConfig,
     frontend: MelFrontEnd,
     vocab: Vocab,
-    encoder: Session,
+    encoder: Encoder,
     decoder: Session,
     joint: Session,
     /// The fused decoder step and joint, used when decoding runs on the GPU.
@@ -149,7 +160,13 @@ impl ParakeetTdt {
                 let joint = session(&dir.join("joint.onnx"), opts.decoder, &opts)?;
                 Ok((decoder, joint, t.elapsed().as_secs_f64() * 1e3))
             });
-            let encoder = session(&dir.join("encoder.onnx"), opts.encoder, &opts);
+            let encoder = match opts.encoder {
+                Device::LiteRt(accelerator) => {
+                    LiteRtEncoder::load(&dir.join("encoder.tflite"), accelerator, Some(&dir.join("gpu-cache")))
+                        .map(|e| Encoder::LiteRt(Box::new(e)))
+                }
+                device => session(&dir.join("encoder.onnx"), device, &opts).map(Encoder::Onnx),
+            };
             (encoder, small.join())
         });
         let encoder = encoder?;
@@ -193,14 +210,26 @@ impl ParakeetTdt {
         t.frontend_s = start.elapsed().as_secs_f64();
 
         let start = Instant::now();
-        let encoded = {
-            let input = TensorRef::from_array_view(([1usize, features.frames, features.mels], &features.data[..]))?;
-            let outputs = self.encoder.run(ort::inputs!["features" => input])?;
-            let (shape, data) = outputs["encoded"].try_extract_tensor::<f32>()?;
-            if shape.len() != 3 || shape[2] as usize != self.hidden {
-                return Err(AsrError::Model(format!("encoder output shape {shape:?}")));
+        let encoded = match &mut self.encoder {
+            Encoder::Onnx(encoder) => {
+                let input = TensorRef::from_array_view(([1usize, features.frames, features.mels], &features.data[..]))?;
+                let outputs = encoder.run(ort::inputs!["features" => input])?;
+                let (shape, data) = outputs["encoded"].try_extract_tensor::<f32>()?;
+                if shape.len() != 3 || shape[2] as usize != self.hidden {
+                    return Err(AsrError::Model(format!("encoder output shape {shape:?}")));
+                }
+                data.to_vec()
             }
-            data.to_vec()
+            Encoder::LiteRt(encoder) => {
+                if encoder.hidden() != self.hidden {
+                    return Err(AsrError::Model(format!(
+                        "encoder frames of {}, decoder of {}",
+                        encoder.hidden(),
+                        self.hidden
+                    )));
+                }
+                encoder.encode(&features.data, features.frames)?
+            }
         };
         t.encoder_s = start.elapsed().as_secs_f64();
         t.encoder_frames = encoded.len() / self.hidden;
@@ -371,6 +400,9 @@ impl ParakeetTdt {
 }
 
 fn session(path: &Path, device: Device, opts: &ParakeetOptions) -> Result<Session, AsrError> {
+    if let Device::LiteRt(_) = device {
+        return Err(AsrError::Runtime(format!("{}: LiteRT runs the encoder only", path.display())));
+    }
     let mut builder = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
         .with_memory_pattern(opts.memory_pattern)?;

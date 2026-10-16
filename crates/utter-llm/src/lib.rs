@@ -84,6 +84,10 @@ pub struct ServerOptions {
     pub start_timeout: Duration,
     /// More arguments, passed through as they are.
     pub extra_args: Vec<String>,
+    /// A llama-server to run instead of the installed component, as it is (no GPU device
+    /// chosen for it): Android's, shipped in the app's native library folder, the only place
+    /// Android runs executables from.
+    pub exe: Option<PathBuf>,
 }
 
 impl ServerOptions {
@@ -95,6 +99,7 @@ impl ServerOptions {
             flash_attention: true,
             start_timeout: Duration::from_secs(180),
             extra_args: Vec::new(),
+            exe: None,
         }
     }
 }
@@ -168,23 +173,25 @@ impl LlamaServer {
         // Development only: a llama-server built elsewhere (the eval on Linux, where Utter has no
         // runtime component yet), with the system's CUDA. The app never sets it.
         let backend = utter_runtime::backend();
-        let (exe, path) = match (std::env::var_os("UTTER_LLAMA_SERVER"), backend) {
-            (Some(exe), _) => (PathBuf::from(exe), None),
-            (None, Backend::Cuda) => {
-                let llama = utter_runtime::component("llama-cpp")?.installed_dir()?;
-                let cuda = utter_runtime::component("cuda-runtime")?.installed_dir()?;
-                // The CUDA runtime comes from Utter's component, for this child only.
-                (llama.join(SERVER_EXE), Some(prepend_path(&[llama, cuda])))
-            }
-            // The Vulkan build needs nothing beside it but the driver's vulkan-1.dll.
-            (None, Backend::Vulkan) => {
-                let llama = utter_runtime::component("llama-cpp-vulkan")?.installed_dir()?;
-                (llama.join(SERVER_EXE), Some(prepend_path(&[llama])))
-            }
-        };
+        let given = opts.exe.is_some();
+        let (exe, path) =
+            match (opts.exe.clone().or_else(|| std::env::var_os("UTTER_LLAMA_SERVER").map(PathBuf::from)), backend) {
+                (Some(exe), _) => (exe, None),
+                (None, Backend::Cuda) => {
+                    let llama = utter_runtime::component("llama-cpp")?.installed_dir()?;
+                    let cuda = utter_runtime::component("cuda-runtime")?.installed_dir()?;
+                    // The CUDA runtime comes from Utter's component, for this child only.
+                    (llama.join(SERVER_EXE), Some(prepend_path(&[llama, cuda])))
+                }
+                // The Vulkan build needs nothing beside it but the driver's vulkan-1.dll.
+                (None, Backend::Vulkan) => {
+                    let llama = utter_runtime::component("llama-cpp-vulkan")?.installed_dir()?;
+                    (llama.join(SERVER_EXE), Some(prepend_path(&[llama])))
+                }
+            };
         let device = match backend {
-            Backend::Vulkan => Some(vulkan_device(&exe)?),
-            Backend::Cuda => None,
+            Backend::Vulkan if !given => Some(vulkan_device(&exe)?),
+            _ => None,
         };
         if !opts.model.is_file() {
             return Err(LlmError::Io {

@@ -198,11 +198,38 @@ backend is Apache-licensed.
 ## Steps
 
 1. Done: measured every runtime on the phone (above).
-2. **Speech in Rust**: an encoder backend in `utter-asr` (onnxruntime on the desktop, LiteRT on
-   Android) and the LiteRT export as a tool; checked against the desktop's transcripts.
-3. **`utter-mobile`**: the dictation session over `utter-asr` and `utter-llm`, fed audio frames,
-   producing events; tested on the emulator from recorded clips (the emulator's microphone and
-   speaker stay off).
+2. Done (2026-10-16): **speech in Rust**. `utter-speech export-litert` (envs/litert, in WSL on
+   Windows) writes one `.tflite` with signatures of 500, 1,000, 2,000 and 3,000 mel frames
+   (5-30 s, the segmenter's longest), each within 7e-5 of Transformers, float16 weights shared:
+   1.33 GB. `utter-asr`'s `litert` module runs it through LiteRT's C API, loaded at run time
+   (`Device::LiteRt`): the clip padded into the shortest signature that holds it, the stage
+   masks built from the lengths in the model's `.json`. On the emulator (x86_64, LiteRT's CPU),
+   12 eval clips of 3.8-23.5 s, every length used: 12 of 12 transcripts identical to the ONNX
+   encoder's. Each signature first unpacked its own float32 weights on the CPU, and four of them
+   took the 8 GB emulator down; XNNPACK's weight cache file (mapped, shared) brought loading
+   from 17.3 s to 3.9 s and the peak to 2.4-4.0 GB. On the GPU the signatures share constants
+   (`enable_constant_tensors_sharing`); the phone's load time and memory with four signatures
+   are measured in step 5.
+3. In progress: **`utter-mobile`**, the dictation session over `utter-asr` and `utter-llm`, fed
+   audio frames, producing events; tested on the emulator from recorded clips (the emulator's
+   microphone and speaker stay off).
+   - The desktop's dictation loop was split: its platform-free half (segments, live words, the
+     gate, cleanup) is now `utter_pipeline::Session` over a `Recognizer`, which the desktop
+     drives from its microphone and hotkey and `utter-mobile` from the app. Desktop end to end
+     (20 clips, Light): 20 of 20 transcripts and final texts identical to before the split.
+   - `utter-mobile`: a worker thread owns the session; the app sends the bubble's touches
+     (through the desktop's `HotkeyMachine`: 150 ms minimum hold, double tap for hands-free,
+     a drag off as Esc), audio, and polls JSON events (`listening`, `words`, `finishing`,
+     `final`, `cancelled`, `error`); JNI in `utter_mobile::jni`. llama-server runs from the
+     app's native library folder (`ServerOptions::exe`), CPU, 4 threads.
+   - On the emulator (`examples/replay.rs`: clips pressed, fed in 30 ms chunks at speaking
+     pace, released): live words, a pause cleaned while speaking, the final text; release to
+     text 1.6-4.2 s on the emulator's CPU for 4.7-23 s clips. It found a bug the desktop's
+     20 ms passes hid: keep-alives queued behind a preview replaced it, so where a pass takes
+     ~300 ms (the emulator's CPU, the phone's GPU) the live words stalled for up to 6 s; a
+     keep-alive now never replaces a preview (`session::newest_job`, tested). Whether the
+     phone needs keep-alives at all (they keep the desktop GPU's clocks up; on a phone they
+     cost battery) is measured in step 5.
 4. **The app**: the Gradle project, the JNI bridge, the accessibility service, the bubble and
    pill, insertion, first run.
 5. **On the phone**: the checks of docs/ux/android.md and DESIGN.md section 12, measured.

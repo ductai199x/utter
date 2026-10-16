@@ -6,6 +6,7 @@
 pub mod boost;
 mod config;
 pub mod frontend;
+pub mod litert;
 pub mod parakeet;
 pub mod runtime;
 pub mod vad;
