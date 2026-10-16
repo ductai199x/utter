@@ -93,7 +93,12 @@ struct Applied {
 
 impl Bar {
     fn new(window: WebviewWindow) -> Self {
+        // A native handle for utter_platform::overlay (Windows: the HWND). Other platforms place
+        // the Bar their own way (docs/plan-cross-platform.md) and have none yet.
+        #[cfg(windows)]
         let hwnd = window.hwnd().ok().map(|h| h.0 as isize);
+        #[cfg(not(windows))]
+        let hwnd: Option<isize> = None;
         if let Some(h) = hwnd {
             overlay::make_overlay(h);
         }
