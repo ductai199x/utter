@@ -174,36 +174,38 @@ backend is Apache-licensed.
   CPU, 960 ms (reported upstream with a one-layer reproducer: google-ai-edge/LiteRT#10934). So
   the app loads the encoder once when its service starts and keeps it resident.
 
-## Architecture (proposed)
+## Architecture (decided by the measurements, 2026-10-16)
 
-- **A Kotlin app around Utter's Rust core.** The core is shared through JNI: the segmenter,
-  the cleanup gate and prompt, the speech decoding loop (utter-asr already runs on `ort`,
-  which supports Android) and History. Kotlin owns the UI, the keyboard or bubble, audio
-  capture (AudioRecord, 16 kHz) and insertion. This keeps one implementation of the logic,
-  as DESIGN.md asks, and amends "Android is separate Kotlin" to "separate Kotlin UI".
-- **Speech:** onnxruntime Android on the CPU with the 8-bit encoder, unless step 1 shows
-  LiteRT on the TPU is much faster.
-- **Cleanup:** the faster of llama.cpp on the CPU (the GGUF as shipped), and LiteRT-LM on the
-  TPU or GPU (a converted .litertlm). Light (E2B) first; Quality only if it meets the budget.
-- **Models** download on first run like the desktop's: pinned and checksummed, with Android
-  entries in components.json.
+- **A Kotlin app (`android/`, its own Gradle build) around Utter's Rust core
+  (`crates/utter-mobile`, a cdylib behind JNI).**
+  - Rust owns everything that decides: the dictation's state and timing, voice detection and
+    the segmenter (`utter-asr::vad`), speech (`utter-asr`), cleanup (`utter-llm`: the prompt,
+    the gate, the retry guard, tidy and strayed), History, and the models (`utter-runtime`,
+    with Android entries in components.json).
+  - Kotlin renders and reaches the system: the accessibility service, the bubble and the pill
+    (docs/ux/android.md), audio capture (AudioRecord, 16 kHz mono, frames handed to Rust),
+    insertion, the first-run screens.
+  - Between them: a few JNI calls (start, push audio, stop, cancel) and one event queue Kotlin
+    polls (state, live words, final text, error), so Rust can be tested without a phone.
+- **Speech: the encoder on the GPU through LiteRT**, called from Rust over LiteRT's C API, as
+  one `.tflite` holding several fixed input lengths as signatures that share their float16
+  weights; the decoder and joint stay on onnxruntime's CPU build, as now. The export is a
+  tool (`utter-speech`), with the float-only rewrite and the LayerNorm scaling above.
+- **Cleanup: llama-server on the CPU**, the GGUF as on the desktop, shipped as a native library
+  of the app (Android runs executables only from the app's native library folder), 4 threads,
+  flash attention off, drafting on; the 1B model (Gemma 3, full fine-tune, two epochs).
 
 ## Steps
 
-1. **Measure on the phone**, no app yet, over adb with binaries pushed to the device:
-   - the speech encoder (8-bit and float16) on the CPU through onnxruntime, then LiteRT if a
-     conversion works: p50/p95 per clip on the bench sets, transcripts against the desktop;
-   - cleanup Light v2: llama.cpp `llama-bench` and real cleanup cases on the CPU (and Vulkan,
-     for completeness); then LiteRT-LM on GPU and TPU, stock Gemma 4 E2B first, then our model
-     converted: prompt and per-token times, outputs against the desktop;
-   - memory, sustained speed over 50 dictations (thermal throttling), and battery per dictation.
-2. **Choose the runtime per stage** from those numbers, and set the Android latency budget
-   (DESIGN.md section 5) from what the phone can do.
-3. **Write docs/ux/android.md** for the bubble: hold-to-talk on
-   the screen, the live text, errors, first run.
-4. **Build:** the Rust core for aarch64-linux-android behind JNI, the Kotlin app, first-run
-   download, dictation, insertion, History; then the latency, eval and UX checks of DESIGN.md
-   section 12, measured on the phone.
+1. Done: measured every runtime on the phone (above).
+2. **Speech in Rust**: an encoder backend in `utter-asr` (onnxruntime on the desktop, LiteRT on
+   Android) and the LiteRT export as a tool; checked against the desktop's transcripts.
+3. **`utter-mobile`**: the dictation session over `utter-asr` and `utter-llm`, fed audio frames,
+   producing events; tested on the emulator from recorded clips (the emulator's microphone and
+   speaker stay off).
+4. **The app**: the Gradle project, the JNI bridge, the accessibility service, the bubble and
+   pill, insertion, first run.
+5. **On the phone**: the checks of docs/ux/android.md and DESIGN.md section 12, measured.
 
 ## Decided (Tai, 2026-10-13)
 
