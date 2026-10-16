@@ -4906,6 +4906,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tracing",
+ "tracing-subscriber",
  "utter-asr",
  "utter-audio",
  "utter-core",

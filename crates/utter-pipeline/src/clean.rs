@@ -62,10 +62,12 @@ pub(crate) enum Health {
 }
 
 pub struct Cleaner {
-    jobs: Sender<Job>,
+    /// None once dropping: the worker sees its job channel close and ends.
+    jobs: Option<Sender<Job>>,
     done: Receiver<Cleaned>,
     health: Receiver<Health>,
     prompt: Prompt,
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Cleaner {
@@ -76,11 +78,11 @@ impl Cleaner {
         let (health_tx, health) = mpsc::channel::<Health>();
         let prompt: Prompt = Arc::new(Mutex::new((dictionary, ctx)));
         let worker = Worker { server, system, prompt: prompt.clone(), done: done_tx, health: health_tx };
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("utter-cleanup".into())
             .spawn(move || worker.run(job_rx))
             .expect("spawn the cleanup worker");
-        Self { jobs, done, health, prompt }
+        Self { jobs: Some(jobs), done, health, prompt, worker: Some(worker) }
     }
 
     /// A change of the server's state since the last call, if any.
@@ -94,7 +96,9 @@ impl Cleaner {
     }
 
     pub(crate) fn request(&self, generation: u64, raw: String) {
-        let _ = self.jobs.send(Job { generation, raw });
+        if let Some(jobs) = &self.jobs {
+            let _ = jobs.send(Job { generation, raw });
+        }
     }
 
     pub(crate) fn try_recv(&self) -> Option<Cleaned> {
@@ -112,6 +116,18 @@ impl Cleaner {
                 Ok(_) => continue,
                 Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => return None,
             }
+        }
+    }
+}
+
+impl Drop for Cleaner {
+    /// Waits for the worker to end, and with it the server it owns: a process that exits right
+    /// after (Android's replay, which leaves without exit hooks) otherwise left llama-server
+    /// running, orphaned. An idle worker ends at once; one mid-request, when the reply is in.
+    fn drop(&mut self) {
+        self.jobs = None;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
     }
 }

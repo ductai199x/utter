@@ -234,7 +234,7 @@ fn alnum_tail(s: &str, n: usize) -> String {
 /// `text` as it goes in after `before` (the characters before the cursor, `None` when the
 /// app does not say): with a space in front when it continues a word or a sentence, the way
 /// one types it (docs/ux/insertion.md, "Spacing").
-fn spaced(before: Option<&str>, text: &str) -> String {
+pub fn spaced(before: Option<&str>, text: &str) -> String {
     if needs_space(before, text) { format!(" {text}") } else { text.to_owned() }
 }
 
