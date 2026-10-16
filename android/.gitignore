@@ -1,0 +1,6 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+# Built by native/build.sh from the Rust core and llama.cpp.
+app/src/main/jniLibs/

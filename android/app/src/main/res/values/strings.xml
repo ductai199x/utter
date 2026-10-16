@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Utter</string>
+    <string name="accessibility_description">Utter shows its bubble next to the text field you are typing in, and types what you dictate into it. It reads only which field has the focus, whether it is a password field, and the text around the cursor when inserting. Nothing leaves the phone.</string>
+</resources>
