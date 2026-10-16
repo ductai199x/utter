@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-audio", "crates/utter-asr", "crates/utter-llm", "crates/utter-pipeline", "crates/utter-cli", "app/src-tauri"]
+members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-audio", "crates/utter-asr", "crates/utter-llm", "crates/utter-pipeline", "crates/utter-mobile", "crates/utter-cli", "app/src-tauri"]
 
 [workspace.package]
 version = "0.1.7"
@@ -25,6 +25,10 @@ clap = { version = "4.6.7", features = ["derive"] }
 globset = "0.4.20"
 hex = "0.4.3"
 hound = "3.5.1"
+# The Android app's calls into utter-mobile.
+jni = "0.22.4"
+# LiteRT, Android's speech encoder runtime, is loaded at run time (utter-asr's litert module).
+libloading = "0.9.0"
 # onnxruntime is loaded at run time (load-dynamic) from the pinned component utter-runtime
 # installs (crates/utter-runtime/components.json).
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "load-dynamic", "cuda", "api-22"] }

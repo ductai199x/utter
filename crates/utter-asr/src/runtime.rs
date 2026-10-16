@@ -32,6 +32,14 @@ const WEBGPU_LIB: &str = "onnxruntime_providers_webgpu.dll";
 pub const WEBGPU_EP: &str = "WebGpuExecutionProvider";
 
 static INIT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+static LIBRARY: OnceLock<PathBuf> = OnceLock::new();
+
+/// Loads onnxruntime from `lib` instead of Utter's components, as `UTTER_ORT_DYLIB` does:
+/// Android's, shipped in the app's native library folder. Call it before anything loads
+/// onnxruntime; later calls do nothing.
+pub fn use_library(lib: PathBuf) {
+    let _ = LIBRARY.set(lib);
+}
 
 /// Loads ONNX Runtime once per process and returns the library's path.
 pub fn init() -> Result<PathBuf, AsrError> {
@@ -40,7 +48,7 @@ pub fn init() -> Result<PathBuf, AsrError> {
 
 fn init_inner() -> Result<PathBuf, AsrError> {
     let backend = utter_runtime::backend();
-    let custom = std::env::var_os("UTTER_ORT_DYLIB").map(PathBuf::from);
+    let custom = LIBRARY.get().cloned().or_else(|| std::env::var_os("UTTER_ORT_DYLIB").map(PathBuf::from));
     let lib = match (&custom, backend) {
         (Some(path), _) => path.clone(),
         (None, Backend::Cuda) => component_dir("onnxruntime-gpu")?.join(ORT_LIB),
