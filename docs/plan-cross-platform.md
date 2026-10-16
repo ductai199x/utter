@@ -99,6 +99,19 @@ macOS has its own unknowns (speech on CoreML vs WebGPU over Metal; the Bar as a 
 NSPanel; which key to hold: Mac keyboards have Right Command and Right Option, and Fn/Globe is
 what Wispr Flow uses), but none can be measured without a Mac (below).
 
+## Spike results (2026-10-16, Ubuntu 24.04, GNOME 46, Wayland, a VMware VM)
+
+1. **Insertion works, with no permission dialog.** The clipboard set by a background process,
+   then a virtual Ctrl+V from a kernel uinput keyboard, put text into a native Wayland editor
+   (GNOME Text Editor), accents and symbols intact, the editor keeping the focus throughout.
+   Both setters worked: an X11 client through XWayland (`xclip`) and a Wayland client
+   (`wl-copy`); Mutter bridges the two clipboards in both directions. Typing through uinput also
+   reaches a Wayland client. So insertion is the Windows recipe (clipboard, Ctrl+V, restore)
+   with a different keyboard: no RemoteDesktop portal needed. It needs `/dev/uinput`, which the
+   same udev `uaccess` rule that grants the hotkey's `/dev/input` grants.
+   Still to check: that `wl-copy` never flashes a focus-taking surface (the XWayland setter is
+   the safe default), the clipboard restore, terminals' Ctrl+Shift+V, Xorg and KDE.
+
 ## The work, in order
 
 **0. Foundations, every OS (testable now):**
