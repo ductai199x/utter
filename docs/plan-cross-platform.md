@@ -135,6 +135,18 @@ the desktop integration (keys, the Bar, insertion, packaging), not for speed. Sp
 where the GPU is: CUDA on Linux (FLAME, or this PC), Metal on a Mac. AMD and Intel on Linux need
 such a machine too.
 
+## Decided (Tai, 2026-10-16)
+
+- **macOS ships through Homebrew, unsigned** (no Apple Developer ID): the core and its UI
+  installed by a formula, macOS's own permission prompts (Microphone, Accessibility, Input
+  Monitoring). The experience must still be intuitive and smooth: the app explains each
+  permission before macOS asks, sees when one is missing (an unsigned build's grants are tied to
+  its ad-hoc signature, which changes at every update) and takes the person straight to the
+  right pane of System Settings; it never fails silently.
+- **No Mac here.** macOS is compile-checked in CI from the start; development and measurement on
+  a rented Apple Silicon Mac (by the hour) when the macOS phase starts; buying one only if that
+  proves too limiting.
+
 ## Decisions for Tai
 
 1. **A Mac to test on.** None here, and VMware on Windows cannot run macOS. Options: buy or
