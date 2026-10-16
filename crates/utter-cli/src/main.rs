@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use utter_asr::boost::BoostConfig;
+use utter_asr::litert::Accelerator;
 use utter_asr::{ConvSearch, Device, ParakeetOptions, ParakeetTdt, Timings};
 
 const WARMUP_CLIPS: usize = 3;
@@ -105,6 +106,10 @@ enum DeviceArg {
     Cuda,
     Webgpu,
     Cpu,
+    /// LiteRT on the GPU, the encoder only (Android; the model folder's encoder.tflite).
+    LitertGpu,
+    /// LiteRT on the CPU, the encoder only (the Android emulator).
+    LitertCpu,
 }
 
 impl From<DeviceArg> for Device {
@@ -117,6 +122,8 @@ impl From<DeviceArg> for Device {
             DeviceArg::Cuda => Device::Cuda,
             DeviceArg::Webgpu => Device::WebGpu,
             DeviceArg::Cpu => Device::Cpu,
+            DeviceArg::LitertGpu => Device::LiteRt(Accelerator::Gpu),
+            DeviceArg::LitertCpu => Device::LiteRt(Accelerator::Cpu),
         }
     }
 }
@@ -313,6 +320,25 @@ struct ResultRow<'a> {
 }
 
 fn main() -> Result<()> {
+    let result = run();
+    // On Android, bionic tears down the onnxruntime library (loaded at run time) before `ort`'s
+    // exit hook releases its environment, which then locks a destroyed mutex and aborts. Leave
+    // without the exit hooks, once the output is out. An app's process is killed, never exits.
+    #[cfg(target_os = "android")]
+    {
+        use std::io::Write;
+        if let Err(e) = &result {
+            eprintln!("Error: {e:?}");
+        }
+        let _ = std::io::stdout().flush();
+        // SAFETY: _exit ends the process at once; nothing runs after it.
+        unsafe { libc::_exit(i32::from(result.is_err())) }
+    }
+    #[cfg(not(target_os = "android"))]
+    result
+}
+
+fn run() -> Result<()> {
     utter_core::init_tracing();
     if let Some(old) = utter_core::move_legacy_data() {
         tracing::info!("moved {} to {}", old.display(), utter_core::data_dir().display());

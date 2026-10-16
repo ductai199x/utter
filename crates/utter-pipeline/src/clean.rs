@@ -61,7 +61,7 @@ pub(crate) enum Health {
     Up,
 }
 
-pub(crate) struct Cleaner {
+pub struct Cleaner {
     jobs: Sender<Job>,
     done: Receiver<Cleaned>,
     health: Receiver<Health>,
@@ -84,26 +84,26 @@ impl Cleaner {
     }
 
     /// A change of the server's state since the last call, if any.
-    pub fn try_health(&self) -> Option<Health> {
+    pub(crate) fn try_health(&self) -> Option<Health> {
         self.health.try_recv().ok()
     }
 
     /// From the next request on, prompts carry this dictionary and context.
-    pub fn configure(&self, dictionary: Vec<String>, ctx: cleanup::Context) {
+    pub(crate) fn configure(&self, dictionary: Vec<String>, ctx: cleanup::Context) {
         *self.prompt.lock().expect("cleanup prompt lock") = (dictionary, ctx);
     }
 
-    pub fn request(&self, generation: u64, raw: String) {
+    pub(crate) fn request(&self, generation: u64, raw: String) {
         let _ = self.jobs.send(Job { generation, raw });
     }
 
-    pub fn try_recv(&self) -> Option<Cleaned> {
+    pub(crate) fn try_recv(&self) -> Option<Cleaned> {
         self.done.try_recv().ok()
     }
 
     /// Waits for the cleanup of exactly `raw` in `generation`, up to `timeout`. Results for
     /// anything else that arrive meanwhile are dropped: at key up, only this one matters.
-    pub fn wait_for(&self, generation: u64, raw: &str, timeout: Duration) -> Option<Cleaned> {
+    pub(crate) fn wait_for(&self, generation: u64, raw: &str, timeout: Duration) -> Option<Cleaned> {
         let deadline = Instant::now() + timeout;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());

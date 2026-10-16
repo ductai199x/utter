@@ -11,6 +11,7 @@ rust-version.workspace = true
 utter-core.workspace = true
 utter-runtime.workspace = true
 utter-platform.workspace = true
+libloading.workspace = true
 ndarray.workspace = true
 ort.workspace = true
 realfft.workspace = true
