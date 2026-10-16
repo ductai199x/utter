@@ -230,8 +230,26 @@ backend is Apache-licensed.
      keep-alive now never replaces a preview (`session::newest_job`, tested). Whether the
      phone needs keep-alives at all (they keep the desktop GPU's clocks up; on a phone they
      cost battery) is measured in step 5.
-4. **The app**: the Gradle project, the JNI bridge, the accessibility service, the bubble and
-   pill, insertion, first run.
+4. In progress: **the app** (`android/`): the Gradle project, the JNI bridge, the accessibility
+   service, the bubble and pill, insertion, first run. `android/native/build.sh` builds the
+   core and llama-server (llama.cpp b11535 from source, checksummed) per ABI; onnxruntime and
+   LiteRT come from Maven. Debug builds take `test-audio.wav` as the microphone
+   (`native/push-models.sh` puts models and clip in).
+   - On the emulator (2026-10-16), in the app: the core loads in the service (llama-server
+     running from the native library folder), the bubble appears beside a focused field with
+     the keyboard up, holding it shows the live words in the pill, release inserts the cleaned
+     text at the cursor through set-text (1.7-2.8 s after release on the emulator's CPU); a
+     second dictation goes in after the first with a space; a stray tap and a drag off cancel,
+     nothing inserted; a double tap listens hands-free (red dot) until a tap, 1.4 s.
+   - Found and fixed: dropping the core only disconnected the cleanup worker, so a process
+     that exits right after left llama-server orphaned (five on the emulator, 630 MB each);
+     dropping it now waits for the server to end.
+   - Not done yet: the model download (the models are not published); the bubble's dragging
+     and per-app position; keeping the bubble off the field's text (it can cover the end of a
+     long field); History on the phone; whether the microphone needs a foreground service
+     when the app is in the background, and whether the clipboard can be restored after a
+     paste (Android limits a background service's clipboard reads), both to check on the
+     phone.
 5. **On the phone**: the checks of docs/ux/android.md and DESIGN.md section 12, measured.
 
 ## Decided (Tai, 2026-10-13)

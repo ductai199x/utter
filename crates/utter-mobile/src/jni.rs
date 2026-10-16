@@ -8,6 +8,7 @@
 //!     @JvmStatic external fun load(configJson: String): Long
 //!     @JvmStatic external fun touch(handle: Long, down: Boolean, timeMs: Int)
 //!     @JvmStatic external fun cancel(handle: Long)
+//!     @JvmStatic external fun beforeCursor(handle: Long, text: String)
 //!     @JvmStatic external fun pushAudio(handle: Long, pcm: ShortArray, length: Int)
 //!     @JvmStatic external fun nextEvent(handle: Long, timeoutMs: Int): String?
 //!     @JvmStatic external fun free(handle: Long)
@@ -50,6 +51,7 @@ pub extern "system" fn Java_dev_utter_app_Native_load<'caller>(
     config: JString<'caller>,
 ) -> jlong {
     env.with_env(|_env: &mut Env| -> Result<jlong, Error> {
+        crate::logcat::init();
         let cfg: Config = serde_json::from_str(&config.to_string())?;
         let mobile = Mobile::load(&cfg)?;
         Ok(Box::into_raw(Box::new(mobile)) as jlong)
@@ -77,6 +79,22 @@ pub extern "system" fn Java_dev_utter_app_Native_cancel<'caller>(
 ) {
     // SAFETY: as for touch.
     unsafe { core(handle) }.cancel();
+}
+
+/// What is before the cursor in the field, read as listening starts.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_utter_app_Native_beforeCursor<'caller>(
+    mut env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    handle: jlong,
+    text: JString<'caller>,
+) {
+    env.with_env(|_env: &mut Env| -> Result<(), Error> {
+        // SAFETY: as for touch.
+        unsafe { core(handle) }.before_cursor(text.to_string());
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 /// The first `length` samples of `pcm`: 16 kHz mono, 16-bit, as AudioRecord reads it.

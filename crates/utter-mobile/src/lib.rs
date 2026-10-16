@@ -9,6 +9,7 @@
 //! (`examples/replay.rs`).
 
 pub mod jni;
+mod logcat;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -84,9 +85,12 @@ pub enum Event {
     },
     /// Speech ended: transcribing the rest and cleaning up.
     Finishing,
-    /// The text to insert, and what was heard; times from the end of speech.
+    /// The text, and what was heard; times from the end of speech. `insert` is the text as it
+    /// goes in after what was before the cursor ([`Mobile::before_cursor`]): with a space in
+    /// front where typing would put one.
     Final {
         text: String,
+        insert: String,
         raw: String,
         asr_ms: f64,
         cleanup_ms: f64,
@@ -120,6 +124,9 @@ enum Input {
     /// A drag off the bubble.
     Cancel,
     Audio(Vec<f32>),
+    BeforeCursor(String),
+    /// The app freed the core: end the worker, and with it the models and llama-server.
+    Stop,
 }
 
 /// The events not yet taken by the app.
@@ -146,6 +153,7 @@ impl Events {
 /// Utter's loaded core: the models, and the worker that runs dictations.
 pub struct Mobile {
     input: Sender<Input>,
+    worker: Option<std::thread::JoinHandle<()>>,
     events: Arc<Events>,
 }
 
@@ -195,11 +203,11 @@ impl Mobile {
             events: events.clone(),
             dictation: None,
         };
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("utter-mobile".into())
             .spawn(move || worker.run(input_rx))
             .map_err(|_| MobileError::Gone)?;
-        Ok(Self { input, events })
+        Ok(Self { input, worker: Some(worker), events })
     }
 
     /// The bubble went down (`down`) or up, at `time_ms` on the app's uptime clock.
@@ -213,6 +221,12 @@ impl Mobile {
     }
 
     /// Microphone audio, 16 kHz mono, as it arrives.
+    /// What is before the cursor in the field being dictated into, read as listening starts
+    /// (as the desktop reads it at key down): the final text is spaced after it.
+    pub fn before_cursor(&self, text: String) {
+        let _ = self.input.send(Input::BeforeCursor(text));
+    }
+
     pub fn push_audio(&self, samples: Vec<f32>) {
         let _ = self.input.send(Input::Audio(samples));
     }
@@ -220,6 +234,16 @@ impl Mobile {
     /// The next event, waiting up to `timeout` for one.
     pub fn next_event(&self, timeout: Duration) -> Option<Event> {
         self.events.pop(timeout)
+    }
+}
+
+impl Drop for Mobile {
+    /// Returns once the worker, the models and llama-server are gone, not some time later.
+    fn drop(&mut self) {
+        let _ = self.input.send(Input::Stop);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -239,6 +263,8 @@ fn server_options(model: PathBuf, cfg: &Config) -> ServerOptions {
 struct Dictation {
     session: Session,
     log: DictationLog,
+    /// What is before the cursor (None: the app has not said).
+    before: Option<String>,
 }
 
 struct Worker {
@@ -274,8 +300,13 @@ impl Worker {
                         self.events.push(Event::Error { message: e.to_string() });
                     }
                 }
+                Ok(Input::BeforeCursor(text)) => {
+                    if let Some(d) = &mut self.dictation {
+                        d.before = Some(text);
+                    }
+                }
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return,
+                Ok(Input::Stop) | Err(RecvTimeoutError::Disconnected) => return,
             }
             if let Some(d) = &mut self.dictation
                 && let Some((committed, preview)) = d.session.poll(&self.rec, &mut d.log)
@@ -292,11 +323,11 @@ impl Worker {
                 let mut log = DictationLog::start(self.logs);
                 log.push(Entry::Listening { hands_free });
                 let session = Session::start(&mut self.rec, self.rule.clone());
-                self.dictation = Some(Dictation { session, log });
+                self.dictation = Some(Dictation { session, log, before: None });
                 self.events.push(Event::Listening { hands_free });
             }
             Some(Action::Finish) => {
-                let Some(Dictation { session, mut log }) = self.dictation.take() else { return };
+                let Some(Dictation { session, mut log, before }) = self.dictation.take() else { return };
                 let ended = Instant::now();
                 log.push(Entry::KeyUp);
                 self.events.push(Event::Finishing);
@@ -305,6 +336,7 @@ impl Worker {
                         let total_ms = ended.elapsed().as_secs_f64() * 1e3;
                         self.events.push(Event::Final {
                             audio_s: heard.audio.len() as f64 / utter_audio::SAMPLE_RATE as f64,
+                            insert: utter_pipeline::spaced(before.as_deref(), &heard.text),
                             text: heard.text.clone(),
                             raw: heard.raw.clone(),
                             asr_ms: heard.asr_ms,
@@ -329,7 +361,7 @@ impl Worker {
                 }
             }
             Some(Action::Cancel) => {
-                let Some(Dictation { session, mut log }) = self.dictation.take() else { return };
+                let Some(Dictation { session, mut log, .. }) = self.dictation.take() else { return };
                 log.push(Entry::Cancelled);
                 let audio = session.audio().to_vec();
                 let config = self.log_config.clone();
