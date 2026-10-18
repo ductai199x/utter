@@ -139,6 +139,16 @@ programs named by their desktop entries; Linux library errors told apart (the dr
 `libcuda.so` from Utter's own); the .deb (the udev rule, applied at install) and the AppImage
 (static runtime, the system's libwayland and libdrm), built by `packaging/linux/build.sh`.
 
+**Checked in the VM** (Ubuntu 24.04, GNOME 46, Wayland, the .deb, the CPU backend, the test
+user out of the `input` group): keyboard access from the udev rule alone; first run through
+check, model, microphone (a PipeWire virtual source fed an eval clip), download and Try it;
+the Bar bottom centre with live words; the dictation pasted into the setup window and into
+GNOME Terminal (Ctrl+Shift+V), 1.9-2.4 s from key up on the VM's CPU; with the rule removed,
+the problem screen, Allow, the desktop's dialog naming `utter-keyboard-access`, Cancel quiet,
+and after authorizing, dictation working without a logout. Found and fixed there: the app
+aborted at start (click-through set on a never-shown window), and the dialog showed the raw
+shell commands. Not yet: Xorg, KDE, Fedora, the AppImage on a stock system, a real GPU.
+
 **macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
 listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
 pasteboard saved whole and restored, Cmd+V and typing as CoreGraphics key events, the
