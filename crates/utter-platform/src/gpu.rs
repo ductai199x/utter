@@ -22,6 +22,7 @@ pub struct Adapter {
 /// The PCI vendors of virtual machines' display adapters (VMware, Microsoft's Hyper-V, VirtualBox,
 /// virtio, QEMU), which cannot run the models: a VM's VMware SVGA 3D was taken for a graphics
 /// card, and first run asked for one "with 6 GB of memory" instead of saying there is none.
+#[cfg(not(target_os = "macos"))]
 const VIRTUAL_DISPLAY: [u32; 5] = [0x15AD, 0x1414, 0x80EE, 0x1AF4, 0x1234];
 
 /// The card to run on: the first in the OS's high-performance order (a discrete card before an
