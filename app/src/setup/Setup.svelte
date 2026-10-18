@@ -85,6 +85,23 @@
   }
   const next = () => go(step + 1);
 
+  // Allow on the keyboard check (Linux): the desktop's password dialog, then the checks again.
+  let allowing = $state(false);
+  let allowError = $state('');
+  async function allowInput() {
+    allowing = true;
+    allowError = '';
+    try {
+      await core.allowInput();
+      await runChecks();
+    } catch (e) {
+      // Dismissing the password dialog is an answer, not an error.
+      if (e !== 'cancelled') allowError = `It did not work: ${String(e)}`;
+    } finally {
+      allowing = false;
+    }
+  }
+
   async function runChecks() {
     checks = null;
     checks = await core.check(mode === 'first');
@@ -233,6 +250,20 @@
     void core.retry();
   }
 
+  /** Allow on the keyboard problem: the password dialog, then dictation starts again. */
+  async function allowThenRetry() {
+    allowing = true;
+    allowError = '';
+    try {
+      await core.allowInput();
+      retry();
+    } catch (e) {
+      if (e !== 'cancelled') allowError = `It did not work: ${String(e)}`;
+    } finally {
+      allowing = false;
+    }
+  }
+
   function repair() {
     repairing = true;
     special = null;
@@ -277,6 +308,7 @@
     gpu: 'Graphics card',
     memory: 'GPU memory',
     driver: 'Graphics driver',
+    keyboard: 'Keyboard access',
     disk: 'Disk space',
   };
 
@@ -350,6 +382,14 @@
                 <span class="name">{CHECK_LABELS[c.id]}</span>
                 <span class="value">{r?.value ?? ''}</span>
                 {#if r?.fix}<span class="fix">{r.fix}</span>{/if}
+                {#if r && !r.ok && r.id === 'keyboard'}
+                  <span class="fix-action">
+                    <button onclick={allowInput} disabled={allowing}>
+                      {allowing ? 'Waiting for your password...' : 'Allow'}
+                    </button>
+                    {#if allowError}<span class="fix">{allowError}</span>{/if}
+                  </span>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -456,6 +496,7 @@
           </div>
           <h1>{problem?.title ?? 'Utter could not start'}</h1>
           <p class="lede">{problem?.message ?? ''}</p>
+          {#if allowError}<p class="panel" role="alert">{allowError}</p>{/if}
           {#if problem?.detail}
             <button class="disclosure" aria-expanded={details} onclick={() => (details = !details)}>
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
@@ -520,6 +561,11 @@
       {/if}
       {#if problem?.actions.includes('repair')}
         <button class="primary" bind:this={primary} onclick={repair}>Repair</button>
+      {:else if problem?.actions.includes('allow')}
+        <button class="primary" bind:this={primary} disabled={allowing || starting} onclick={allowThenRetry}>
+          {#if allowing}Waiting for your password...{:else if starting}<span class="spinner on-accent" aria-hidden="true"
+            ></span>Starting...{:else}Allow{/if}
+        </button>
       {:else}
         <button class="primary" bind:this={primary} disabled={starting} onclick={retry}>
           {#if starting}<span class="spinner on-accent" aria-hidden="true"></span>Starting...{:else}Retry{/if}
@@ -645,6 +691,16 @@
     font-size: 13px;
     line-height: 18px;
     margin-top: 4px;
+  }
+  .fix-action {
+    grid-column: 2 / 4;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .fix-action .fix {
+    margin-top: 0;
   }
   .panel {
     margin: 20px 0 0;

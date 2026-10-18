@@ -126,6 +126,30 @@ VM: the hold-to-talk key (Right Ctrl held starts and finishes, tapped cancels) r
 under Wayland, the paste through Utter's own uinput keyboard into the focused editor, the
 clipboard restored after it.
 
+## Progress (2026-10-18)
+
+**Linux, done:** the platform layer (above); the Bar placed by Tauri under XWayland (the app
+sets `GDK_BACKEND=x11,wayland` and turns WebKit's DMA-BUF renderer off unless the person set
+them); the paste keys made ready at start (`insert::warm`); first run's "Keyboard access" check
+with Allow, which installs the udev rule through pkexec and works without logging out (a
+refused permission is no longer cached for the session); the same as a problem screen when
+dictation cannot start; "Start at login" (the AppImage's own path, not its mount); Quit in
+Settings where the desktop shows no tray icons (GNOME without an AppIndicator extension);
+programs named by their desktop entries; Linux library errors told apart (the driver's
+`libcuda.so` from Utter's own); the .deb (the udev rule, applied at install) and the AppImage
+(static runtime, the system's libwayland and libdrm), built by `packaging/linux/build.sh`.
+
+**macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
+listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
+pasteboard saved whole and restored, Cmd+V and typing as CoreGraphics key events, the
+frontmost app, the caret through Accessibility, Metal's device; first run's check asks for
+Input Monitoring and Accessibility and opens the right pane of System Settings; Right Option
+is the default key (most Mac keyboards have no Right Control). Still to do on a Mac: run it,
+the Bar as a non-activating panel, the Homebrew formula, speech on CoreML vs WebGPU.
+
+**CI:** `.github/workflows/ci.yml`, Windows, Ubuntu 24.04 and macOS: the pages, format, clippy
+with warnings as errors, the tests.
+
 ## The work, in order
 
 **0. Foundations, every OS (testable now):**

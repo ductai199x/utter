@@ -13,6 +13,7 @@
     openPasteRules,
     openPath,
     pasteRules,
+    quit,
     ruleSource,
     withRule,
     withoutRule,
@@ -79,6 +80,11 @@
   const groups = $derived(groupRules(rules?.rules ?? []));
   const mine = $derived(groups.filter((g) => ruleSource(g) !== 'default'));
   const defaults = $derived(groups.length - mine.length);
+  const loginLabel = $derived(home?.os === 'windows' ? 'Start with Windows' : 'Start at login');
+  // GNOME shows no tray icons without an extension, so elsewhere it is "in the background".
+  const loginDesc = $derived(
+    home?.os === 'windows' ? 'Utter starts in the tray when you sign in.' : 'Utter starts in the background when you sign in.',
+  );
 
   // History ------------------------------------------------------------------------------
 
@@ -172,19 +178,28 @@
       <h2>General</h2>
       <div class="row">
         <div class="label">
-          <label for="login">Start with Windows</label>
-          <span class="desc">Utter starts in the tray when you sign in.</span>
+          <label for="login">{loginLabel}</label>
+          <span class="desc">{loginDesc}</span>
         </div>
         <button
           id="login"
           class="switch"
           role="switch"
           aria-checked={settings.start_at_login}
-          aria-label="Start with Windows"
+          aria-label={loginLabel}
           onclick={() => settings && save({ ...settings, start_at_login: !settings.start_at_login })}
           ><span></span></button
         >
       </div>
+      {#if !home.tray}
+        <div class="row">
+          <div class="label">
+            <span class="label-text">Quit Utter</span>
+            <span class="desc">This desktop shows no tray icons. Opening Utter again brings back this window.</span>
+          </div>
+          <button onclick={() => void quit()}>Quit</button>
+        </div>
+      {/if}
 
       <h2>Dictation</h2>
       <div class="row">

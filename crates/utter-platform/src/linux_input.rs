@@ -92,8 +92,15 @@ fn hub() -> &'static Mutex<Hub> {
 /// Key events from every keyboard, from now on. Fails, saying why, when no keyboard can be
 /// read (the udev rule is missing, or the person is not at the seat).
 pub fn subscribe() -> Result<Receiver<KeyEvent>, String> {
-    static READER: OnceLock<Result<(), String>> = OnceLock::new();
-    READER.get_or_init(start_reader).clone()?;
+    // Started once, by the first call that finds a keyboard: a failed start is tried again.
+    static READER: Mutex<bool> = Mutex::new(false);
+    {
+        let mut started = READER.lock().unwrap_or_else(|e| e.into_inner());
+        if !*started {
+            start_reader()?;
+            *started = true;
+        }
+    }
     let (tx, rx) = mpsc::channel();
     hub().lock().expect("input hub").subscribers.push(tx);
     Ok(rx)
@@ -126,14 +133,13 @@ fn keyboards(known: &HashMap<PathBuf, Device>) -> (Vec<(PathBuf, Device)>, usize
     (found, denied)
 }
 
+const NO_ACCESS: &str =
+    "the keyboard devices are not open to this user (Utter's udev rule, packaging/linux/70-utter.rules)";
+
 fn start_reader() -> Result<(), String> {
     let (first, denied) = keyboards(&HashMap::new());
     if first.is_empty() {
-        return Err(if denied > 0 {
-            "Utter cannot read the keyboard: the input devices are not open to this user (install Utter's udev rule, packaging/linux/70-utter.rules)".into()
-        } else {
-            "no keyboard found".into()
-        });
+        return Err(if denied > 0 { NO_ACCESS.into() } else { "no keyboard found".into() });
     }
     std::thread::Builder::new()
         .name("utter-keyboards".into())
@@ -230,13 +236,23 @@ fn read_loop(first: Vec<(PathBuf, Device)>) {
     }
 }
 
-/// Utter's virtual keyboard, made once and kept: the compositor takes about a second to start
-/// listening to a new device, and devices made and dropped per keystroke crashed GNOME Shell on
-/// Xorg (ydotool, 2026-10-13).
-pub fn virtual_keyboard() -> Result<&'static Mutex<evdev::uinput::VirtualDevice>, String> {
-    static KEYBOARD: OnceLock<Result<Mutex<evdev::uinput::VirtualDevice>, String>> = OnceLock::new();
-    KEYBOARD
-        .get_or_init(|| {
+/// Utter's virtual keyboard and when the compositor will have taken it up (about a second
+/// after it is made).
+struct Virtual {
+    dev: evdev::uinput::VirtualDevice,
+    ready: Instant,
+}
+
+/// The virtual keyboard, made once and kept: devices made and dropped per keystroke crashed
+/// GNOME Shell on Xorg (ydotool, 2026-10-13). Not made yet while /dev/uinput is closed to this
+/// user: the next use tries again, so allowing it (allow_input) works without a restart.
+static KEYBOARD: Mutex<Option<Virtual>> = Mutex::new(None);
+
+fn with_keyboard<T>(f: impl FnOnce(&mut Virtual) -> Result<T, String>) -> Result<T, String> {
+    let mut slot = KEYBOARD.lock().unwrap_or_else(|e| e.into_inner());
+    let kb = match slot.as_mut() {
+        Some(kb) => kb,
+        None => {
             // Every key: a device with fewer is not taken for a keyboard by udev and libinput.
             let mut keys = evdev::AttributeSet::<KeyCode>::new();
             for code in 1..249u16 {
@@ -249,44 +265,79 @@ pub fn virtual_keyboard() -> Result<&'static Mutex<evdev::uinput::VirtualDevice>
                 .map_err(|e| e.to_string())?
                 .build()
                 .map_err(|e| format!("/dev/uinput: {e}"))?;
-            Ok(Mutex::new(dev))
-        })
-        .as_ref()
-        .map_err(Clone::clone)
+            slot.insert(Virtual { dev, ready: Instant::now() + Duration::from_millis(1200) })
+        }
+    };
+    f(kb)
 }
 
 /// Makes the virtual keyboard now, so the first paste does not wait for the compositor to take
 /// it up.
 pub fn warm() {
     std::thread::spawn(|| {
-        let made = Instant::now();
-        if let Err(e) = virtual_keyboard() {
+        if let Err(e) = with_keyboard(|_| Ok(())) {
             tracing::warn!("virtual keyboard: {e}");
         }
-        READY_AT.get_or_init(|| made + Duration::from_millis(1200));
     });
 }
 
-/// When the compositor has had time to take the virtual keyboard up.
-static READY_AT: OnceLock<Instant> = OnceLock::new();
-
 /// Presses `combo` (modifiers first, released in reverse) on the virtual keyboard.
 pub fn press(combo: &[KeyCode]) -> Result<(), String> {
-    let kb = virtual_keyboard()?;
-    let ready = *READY_AT.get_or_init(|| Instant::now() + Duration::from_millis(1200));
-    if let Some(wait) = ready.checked_duration_since(Instant::now()) {
-        std::thread::sleep(wait);
+    with_keyboard(|kb| {
+        if let Some(wait) = kb.ready.checked_duration_since(Instant::now()) {
+            std::thread::sleep(wait);
+        }
+        let key = |code: KeyCode, value: i32| evdev::InputEvent::new(evdev::EventType::KEY.0, code.code(), value);
+        for &c in combo {
+            kb.dev.emit(&[key(c, 1)]).map_err(|e| e.to_string())?;
+        }
+        std::thread::sleep(Duration::from_millis(8));
+        for &c in combo.iter().rev() {
+            kb.dev.emit(&[key(c, 0)]).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+}
+
+/// Whether this user may read the keyboards and make the virtual one, and if not, why.
+pub fn access() -> Result<(), String> {
+    let (found, denied) = keyboards(&HashMap::new());
+    if found.is_empty() {
+        return Err(if denied > 0 { NO_ACCESS.into() } else { "no keyboard found".into() });
     }
-    let mut kb = kb.lock().map_err(|_| "virtual keyboard lock".to_string())?;
-    let key = |code: KeyCode, value: i32| evdev::InputEvent::new(evdev::EventType::KEY.0, code.code(), value);
-    for &c in combo {
-        kb.emit(&[key(c, 1)]).map_err(|e| e.to_string())?;
-    }
-    std::thread::sleep(Duration::from_millis(8));
-    for &c in combo.iter().rev() {
-        kb.emit(&[key(c, 0)]).map_err(|e| e.to_string())?;
-    }
+    std::fs::OpenOptions::new().write(true).open("/dev/uinput").map_err(|e| format!("/dev/uinput: {e}"))?;
     Ok(())
+}
+
+/// The udev rule that gives the person at the seat the keyboards and /dev/uinput.
+pub const UDEV_RULE: &str = include_str!("../../../packaging/linux/70-utter.rules");
+
+/// Installs the udev rule (packaging/linux), through pkexec: the desktop asks for the person's
+/// password in its own dialog. The package managers' installs do this themselves; this is for
+/// the AppImage, and for a rule since removed.
+pub fn allow_input() -> Result<(), String> {
+    use std::io::Write;
+    // Loads uinput (a static node otherwise, made accessible at boot), puts the rule in place
+    // and applies it to the devices there now, so it works without logging out.
+    const SCRIPT: &str = "modprobe uinput 2>/dev/null; \
+        cat > /etc/udev/rules.d/70-utter.rules && \
+        udevadm control --reload-rules && \
+        udevadm trigger --action=change --subsystem-match=input --subsystem-match=misc && \
+        udevadm settle --timeout=5";
+    let mut child = std::process::Command::new("pkexec")
+        .args(["/bin/sh", "-c", SCRIPT])
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("pkexec: {e}"))?;
+    child.stdin.take().expect("piped stdin").write_all(UDEV_RULE.as_bytes()).map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    match out.status.code() {
+        Some(0) => access(),
+        // pkexec: the dialog was dismissed (126) or no agent could ask (127).
+        Some(126) => Err("cancelled".into()),
+        _ => Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()),
+    }
 }
 
 /// The US-layout keys that type `ch`, if it is plain ASCII.

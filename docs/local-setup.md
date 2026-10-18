@@ -93,6 +93,22 @@ npx tauri build --no-bundle                    # target/release/utter.exe
 npm run check                                  # svelte-check
 ```
 
+**Linux** (Ubuntu 24.04, the build machine of the packages: their glibc is 2.39, so they run
+on Ubuntu 24.04+, Fedora 40+ and Debian 13): the system libraries first, then the .deb and the
+AppImage into `target/release/bundle`:
+
+```
+sudo apt install build-essential curl libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+sh packaging/linux/build.sh
+```
+
+The hotkey and the paste keys need `packaging/linux/70-utter.rules` (the .deb installs it; the
+app's first run offers to, through the desktop's password dialog). A machine without a usable
+GPU (a VM) runs everything on the CPU with `UTTER_GPU_BACKEND=cpu`: slow, right for the desktop
+side only.
+
+**macOS** is checked by CI (`.github/workflows/ci.yml`) and not yet run: no Mac here.
+
 It loads the same components as `utter-cli dictate`; run `setup` first. Logs go to the
 console in a debug build (`RUST_LOG=debug` for more). Development builds are optimized
 (`[profile.dev]` in Cargo.toml), so timings in `tauri dev` are the product's; a full rebuild

@@ -49,3 +49,8 @@ arboard = { version = "3.7.0", default-features = false, features = ["image-data
 ash = { version = "0.38.0", default-features = false, features = ["loaded", "std"] }
 evdev = "0.13.2"
 zbus = { version = "5.19", default-features = false, features = ["blocking-api", "async-io"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSData", "NSArray", "NSEnumerator", "NSURL"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "libc", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication", "NSWorkspace"] }

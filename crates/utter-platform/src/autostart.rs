@@ -1,4 +1,5 @@
-//! Starting Utter when the user signs in (the Settings switch "Start with Windows").
+//! Starting Utter when the user signs in (the Settings switch "Start with Windows", "Start at
+//! login" elsewhere).
 
 use std::path::Path;
 
@@ -75,6 +76,9 @@ mod imp {
         }
         let dir = path.parent().ok_or("autostart folder")?;
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        // From an AppImage the program runs from a mount made anew at every start: the image
+        // itself is what starts it ($APPIMAGE, set by its runtime).
+        let exe = std::env::var_os("APPIMAGE").map(PathBuf::from).unwrap_or_else(|| exe.to_path_buf());
         // Exec quoting (Desktop Entry spec): the path in double quotes, \ " ` $ escaped.
         let quoted = exe
             .display()

@@ -157,6 +157,28 @@ impl Drop for Listener {
     }
 }
 
+/// Whether Utter may read the keyboard and press the paste keys, and if not, why. Linux asks for
+/// a udev rule (packaging/linux); Windows asks for nothing.
+pub fn input_access() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    return crate::linux_input::access();
+    #[cfg(target_os = "macos")]
+    return crate::macos::input_access();
+    #[cfg(windows)]
+    Ok(())
+}
+
+/// Grants what input_access found missing, asking the person through the desktop's own
+/// password dialog (Linux: installs the udev rule through pkexec). Blocks until they answer.
+pub fn allow_input() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    return crate::linux_input::allow_input();
+    #[cfg(target_os = "macos")]
+    return crate::macos::allow_input();
+    #[cfg(windows)]
+    Ok(())
+}
+
 /// Starts listening for the hotkey system-wide.
 pub fn listen(cfg: HotkeyConfig) -> Result<Listener, HotkeyError> {
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<KeyEvent>();
