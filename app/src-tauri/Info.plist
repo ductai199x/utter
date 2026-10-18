@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into Utter's macOS app bundle by Tauri. -->
+<plist version="1.0">
+<dict>
+  <!-- macOS asks for the microphone with this sentence; without it, it refuses outright. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Utter turns what you dictate into text. Nothing it hears leaves this Mac.</string>
+  <!-- A menu bar app, as Utter is a tray app on Windows: no Dock icon. -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
