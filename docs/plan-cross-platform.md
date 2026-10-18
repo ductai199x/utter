@@ -217,8 +217,8 @@ most of every dictation, for three reasons, each measured away:
 - llama.cpp already uses everything this CPU has (AVX-512, VNNI, BF16, weights repacked to
   q4_0_8x8 at load, one thread per physical core).
 - Light with all of it: 0.50 s / 1.15 s at 7.2% final-text WER (Extra light 9.1%).
-The int8 speech model reaches the app once published (`parakeet-ultra-onnx-i8`); until then the
-processor runs the 8-bit one.
+The int8 speech model is published (ductai199x/utter-parakeet-ultra-onnx, `i8/`, revision
+d1b9425d) as the `parakeet-ultra-onnx-i8` component: installed from there, 0.39 s / 0.81 s.
 
 **macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
 listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
