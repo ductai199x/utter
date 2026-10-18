@@ -181,8 +181,17 @@ crate releasing its environment after onnxruntime's own teardown (`skip_teardown
 with Light or **Extra light**, the phone's Gemma 3 1B (`utter-mini-v1-q4_0.gguf`, published in
 ductai199x/utter under the Gemma terms), recommended there; Quality is grayed. Settings'
 "Runs on" lists CUDA, Vulkan and the processor as the computer has them. Measured on this PC's
-processor (`utter-cli e2e-bench`, 40 clips): Extra light p50 1.85 s / p95 2.67 s, Light
-2.38 / 3.71 s; speech recognition is most of it (1.55-1.64 s). In an Ubuntu VM: first run with
+processor (`utter-cli e2e-bench`, Quality's 40 clips, UTTER_GPU_BACKEND=cpu, 24 threads):
+
+| | cleanup p50 | cleanup p95 | key up -> text p50 | p95 | final-text WER |
+|---|---|---|---|---|---|
+| Extra light | 308 ms | 786 ms | 2.38 s | 4.02 s | 9.4% |
+| Light | 391 ms | 1,057 ms | 2.05 s | 4.07 s | 7.0% |
+
+Speech recognition on the processor is most of the time (1.6-2.0 s p50) and moved by 0.4 s
+between the two runs with the same model, so the totals do not rank the cleanup models; the
+cleanup column does: Extra light 21% faster at p50, 26% at p95, on a fast desktop processor
+(a laptop's, and the phone's, widen the gap: 1.5 s against 2.7 s there). In an Ubuntu VM: first run with
 Extra light recommended, dictations at 2.0-2.1 s (cleanup 224-526 ms), Quit, relaunch ready in
 6.6 s, nothing left running.
 
