@@ -161,7 +161,21 @@ KWin made the Bar the active window (GTK 3 offers WM_TAKE_FOCUS whatever the win
 setting), so the paste keys went to the Bar (the Bar is now a notification-type window, which
 KWin never activates, and unfocusable in its config). Once, before those fixes, Utter exited
 silently mid-dictation on Plasma; not seen again in four fresh starts after them.
-Not yet: Fedora, AMD or Intel graphics (Vulkan) on Linux.
+Fedora 44 Workstation (GNOME 50, Wayland, btrfs, no FUSE 2, no tray; 6 cores, no
+graphics card), the AppImage built on Ubuntu 24.04, 2026-10-18: first run (keyboard
+access through pkexec, the processor picked, Quality grayed and Extra light recommended, the
+microphone check, 1.5 GB downloaded), dictations into Try it, Text Editor and Ptyxis at 150-191
+ms key up to text, Quit from Settings leaving no process; started again from a desktop entry in
+Activities (as Gear Lever makes one; GNOME Files does not run executables), ready in 4.17 s
+(4.13 s with the page cache dropped), two more dictations at 151 and 158 ms, Quit leaving no
+process. The first load after the download took 8.1 s (the speech sessions 7.8 s, against
+2.1-2.8 s later), once, while btrfs was still compressing the new files (compress=zstd:1). Found
+there: starting Utter again while it ran opened Home *behind* the focused window, with GNOME's
+"Utter is ready" notice, since the running Utter showed it without the new launch's startup
+token; on a desktop with no tray that is the only way back to Home. The second start now leaves
+its token (DESKTOP_STARTUP_ID or XDG_ACTIVATION_TOKEN) for the running one, which gives it to the
+window before showing it: Home comes to the front.
+Not yet: AMD or Intel graphics (Vulkan) on Linux.
 
 **Linux on a real GPU** (WSL 2, Ubuntu 24.04, this PC's RTX 3090 Ti, `utter-cli e2e-bench`,
 Quality, 20 clips each of en-ami and en-voxpopuli, the same command on Windows):
