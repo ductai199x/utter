@@ -508,7 +508,10 @@ fn linux_display_defaults() {
 
 fn main() {
     #[cfg(target_os = "linux")]
-    linux_display_defaults();
+    {
+        linux_display_defaults();
+        home::keep_launch_token();
+    }
     if !args::handle() {
         return;
     }
@@ -522,7 +525,7 @@ fn main() {
     }
     tauri::Builder::default()
         // Launching Utter again while it runs opens the Home window.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| home::show(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| home::show_launched(app)))
         .manage(setup::MicCheck::default())
         .manage(setup::Downloading::default())
         .manage(setup::LastProblem::default())

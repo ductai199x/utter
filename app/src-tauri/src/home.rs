@@ -295,6 +295,61 @@ pub fn show(app: &AppHandle) {
     }
 }
 
+/// Opens the Home window for a second start of Utter. On Linux the window manager raises a
+/// window only for the launch that asked (its startup token); without it GNOME leaves Home
+/// behind the focused window and shows "Utter is ready" instead. The second start's token
+/// reaches here through a file (keep_launch_token): the single-instance plugin passes only
+/// arguments, and GTK takes the variable out of the environment as it starts.
+pub fn show_launched(app: &AppHandle) {
+    #[cfg(target_os = "linux")]
+    if let (Some(token), Some(w)) = (take_launch_token(), app.get_webview_window("home")) {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Ok(gtk_window) = w.gtk_window() {
+                use gtk::prelude::GtkWindowExt;
+                gtk_window.set_startup_id(&token);
+            }
+            show(&handle);
+        });
+        return;
+    }
+    show(app);
+}
+
+/// Where a start of Utter leaves its launch token for the running one.
+#[cfg(target_os = "linux")]
+fn launch_token_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("utter-launch-token"))
+}
+
+/// At the top of main, before GTK reads it: this start's launch token, for the running Utter
+/// should this start find one (show_launched), else none, so a stale token is never used.
+/// The windows are X11 ones (GDK_BACKEND), whose token is DESKTOP_STARTUP_ID; launchers set it
+/// and XDG_ACTIVATION_TOKEN to the same value.
+#[cfg(target_os = "linux")]
+pub fn keep_launch_token() {
+    let Some(path) = launch_token_path() else { return };
+    let token = ["DESKTOP_STARTUP_ID", "XDG_ACTIVATION_TOKEN"]
+        .iter()
+        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()));
+    match token {
+        Some(token) => {
+            let _ = std::fs::write(&path, token);
+        }
+        None => {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn take_launch_token() -> Option<String> {
+    let path = launch_token_path()?;
+    let token = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    Some(token.trim().to_owned()).filter(|t| !t.is_empty())
+}
+
 /// Applies `settings.toml` on every change: to the pipeline, and to the page.
 pub fn watch(app: AppHandle, link: PipelineLink) {
     std::thread::Builder::new()
