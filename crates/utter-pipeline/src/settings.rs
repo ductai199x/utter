@@ -39,6 +39,12 @@ microphone = \"\"
 # 6 GB or more) or \"light\" (the smaller one, about 3.3 GB, for graphics cards with 4 GB).
 model = \"quality\"
 
+# What runs Utter: \"auto\" (the best this computer has: an NVIDIA card through CUDA, another
+# graphics card through Vulkan, an Apple GPU through Metal, else the processor), \"cuda\",
+# \"vulkan\", \"metal\" or \"cpu\". The processor is slower and runs the Light model only.
+# Utter restarts to switch.
+runtime = \"auto\"
+
 # How long History keeps your dictations, on this computer only: \"forever\", \"30-days\",
 # \"24-hours\" or \"off\".
 keep_history = \"forever\"
@@ -74,6 +80,8 @@ pub struct Settings {
     /// Part of the input device's name; empty for the system default.
     pub microphone: String,
     pub model: Model,
+    /// What runs the models (crate::runtime_choice).
+    pub runtime: Runtime,
     pub keep_history: KeepHistory,
     /// Keep the detailed dictation log with audio (development builds always do).
     pub debug_log: bool,
@@ -283,6 +291,18 @@ pub fn paste_rule(overrides: &[PasteOverride], exe: &str) -> PasteRule {
         .unwrap_or_default()
 }
 
+/// What runs the models: Utter's pick, or one the person chose in Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Runtime {
+    #[default]
+    Auto,
+    Cuda,
+    Vulkan,
+    Metal,
+    Cpu,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Model {
@@ -313,6 +333,7 @@ impl Default for Settings {
             dictation_key: DictationKey::default(),
             microphone: String::new(),
             model: Model::Quality,
+            runtime: Runtime::Auto,
             keep_history: KeepHistory::Forever,
             debug_log: false,
             keep_logs: true,
@@ -381,6 +402,7 @@ impl Settings {
             Model::Light => "light",
         };
         set(&mut doc, "model", model.into());
+        set(&mut doc, "runtime", word(&self.runtime).into());
         set(&mut doc, "keep_history", word(&self.keep_history).into());
         set(&mut doc, "debug_log", self.debug_log.into());
         set(&mut doc, "keep_logs", self.keep_logs.into());
@@ -410,7 +432,8 @@ impl Settings {
         cfg.lists = self.lists;
         cfg.hotkey.key = self.dictation_key.vk();
         cfg.mic.device = (!self.microphone.is_empty()).then(|| self.microphone.clone());
-        cfg.tier = self.model.into();
+        // Quality needs a graphics card: on the processor, Light (crate::runtime_choice).
+        cfg.tier = crate::runtime_choice::effective_model(self.model).into();
         cfg.paste = self.paste.clone();
         cfg.keep_history = self.keep_history;
         cfg.log.enabled = self.debug_log || utter_core::is_development_build();
@@ -497,6 +520,7 @@ mod tests {
             dictation_key: DictationKey::F13,
             microphone: "USB".into(),
             model: Model::Light,
+            runtime: Runtime::Vulkan,
             keep_history: KeepHistory::Days30,
             debug_log: true,
             keep_logs: false,

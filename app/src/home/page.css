@@ -40,6 +40,13 @@
   flex-direction: column;
   min-width: 0;
 }
+/* A row's control keeps its one line; the label beside it wraps instead ("All paste rules..."
+   broke onto two lines at the window's default width with Linux's wider fonts). */
+.page .row > button,
+.page .row > select {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .page .desc {
   color: var(--home-muted);
   font-size: 13px;

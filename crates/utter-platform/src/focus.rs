@@ -377,7 +377,21 @@ mod imp {
     /// What people call an app: the Name of its desktop entry ("Text Editor" for
     /// gnome-text-editor), else the program's file name.
     fn app_name(exe: &str, _path: &str) -> String {
-        desktop_names().get(exe).cloned().unwrap_or_else(|| exe.to_owned())
+        name_for(desktop_names(), exe).unwrap_or_else(|| exe.to_owned())
+    }
+
+    /// The entry for `exe`, by its program (case aside), else by the longest program that `exe`
+    /// extends with a dash: the process behind an app is often a helper of its launcher
+    /// (gnome-terminal-server for gnome-terminal, ptyxis-agent for ptyxis).
+    fn name_for(names: &std::collections::HashMap<String, String>, exe: &str) -> Option<String> {
+        let exe = exe.to_lowercase();
+        names.get(&exe).cloned().or_else(|| {
+            names
+                .iter()
+                .filter(|(program, _)| exe.strip_prefix(program.as_str()).is_some_and(|rest| rest.starts_with('-')))
+                .max_by_key(|(program, _)| program.len())
+                .map(|(_, name)| name.clone())
+        })
     }
 
     /// Program file name to the Name of the desktop entry that starts it (its Exec or TryExec
@@ -405,7 +419,7 @@ mod imp {
                         && let Ok(text) = std::fs::read_to_string(entry.path())
                     {
                         for (program, name) in desktop_entry(&text) {
-                            names.insert(program, name.clone());
+                            names.insert(program.to_lowercase(), name.clone());
                         }
                     }
                 }
@@ -452,6 +466,18 @@ mod imp {
             assert_eq!(found.len(), 2);
             let env = "[Desktop Entry]\nName=Thing\nExec=env FOO=1 /opt/thing/bin/thing-app --x\n";
             assert_eq!(super::desktop_entry(env), [("thing-app".to_owned(), "Thing".to_owned())]);
+        }
+
+        #[test]
+        fn a_helper_process_takes_its_launcher_s_name() {
+            let names: std::collections::HashMap<String, String> =
+                [("gnome-terminal", "Terminal"), ("gnome", "Wrong"), ("firefox", "Firefox")]
+                    .into_iter()
+                    .map(|(a, b)| (a.to_owned(), b.to_owned()))
+                    .collect();
+            assert_eq!(super::name_for(&names, "gnome-terminal-server").as_deref(), Some("Terminal"));
+            assert_eq!(super::name_for(&names, "Firefox").as_deref(), Some("Firefox"));
+            assert_eq!(super::name_for(&names, "firefoxish"), None);
         }
 
         #[test]

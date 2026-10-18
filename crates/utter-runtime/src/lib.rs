@@ -13,7 +13,7 @@
 mod backend;
 pub mod gpu;
 
-pub use backend::{Backend, backend};
+pub use backend::{Backend, backend, select as select_backend};
 
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Write};

@@ -19,6 +19,11 @@ pub struct Adapter {
     pub free_bytes: Option<u64>,
 }
 
+/// The PCI vendors of virtual machines' display adapters (VMware, Microsoft's Hyper-V, VirtualBox,
+/// virtio, QEMU), which cannot run the models: a VM's VMware SVGA 3D was taken for a graphics
+/// card, and first run asked for one "with 6 GB of memory" instead of saying there is none.
+const VIRTUAL_DISPLAY: [u32; 5] = [0x15AD, 0x1414, 0x80EE, 0x1AF4, 0x1234];
+
 /// The card to run on: the first in the OS's high-performance order (a discrete card before an
 /// integrated one), software renderers skipped. `UTTER_GPU_INDEX` picks another place in that
 /// order, to test on a second card (an integrated GPU beside the discrete one): llama-server
@@ -57,7 +62,9 @@ mod imp {
                     break;
                 };
                 let Ok(desc) = adapter.GetDesc1() else { continue };
-                if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+                if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
+                    || super::VIRTUAL_DISPLAY.contains(&desc.VendorId)
+                {
                     continue;
                 }
                 let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
@@ -125,6 +132,9 @@ mod imp {
                         vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
                         _ => return None,
                     };
+                    if super::VIRTUAL_DISPLAY.contains(&p.vendor_id) {
+                        return None;
+                    }
                     let memory = instance.get_physical_device_memory_properties(device);
                     let local = memory.memory_heaps[..memory.memory_heap_count as usize]
                         .iter()

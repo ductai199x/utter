@@ -9,7 +9,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface Check {
   /** "keyboard" on Linux only: the udev rule for the keyboards and the paste keys. */
-  id: 'gpu' | 'memory' | 'driver' | 'keyboard' | 'disk';
+  id: 'gpu' | 'processor' | 'memory' | 'shared-memory' | 'driver' | 'keyboard' | 'disk';
   ok: boolean;
   value: string;
   fix: string | null;
@@ -38,14 +38,14 @@ export interface Problem {
   actions: ('retry' | 'repair' | 'allow' | 'logs' | 'quit' | 'close')[];
 }
 
-export type Mode = 'first' | 'update' | 'model' | 'repair' | 'problem';
+export type Mode = 'first' | 'update' | 'model' | 'runtime' | 'repair' | 'problem';
 
 const params = new URLSearchParams(location.search);
 /** Opened to carry on what the person already started (a repair that restarted Utter). */
 export const carryOn = params.get('go') === '1';
 export const mode = (): Mode => {
   const m = params.get('mode');
-  return m === 'update' || m === 'model' || m === 'repair' || m === 'problem' ? m : 'first';
+  return m === 'update' || m === 'model' || m === 'runtime' || m === 'repair' || m === 'problem' ? m : 'first';
 };
 
 const inTauri = '__TAURI_INTERNALS__' in window;
@@ -76,7 +76,7 @@ export function check(beforeChoice = false): Promise<Checks> {
                   id: 'keyboard' as const,
                   ok: false,
                   value: 'Not allowed',
-                  fix: 'Utter needs to read the dictation key and press the paste keys. Allow it once; your password is asked.',
+                  fix: 'Utter needs this to hear the dictation key and paste for you. Allow asks for your password once.',
                 },
               ]
             : []),
@@ -198,7 +198,7 @@ const MOCK_PROBLEMS: Record<Problem['kind'], Problem> = {
   keyboard: {
     kind: 'keyboard',
     title: 'Utter cannot use the keyboard',
-    message: 'Utter needs to read the dictation key and press the paste keys. Allow it once; your password is asked.',
+    message: 'Utter needs this to hear the dictation key and paste for you. Allow asks for your password once.',
     detail: 'hotkey: the keyboard devices are not open to this user (Utter\'s udev rule, packaging/linux/70-utter.rules)',
     actions: ['allow', 'logs', 'quit'],
   },
@@ -245,19 +245,25 @@ export interface ModelCard {
   cardBytes: number;
   downloadBytes: number;
   fits: boolean;
+  /** Why not, when it does not fit ("Needs a graphics card"). */
+  why: string | null;
+  /** Everything runs on the processor (no usable graphics card, or chosen). */
+  onProcessor: boolean;
   recommended: boolean;
   selected: boolean;
 }
 
-// ?gpu=4 plays a 4 GB card (Quality does not fit, Light is recommended).
+// ?gpu=4 plays a 4 GB card (Quality does not fit, Light is recommended); ?gpu=0, no graphics
+// card (the processor: Light only).
 const mockGpuGb = Number(params.get('gpu') ?? 24);
+const cpu = mockGpuGb === 0;
 
 export function models(): Promise<ModelCard[]> {
   if (inTauri) return invoke<ModelCard[]>('setup_models');
-  const quality = mockGpuGb >= 5.4;
+  const quality = !cpu && mockGpuGb >= 5.4;
   return Promise.resolve([
-    { id: 'quality', gpuBytes: 4.8e9, cardBytes: 5.8e9, downloadBytes: 5.95e9, fits: quality, recommended: quality, selected: true },
-    { id: 'light', gpuBytes: 3.25e9, cardBytes: 4.25e9, downloadBytes: 4.14e9, fits: mockGpuGb >= 3.96, recommended: !quality, selected: false },
+    { id: 'quality', gpuBytes: 4.8e9, cardBytes: 5.8e9, downloadBytes: 5.95e9, fits: quality, why: quality ? null : (cpu ? 'Needs a graphics card' : 'Needs a 6 GB graphics card'), onProcessor: cpu, recommended: quality, selected: true },
+    { id: 'light', gpuBytes: 3.25e9, cardBytes: 4.25e9, downloadBytes: 4.14e9, fits: cpu || mockGpuGb >= 3.96, why: cpu || mockGpuGb >= 3.96 ? null : 'Needs a 4 GB graphics card', onProcessor: cpu, recommended: !quality, selected: false },
   ]);
 }
 

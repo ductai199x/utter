@@ -102,10 +102,47 @@ mod imp {
     }
 }
 
+/// Gives `cmd` the environment the desktop gave the AppImage, not the AppImage's own. Its
+/// launcher points the library search path (and GTK's, GIO's, Python's...) into the image, and
+/// children inherit it: llama-server took the image's libcrypto, built on Ubuntu 24.04, with
+/// Ubuntu 26.04's libssl and did not start (2026-10-18). Every value naming the image ($APPDIR)
+/// loses those entries, or goes when nothing is left; what the command sets itself is kept.
+/// Nothing to do outside an AppImage, and off Linux.
+pub fn outside_appimage(cmd: &mut std::process::Command) {
+    #[cfg(target_os = "linux")]
+    {
+        let Some(appdir) = std::env::var_os("APPDIR").filter(|d| !d.is_empty()) else { return };
+        let appdir = std::path::PathBuf::from(appdir);
+        let own: Vec<std::ffi::OsString> = cmd.get_envs().map(|(k, _)| k.to_owned()).collect();
+        for (key, value) in std::env::vars_os() {
+            if own.contains(&key) {
+                continue;
+            }
+            if matches!(key.to_str(), Some("APPDIR" | "APPIMAGE" | "ARGV0" | "OWD" | "GTK_THEME")) {
+                cmd.env_remove(&key);
+                continue;
+            }
+            let entries: Vec<std::path::PathBuf> = std::env::split_paths(&value).collect();
+            if !entries.iter().any(|p| p.starts_with(&appdir)) {
+                continue;
+            }
+            let kept: Vec<_> =
+                entries.into_iter().filter(|p| !p.starts_with(&appdir) && !p.as_os_str().is_empty()).collect();
+            match std::env::join_paths(kept) {
+                Ok(v) if !v.is_empty() => cmd.env(&key, v),
+                _ => cmd.env_remove(&key),
+            };
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = cmd;
+}
+
 /// Starts `cmd` so that it ends when this process ends, even by a crash: Windows puts it in a
 /// job object; Linux has the kernel kill it when its parent goes (`PR_SET_PDEATHSIG`); macOS has
 /// no such tie (Utter sweeps a leftover server when it next starts, utter-llm).
-pub fn spawn_tied(cmd: std::process::Command) -> std::io::Result<std::process::Child> {
+pub fn spawn_tied(mut cmd: std::process::Command) -> std::io::Result<std::process::Child> {
+    outside_appimage(&mut cmd);
     #[cfg(windows)]
     {
         let mut cmd = cmd;

@@ -338,11 +338,10 @@ pub fn allow_input() -> Result<(), String> {
         f.write_all(script.as_bytes()).map_err(|e| e.to_string())?;
         f.set_permissions(std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
     }
-    let out = std::process::Command::new("pkexec")
-        .arg(&path)
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .map_err(|e| format!("pkexec: {e}"));
+    let mut pkexec = std::process::Command::new("pkexec");
+    pkexec.arg(&path).stderr(std::process::Stdio::piped());
+    crate::process::outside_appimage(&mut pkexec);
+    let out = pkexec.output().map_err(|e| format!("pkexec: {e}"));
     let _ = std::fs::remove_file(&path);
     let out = out?;
     match out.status.code() {
