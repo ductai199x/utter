@@ -51,11 +51,75 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: a desktop entry in the XDG autostart folder, which GNOME, KDE and the other desktops
+/// start at sign-in.
+#[cfg(all(unix, not(target_os = "macos")))]
 mod imp {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    pub fn set(_enabled: bool, _exe: &Path, _arg: &str) -> Result<(), String> {
-        Err("starting at sign-in is not supported on this platform yet".into())
+    fn entry() -> Result<PathBuf, String> {
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+            .ok_or("no home folder")?;
+        Ok(config.join("autostart").join("utter.desktop"))
+    }
+
+    pub fn set(enabled: bool, exe: &Path, arg: &str) -> Result<(), String> {
+        let path = entry()?;
+        if !enabled {
+            return match std::fs::remove_file(&path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", path.display())),
+                _ => Ok(()),
+            };
+        }
+        let dir = path.parent().ok_or("autostart folder")?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        // Exec quoting (Desktop Entry spec): the path in double quotes, \ " ` $ escaped.
+        let quoted = exe
+            .display()
+            .to_string()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('`', "\\`")
+            .replace('$', "\\$");
+        let text = format!(
+            "[Desktop Entry]\nType=Application\nName=Utter\nComment=Voice dictation\nExec=\"{quoted}\" {arg}\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n"
+        );
+        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+}
+
+/// macOS: a LaunchAgent, run at sign-in (a login item through SMAppService needs a signed app
+/// bundle; Utter ships through Homebrew, unsigned).
+#[cfg(target_os = "macos")]
+mod imp {
+    use std::path::{Path, PathBuf};
+
+    fn agent() -> Result<PathBuf, String> {
+        let home = std::env::var_os("HOME").ok_or("no home folder")?;
+        Ok(PathBuf::from(home).join("Library/LaunchAgents/app.utter.plist"))
+    }
+
+    fn xml(s: &str) -> String {
+        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    }
+
+    pub fn set(enabled: bool, exe: &Path, arg: &str) -> Result<(), String> {
+        let path = agent()?;
+        if !enabled {
+            return match std::fs::remove_file(&path) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", path.display())),
+                _ => Ok(()),
+            };
+        }
+        let dir = path.parent().ok_or("LaunchAgents folder")?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>app.utter</string>\n<key>ProgramArguments</key><array><string>{}</string><string>{}</string></array>\n<key>RunAtLoad</key><true/>\n<key>ProcessType</key><string>Interactive</string>\n</dict></plist>\n",
+            xml(&exe.display().to_string()),
+            xml(arg)
+        );
+        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
     }
 }

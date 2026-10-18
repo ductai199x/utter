@@ -26,12 +26,25 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 mod imp {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
     use std::path::Path;
 
-    pub fn free_bytes(_path: &Path) -> Option<u64> {
-        None
+    /// The space available to unprivileged users (f_bavail), as `df` shows it. A folder that
+    /// does not exist yet is measured at its nearest existing parent.
+    pub fn free_bytes(path: &Path) -> Option<u64> {
+        let existing = path.ancestors().find(|p| p.exists())?;
+        let c = CString::new(existing.as_os_str().as_bytes()).ok()?;
+        // SAFETY: a valid NUL-terminated path and a zeroed struct for the call to fill.
+        let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+        // SAFETY: as above.
+        if unsafe { libc::statvfs(c.as_ptr(), &mut s) } != 0 {
+            return None;
+        }
+        #[allow(clippy::unnecessary_cast)] // the field types differ between Linux and macOS
+        Some(s.f_bavail as u64 * s.f_frsize as u64)
     }
 }
 
@@ -40,8 +53,6 @@ mod tests {
     #[test]
     fn the_temp_drive_has_some_space() {
         let free = super::free_bytes(&std::env::temp_dir());
-        if cfg!(windows) {
-            assert!(free.unwrap() > 0);
-        }
+        assert!(free.unwrap() > 0);
     }
 }

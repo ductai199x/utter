@@ -64,7 +64,8 @@ impl SpeechModel {
     pub fn options(self) -> ParakeetOptions {
         let encoder = match utter_runtime::backend() {
             utter_runtime::Backend::Cuda => Device::Cuda,
-            utter_runtime::Backend::Vulkan => Device::WebGpu,
+            utter_runtime::Backend::Vulkan | utter_runtime::Backend::Metal => Device::WebGpu,
+            utter_runtime::Backend::Cpu => Device::Cpu,
         };
         let base = ParakeetOptions { encoder, ..ParakeetOptions::default() };
         match self {

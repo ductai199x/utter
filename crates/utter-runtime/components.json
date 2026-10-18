@@ -133,6 +133,232 @@
       "purpose": "llama-server built for Vulkan (shaders inside; needs only the driver's vulkan-1.dll): the cleanup model on AMD and Intel graphics cards."
     },
     {
+      "id": "onnxruntime-gpu",
+      "version": "1.31.0",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-linux-x64-gpu_cuda13-1.31.0.tgz",
+      "sha256": "2867dec99c6a4926e8142361b9d4d1518c16c85b854b4d41d28d65d3b2c81135",
+      "size": 244574938,
+      "extract": [
+        "*/lib/libonnxruntime.so*",
+        "*/lib/libonnxruntime_providers_cuda.so",
+        "*/lib/libonnxruntime_providers_shared.so",
+        "*/LICENSE"
+      ],
+      "license": "MIT (Microsoft)",
+      "purpose": "Runs the speech model (ONNX graphs) on the GPU."
+    },
+    {
+      "id": "onnxruntime",
+      "version": "1.31.0",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-linux-x64-1.31.0.tgz",
+      "sha256": "cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57",
+      "size": 11408003,
+      "extract": [
+        "*/lib/libonnxruntime.so*",
+        "*/lib/libonnxruntime_providers_shared.so",
+        "*/LICENSE"
+      ],
+      "license": "MIT (Microsoft)",
+      "purpose": "Runs the speech model (ONNX graphs) on the Vulkan backend (AMD, Intel) with the WebGPU provider, or on the CPU."
+    },
+    {
+      "id": "onnxruntime-ep-webgpu",
+      "version": "0.4.0",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://files.pythonhosted.org/packages/c1/96/2a18a45079250afcd825687aef2895de266d5abc1cff9f52d2dede7598f2/onnxruntime_ep_webgpu-0.4.0-py3-none-manylinux_2_28_x86_64.whl",
+      "sha256": "5d8c961eda91a88961cad1fb7621f389f006b18497d6ea9ecf96f729f066cbfb",
+      "size": 6892120,
+      "extract": [
+        "onnxruntime_ep_webgpu/libonnxruntime_providers_webgpu.so",
+        "onnxruntime_ep_webgpu-*.dist-info/licenses/*"
+      ],
+      "license": "MIT (Microsoft's own PyPI package)",
+      "purpose": "onnxruntime's WebGPU plugin provider (Dawn over Vulkan): the speech model on AMD and Intel graphics cards."
+    },
+    {
+      "id": "cuda-runtime",
+      "version": "13.4",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/cudart-llama-b11535-bin-ubuntu-cuda-13.4-x64.tar.gz",
+      "sha256": "59e3b5755d05a1d0d6e5c47bf5f76b0ec0b71e508798fabc4863581484a151df",
+      "size": 440236537,
+      "extract": [
+        "*/libcudart.so.13",
+        "*/libcublas.so.13",
+        "*/libcublasLt.so.13"
+      ],
+      "license": "NVIDIA CUDA EULA, redistributable files (as shipped by ggml-org's llama.cpp release)",
+      "purpose": "The CUDA runtime and cuBLAS, shared by onnxruntime and llama.cpp."
+    },
+    {
+      "id": "cudnn",
+      "version": "9.27.0.42",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://files.pythonhosted.org/packages/af/75/96ea5c5368eb595c39d629cde08a66227a864e71ccb0e593add2612bb952/nvidia_cudnn_cu13-9.27.0.42-py3-none-manylinux_2_27_x86_64.whl",
+      "sha256": "9677e76f21862eb5da7ee5ed69d544738b2d8b5c3ce7e5ec125c5592e6cdbdc8",
+      "size": 536771498,
+      "extract": [
+        "nvidia/cudnn/lib/libcudnn*.so.9",
+        "nvidia_cudnn_cu13-*.dist-info/licenses/*"
+      ],
+      "license": "NVIDIA cuDNN license, redistributable (NVIDIA's own PyPI package)",
+      "purpose": "cuDNN, for onnxruntime's convolutions."
+    },
+    {
+      "id": "llama-cpp",
+      "version": "b11535",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/llama-b11535-bin-ubuntu-cuda-13.4-x64.tar.gz",
+      "sha256": "85852549df6b131a5b276106ddfb7216cb08eaf6be32ced12b9d6dbe99c62bae",
+      "size": 152828235,
+      "extract": [
+        "**/llama-server",
+        "**/libllama-server-impl.so",
+        "**/libllama-common.so*",
+        "**/libllama.so*",
+        "**/libmtmd.so*",
+        "**/libggml.so*",
+        "**/libggml-base.so*",
+        "**/libggml-cpu-*.so",
+        "**/libggml-cuda.so",
+        "**/LICENSE"
+      ],
+      "license": "MIT (ggml-org)",
+      "purpose": "llama-server built for CUDA: runs the cleanup model on the GPU."
+    },
+    {
+      "id": "llama-cpp-vulkan",
+      "version": "b11535",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/llama-b11535-bin-ubuntu-vulkan-x64.tar.gz",
+      "sha256": "ec9990a7c7e232858f8612567d30a5eeb29e3e2870aad933758c5e13480de35c",
+      "size": 31760827,
+      "extract": [
+        "**/llama-server",
+        "**/libllama-server-impl.so",
+        "**/libllama-common.so*",
+        "**/libllama.so*",
+        "**/libmtmd.so*",
+        "**/libggml.so*",
+        "**/libggml-base.so*",
+        "**/libggml-cpu-*.so",
+        "**/libggml-vulkan.so",
+        "**/LICENSE"
+      ],
+      "license": "MIT (ggml-org)",
+      "purpose": "llama-server built for Vulkan (needs only the driver's libvulkan): the cleanup model on AMD and Intel graphics cards."
+    },
+    {
+      "id": "llama-cpp-cpu",
+      "version": "b11535",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/llama-b11535-bin-ubuntu-x64.tar.gz",
+      "sha256": "47d25c3a6a9ddfa364f75c02e04f9b2f1ce7676f79bb3c073860bad9168e5057",
+      "size": 17798375,
+      "extract": [
+        "**/llama-server",
+        "**/libllama-server-impl.so",
+        "**/libllama-common.so*",
+        "**/libllama.so*",
+        "**/libmtmd.so*",
+        "**/libggml.so*",
+        "**/libggml-base.so*",
+        "**/libggml-cpu-*.so",
+        "**/LICENSE"
+      ],
+      "license": "MIT (ggml-org)",
+      "purpose": "llama-server for the processor alone: the CPU backend (test machines)."
+    },
+    {
+      "id": "llama-cpp-cpu",
+      "version": "b11535",
+      "os": "windows",
+      "arch": "x86_64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/llama-b11535-bin-win-cpu-x64.zip",
+      "sha256": "9a30e789aaf35ab0ceb86b4bbbd8c74c1681638303cfc27557a901c242c51026",
+      "size": 19513815,
+      "extract": [
+        "**llama-server.exe",
+        "**llama-server-impl.dll",
+        "**llama-common.dll",
+        "**llama.dll",
+        "**mtmd.dll",
+        "**ggml.dll",
+        "**ggml-base.dll",
+        "**ggml-cpu-*.dll",
+        "**libomp.dll",
+        "**LICENSE*"
+      ],
+      "license": "MIT (ggml-org)",
+      "purpose": "llama-server for the processor alone: the CPU backend (test machines)."
+    },
+    {
+      "id": "onnxruntime",
+      "version": "1.31.0",
+      "os": "macos",
+      "arch": "aarch64",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-osx-arm64-1.31.0.tgz",
+      "sha256": "1031b36dd3bdaa8d976a6130d9cf2a05e9be320b93ae804f8427b91dc3432afc",
+      "size": 36549009,
+      "extract": [
+        "*/lib/libonnxruntime.1.31.0.dylib",
+        "*/lib/libonnxruntime.1.dylib",
+        "*/lib/libonnxruntime.dylib",
+        "*/LICENSE"
+      ],
+      "license": "MIT (Microsoft)",
+      "purpose": "Runs the speech model (ONNX graphs), on Apple's GPU with the WebGPU provider."
+    },
+    {
+      "id": "onnxruntime-ep-webgpu",
+      "version": "0.4.0",
+      "os": "macos",
+      "arch": "aarch64",
+      "url": "https://files.pythonhosted.org/packages/c3/9f/1e09865bbe4c9202ff1334545535be32dfdbeffc46e7d4c36c5de67ffafe/onnxruntime_ep_webgpu-0.4.0-py3-none-macosx_14_0_universal2.whl",
+      "sha256": "8d0a91d44b43d931c3068b9134aed9770f27803e353c2b58c93e1700bb68bcca",
+      "size": 5200679,
+      "extract": [
+        "onnxruntime_ep_webgpu/libonnxruntime_providers_webgpu.dylib",
+        "onnxruntime_ep_webgpu-*.dist-info/licenses/*"
+      ],
+      "license": "MIT (Microsoft's own PyPI package)",
+      "purpose": "onnxruntime's WebGPU plugin provider (Dawn over Metal): the speech model on Apple's GPU."
+    },
+    {
+      "id": "llama-cpp-metal",
+      "version": "b11535",
+      "os": "macos",
+      "arch": "aarch64",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11535/llama-b11535-bin-macos-arm64.tar.gz",
+      "sha256": "69437c84cc39e7bef5fbee2a8c3e9efdb4b3f9ba0bd889d6fdce0350c5dca58d",
+      "size": 12075843,
+      "extract": [
+        "**/llama-server",
+        "**/libllama-server-impl.dylib",
+        "**/libllama-common*.dylib",
+        "**/libllama.*dylib",
+        "**/libmtmd*.dylib",
+        "**/libggml.*dylib",
+        "**/libggml-base*.dylib",
+        "**/libggml-cpu*.dylib",
+        "**/libggml-metal*.dylib",
+        "**/libggml-blas*.dylib",
+        "**/LICENSE"
+      ],
+      "license": "MIT (ggml-org)",
+      "purpose": "llama-server built for Metal: the cleanup model on Apple's GPU."
+    },
+    {
       "id": "silero-vad",
       "version": "6.2.3",
       "os": "any",

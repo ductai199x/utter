@@ -415,9 +415,13 @@ fn session(path: &Path, device: Device, opts: &ParakeetOptions) -> Result<Sessio
         let adapter = utter_platform::gpu::high_performance_adapter()
             .ok_or_else(|| AsrError::Runtime("no graphics card found".into()))?;
         let env = ort::environment::Environment::current()?;
+        // A device id of 0 is a GPU with no PCI id (Apple Silicon's, the only one there).
         let devices: Vec<_> = env
             .devices()
-            .filter(|d| d.ep().is_ok_and(|ep| ep == WEBGPU_EP) && d.hardware_device().id() == adapter.device_id)
+            .filter(|d| {
+                d.ep().is_ok_and(|ep| ep == WEBGPU_EP)
+                    && (adapter.device_id == 0 || d.hardware_device().id() == adapter.device_id)
+            })
             .take(1)
             .collect();
         if devices.is_empty() {

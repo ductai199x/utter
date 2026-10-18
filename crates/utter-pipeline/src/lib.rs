@@ -110,11 +110,12 @@ type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
 /// Which speech build a tier runs. On CUDA the 8-bit one for both: it transcribes the same as
 /// float16 and takes 0.66 GB less GPU memory, for about 5 ms more a clip (2026-10-11: cut
 /// memory as far as quality allows; small latency costs are fine). On Vulkan float16: WebGPU
-/// runs 8 bits 34 ms slower a clip, not 5 (docs/plan-vulkan.md).
+/// runs 8 bits 34 ms slower a clip, not 5 (docs/plan-vulkan.md); Metal runs the same WebGPU
+/// provider. On the CPU the 8-bit build, half the memory traffic.
 pub fn speech_for(_tier: Tier) -> SpeechModel {
     match utter_runtime::backend() {
-        Backend::Cuda => SpeechModel::W8,
-        Backend::Vulkan => SpeechModel::Fp16,
+        Backend::Cuda | Backend::Cpu => SpeechModel::W8,
+        Backend::Vulkan | Backend::Metal => SpeechModel::Fp16,
     }
 }
 
@@ -128,6 +129,9 @@ pub fn gpu_need(tier: Tier) -> u64 {
         (Backend::Cuda, Tier::Light) => 3_250_000_000,
         (Backend::Vulkan, Tier::Quality) => 6_200_000_000,
         (Backend::Vulkan, Tier::Light) => 4_500_000_000,
+        // Metal and the CPU use the system's memory: Vulkan's figures until measured there.
+        (Backend::Metal | Backend::Cpu, Tier::Quality) => 6_200_000_000,
+        (Backend::Metal | Backend::Cpu, Tier::Light) => 4_500_000_000,
         (_, Tier::Reference) => 18_000_000_000,
     }
 }
@@ -154,6 +158,8 @@ pub fn runtime_for(backend: Backend) -> &'static [&'static str] {
     match backend {
         Backend::Cuda => &["onnxruntime-gpu", "cuda-runtime", "cudnn", "silero-vad", "llama-cpp"],
         Backend::Vulkan => &["onnxruntime", "onnxruntime-ep-webgpu", "silero-vad", "llama-cpp-vulkan"],
+        Backend::Metal => &["onnxruntime", "onnxruntime-ep-webgpu", "silero-vad", "llama-cpp-metal"],
+        Backend::Cpu => &["onnxruntime", "silero-vad", "llama-cpp-cpu"],
     }
 }
 
