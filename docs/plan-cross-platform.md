@@ -218,7 +218,10 @@ most of every dictation, for three reasons, each measured away:
   q4_0_8x8 at load, one thread per physical core).
 - Light with all of it: 0.50 s / 1.15 s at 7.2% final-text WER (Extra light 9.1%).
 The int8 speech model is published (ductai199x/utter-parakeet-ultra-onnx, `i8/`, revision
-d1b9425d) as the `parakeet-ultra-onnx-i8` component: installed from there, 0.39 s / 0.81 s.
+d1b9425d) as the `parakeet-ultra-onnx-i8` component: installed from there, 0.39 s / 0.81 s. In a fresh
+Ubuntu 24.04 VM with no graphics card (6 cores) from the .deb: the processor picked, Extra light
+recommended (1.5 GB download), dictations 128-224 ms key up to text (the cleanup done during the
+last pause), model loading 3.1 s, relaunch ready in 2.77 s (6.6 s before), Quit leaving nothing.
 
 **macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
 listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
