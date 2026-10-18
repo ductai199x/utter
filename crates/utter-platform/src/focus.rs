@@ -29,9 +29,13 @@ pub fn foreground() -> Option<Window> {
     imp::foreground()
 }
 
-/// Whether `w` is still the foreground window.
+/// The handle of a window the OS will not name (Linux, an app the accessibility bus does not
+/// know): it is taken to be the one in front.
+pub const UNKNOWN_WINDOW: isize = -1;
+
+/// Whether `w` is still the foreground window (always, for an unknown one).
 pub fn is_foreground(w: &Window) -> bool {
-    imp::foreground_handle() == Some(w.handle)
+    w.handle == UNKNOWN_WINDOW || imp::foreground_handle() == Some(w.handle)
 }
 
 /// Whether the OS will drop key strokes Utter sends to `w`: on Windows, a window of a program
@@ -309,26 +313,69 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux, X11 and Wayland alike: the focused app from the accessibility bus (linux_a11y.rs),
+/// its process as the window. Wayland tells a normal app nothing else about other windows. When
+/// the accessibility bus knows nothing (an app with accessibility off, such as Chromium by
+/// default), the focus is an unknown window that is always in front: the dictation is still
+/// pasted where the person is typing, it only cannot be checked or matched to a paste rule.
+#[cfg(target_os = "linux")]
 mod imp {
     use super::{App, Window};
+    use crate::linux_a11y;
+
+    use super::UNKNOWN_WINDOW as UNKNOWN;
 
     pub fn foreground_handle() -> Option<isize> {
-        None
+        Some(linux_a11y::focused().map_or(UNKNOWN, |f| f.pid as isize))
     }
 
-    /// Phase 4 (Linux): AT-SPI and the portal (DESIGN.md section 7).
     pub fn foreground() -> Option<Window> {
-        None
+        let Some(f) = linux_a11y::focused() else {
+            return Some(Window { handle: UNKNOWN, process_id: 0, title: String::new(), app: App::default() });
+        };
+        let (exe, path) = linux_a11y::process(f.pid).unwrap_or_default();
+        Some(Window {
+            handle: f.pid as isize,
+            process_id: f.pid,
+            title: exe.clone(),
+            app: App { name: app_name(&exe, &path), exe },
+        })
     }
 
     pub fn refuses_input(_pid: u32) -> bool {
         false
     }
 
+    /// The apps on the accessibility bus that people see (not desktop services).
     pub fn open_apps() -> Vec<App> {
-        Vec::new()
+        linux_a11y::app_pids()
+            .into_iter()
+            .filter_map(linux_a11y::process)
+            .filter(|(exe, _)| !is_service(exe))
+            .map(|(exe, path)| App { name: app_name(&exe, &path), exe })
+            .collect()
     }
+
+    fn is_service(exe: &str) -> bool {
+        exe.starts_with("gsd-")
+            || exe.starts_with("ibus")
+            || matches!(
+                exe,
+                "gnome-shell" | "gjs" | "vmware-user" | "evolution-alarm" | "xdg-desktop-por" | "plasmashell" | "kded6"
+            )
+    }
+
+    /// What people call an app: its executable's file name, capitalized ("gnome-text-editor"
+    /// stays as it is; the desktop entry's name would be better, and is not looked up yet).
+    fn app_name(exe: &str, path: &str) -> String {
+        let base = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(exe);
+        base.to_owned()
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod imp {
+    pub use crate::macos::focus::*;
 }
 
 #[cfg(test)]

@@ -588,53 +588,156 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux, X11 and Wayland alike (docs/plan-cross-platform.md, spike 1): the CLIPBOARD selection
+/// owned through X11, which XWayland bridges to Wayland apps (GNOME offers Wayland clients no
+/// way to set the clipboard without the keyboard focus, which Utter never takes), and the paste
+/// keys from Utter's virtual keyboard (uinput), which reaches every app.
+///
+/// X11 has no clipboard sequence number: Utter counts its own writes, and restores only while
+/// the clipboard still holds the text it put there, so a copy made in between is kept.
+#[cfg(target_os = "linux")]
 mod imp {
-    use super::{DefaultRule, InsertError, PasteKeys};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// macOS and Linux get their tables when they are built (docs/ux/insertion.md).
-    pub const DEFAULT_RULES: &[DefaultRule] = &[];
+    use arboard::SetExtLinux;
+    use evdev::KeyCode;
 
-    /// What the clipboard held (macOS: NSPasteboard items; Linux: the targets on offer).
-    pub type Snapshot = ();
+    use super::{DefaultRule, InsertError, Keep, PasteKeys, PasteRule};
+    use crate::linux_input;
 
-    // The primitives to build in Phase 4 (docs/ux/insertion.md, "Other platforms"):
-    // - macOS: NSPasteboard (read all items to save; write the string and the nspasteboard.org
-    //   transient and concealed markers), changeCount as the sequence, CGEventPost for Cmd+V
-    //   (the Accessibility permission);
-    // - Linux X11: own the CLIPBOARD selection and serve it (with x-kde-passwordManagerHint),
-    //   XTest for the keys;
-    // - Linux Wayland: ext/wlr data-control for the selection (not on GNOME, which needs
-    //   XWayland's), the RemoteDesktop portal or uinput for the keys.
-    pub fn save_all() -> Result<Snapshot, InsertError> {
-        Err(InsertError::Clipboard("not implemented on this platform yet".into()))
+    const TERMINAL: PasteRule = PasteRule { keys: PasteKeys::CtrlShiftV, keep: Keep::Normal };
+
+    /// Linux terminals paste with Ctrl+Shift+V (Ctrl+V sends a control character). Keyed by the
+    /// focused program's process name.
+    pub const DEFAULT_RULES: &[DefaultRule] = &[
+        ("gnome-terminal-server", "GNOME Terminal", TERMINAL),
+        ("kgx", "Console", TERMINAL),
+        ("ptyxis-agent", "Ptyxis", TERMINAL),
+        ("ptyxis", "Ptyxis", TERMINAL),
+        ("konsole", "Konsole", TERMINAL),
+        ("xfce4-terminal", "Xfce Terminal", TERMINAL),
+        ("tilix", "Tilix", TERMINAL),
+        ("terminator", "Terminator", TERMINAL),
+        ("alacritty", "Alacritty", TERMINAL),
+        ("kitty", "kitty", TERMINAL),
+        ("wezterm-gui", "WezTerm", TERMINAL),
+        ("foot", "foot", TERMINAL),
+        ("xterm", "XTerm", PasteRule { keys: PasteKeys::ShiftInsert, keep: Keep::Normal }),
+    ];
+
+    /// What the clipboard held: its text, else its image, else nothing.
+    pub enum Snapshot {
+        Text(String),
+        Image(arboard::ImageData<'static>),
+        Empty,
     }
 
-    pub fn press(_keys: PasteKeys) -> Result<(), InsertError> {
-        Err(InsertError::Input("not implemented on this platform yet".into()))
+    /// One clipboard for the process: on X11 the owner must stay alive to serve its contents.
+    static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+    /// Utter's writes, counted; and the text of the last one.
+    static WRITES: AtomicU32 = AtomicU32::new(0);
+    static OURS: Mutex<Option<String>> = Mutex::new(None);
+
+    fn with<T>(f: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboard::Error>) -> Result<T, InsertError> {
+        let mut slot = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() {
+            *slot = Some(arboard::Clipboard::new().map_err(|e| InsertError::Clipboard(e.to_string()))?);
+        }
+        f(slot.as_mut().expect("clipboard")).map_err(|e| InsertError::Clipboard(e.to_string()))
+    }
+
+    pub fn save_all() -> Result<Snapshot, InsertError> {
+        if let Ok(text) = with(|c| c.get_text()) {
+            return Ok(Snapshot::Text(text));
+        }
+        Ok(match with(|c| c.get_image()) {
+            Ok(image) => Snapshot::Image(image.to_owned_img()),
+            Err(_) => Snapshot::Empty,
+        })
+    }
+
+    pub fn put_text(text: &str, transient: bool) -> Result<u32, InsertError> {
+        // Transient: marked for clipboard managers to leave out of their history.
+        with(|c| if transient { c.set().exclude_from_history().text(text) } else { c.set_text(text) })?;
+        *OURS.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.to_owned());
+        Ok(WRITES.fetch_add(1, Ordering::SeqCst) + 1)
+    }
+
+    pub fn sequence() -> u32 {
+        WRITES.load(Ordering::SeqCst)
     }
 
     pub fn is_free() -> bool {
         true
     }
 
-    pub fn sequence() -> u32 {
-        0
+    pub fn press(keys: PasteKeys) -> Result<(), InsertError> {
+        let combo: &[KeyCode] = match keys {
+            PasteKeys::Primary => &[KeyCode::KEY_LEFTCTRL, KeyCode::KEY_V],
+            PasteKeys::CtrlShiftV => &[KeyCode::KEY_LEFTCTRL, KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_V],
+            PasteKeys::ShiftInsert => &[KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_INSERT],
+            PasteKeys::Type => return Err(InsertError::Input("typing goes through type_text".into())),
+        };
+        linux_input::press(combo).map_err(InsertError::Input)
     }
 
-    pub fn restore(_saved: Snapshot, _ours: u32) {}
+    pub fn restore(saved: Snapshot, ours: u32) {
+        let still_ours = sequence() == ours && {
+            let ours_text = OURS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            ours_text.is_some() && with(|c| c.get_text()).ok() == ours_text
+        };
+        if !still_ours {
+            tracing::debug!("the clipboard changed since the paste; not restoring");
+            return;
+        }
+        let result = match saved {
+            Snapshot::Text(t) => with(|c| c.set_text(t)),
+            Snapshot::Image(i) => with(|c| c.set_image(i)),
+            Snapshot::Empty => with(|c| c.clear()),
+        };
+        if let Err(e) = result {
+            tracing::warn!("restoring the clipboard: {e}");
+        }
+    }
 
     pub fn clipboard_text() -> Option<String> {
-        None
+        with(|c| c.get_text()).ok()
     }
 
-    pub fn put_text(_text: &str, _transient: bool) -> Result<u32, InsertError> {
-        Err(InsertError::Clipboard("not implemented on this platform yet".into()))
+    /// The text as key strokes on the US layout (ASCII), for apps that block pasting.
+    pub fn type_text(text: &str) -> Result<(), InsertError> {
+        for ch in text.chars() {
+            let combo = linux_input::keys_for(ch)
+                .ok_or_else(|| InsertError::Input(format!("cannot type {ch:?} as key strokes; paste it")))?;
+            linux_input::press(&combo).map_err(InsertError::Input)?;
+        }
+        Ok(())
     }
 
-    pub fn type_text(_text: &str) -> Result<(), InsertError> {
-        Err(InsertError::Input("not implemented on this platform yet".into()))
+    /// Makes the virtual keyboard now: the compositor takes about a second to listen to it.
+    pub fn warm() {
+        linux_input::warm();
     }
+}
+
+#[cfg(target_os = "macos")]
+mod imp {
+    pub use crate::macos::insert::*;
+}
+
+#[cfg(windows)]
+mod warm_imp {
+    pub fn warm() {}
+}
+
+/// Prepares what the first paste needs (Linux: Utter's virtual keyboard, which the compositor
+/// takes about a second to listen to), so it does not wait.
+pub fn warm() {
+    #[cfg(windows)]
+    warm_imp::warm();
+    #[cfg(not(windows))]
+    imp::warm();
 }
 
 /// Pastes into a real window and reads back what arrived (docs/ux/insertion.md, acceptance

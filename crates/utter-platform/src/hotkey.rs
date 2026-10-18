@@ -380,15 +380,50 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: every keyboard through the kernel (linux_input.rs), under X11 and Wayland alike. The
+/// GlobalShortcuts portal cannot bind a lone modifier such as Right Ctrl, nor report a key
+/// held, so it is not used.
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::Sender;
+    use std::time::Duration;
+
+    use super::{HotkeyError, KeyEvent};
+
+    pub fn start_hook(tx: Sender<KeyEvent>) -> Result<Box<dyn FnMut() + Send>, HotkeyError> {
+        let rx = crate::linux_input::subscribe().map_err(HotkeyError)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        std::thread::Builder::new()
+            .name("utter-keys-input".into())
+            .spawn(move || {
+                while !stopping.load(Ordering::Relaxed) {
+                    match rx.recv_timeout(Duration::from_millis(200)) {
+                        Ok(e) => {
+                            if tx.send(e).is_err() {
+                                break;
+                            }
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(_) => break,
+                    }
+                }
+            })
+            .map_err(|e| HotkeyError(e.to_string()))?;
+        Ok(Box::new(move || stop.store(true, Ordering::Relaxed)))
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
 mod imp {
     use std::sync::mpsc::Sender;
 
     use super::{HotkeyError, KeyEvent};
 
-    /// Phase 4 (Linux, GNOME): the GlobalShortcuts portal or evdev (DESIGN.md section 7).
-    pub fn start_hook(_tx: Sender<KeyEvent>) -> Result<Box<dyn FnMut() + Send>, HotkeyError> {
-        Err(HotkeyError("not implemented on this platform yet".into()))
+    pub fn start_hook(tx: Sender<KeyEvent>) -> Result<Box<dyn FnMut() + Send>, HotkeyError> {
+        crate::macos::start_hook(tx).map_err(HotkeyError)
     }
 }
 

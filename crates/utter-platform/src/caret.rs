@@ -116,19 +116,35 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: AT-SPI's Text interface on the focused object (linux_a11y.rs).
+#[cfg(target_os = "linux")]
 mod imp {
-    /// macOS: the focused element's AXSelectedTextRange and AXStringForRange; Linux: AT-SPI's
-    /// Text interface (caret offset, get_text). Built with those platforms.
     pub struct Reader;
 
     impl Reader {
         pub fn new() -> Option<Self> {
-            None
+            crate::linux_a11y::start();
+            Some(Reader)
         }
 
-        pub fn before_cursor(&self, _chars: i32) -> Option<String> {
-            None
+        pub fn before_cursor(&self, chars: i32) -> Option<String> {
+            crate::linux_a11y::before_caret(chars)
+        }
+    }
+}
+
+/// macOS: the focused element's AXSelectedTextRange and AXStringForRange (macos.rs).
+#[cfg(target_os = "macos")]
+mod imp {
+    pub struct Reader;
+
+    impl Reader {
+        pub fn new() -> Option<Self> {
+            Some(Reader)
+        }
+
+        pub fn before_cursor(&self, chars: i32) -> Option<String> {
+            crate::macos::before_caret(chars)
         }
     }
 }

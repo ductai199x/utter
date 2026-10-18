@@ -10,6 +10,10 @@ pub mod focus;
 pub mod gpu;
 pub mod hotkey;
 pub mod insert;
+#[cfg(target_os = "linux")]
+mod linux_a11y;
+#[cfg(target_os = "linux")]
+mod linux_input;
 pub mod memory;
 pub mod overlay;
 pub mod process;
