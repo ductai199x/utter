@@ -5,6 +5,7 @@
 pub mod autostart;
 pub mod caret;
 pub mod console;
+pub mod cpu;
 pub mod disk;
 pub mod focus;
 pub mod gpu;

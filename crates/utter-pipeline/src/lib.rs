@@ -120,6 +120,8 @@ pub fn speech_for(tier: Tier) -> SpeechModel {
 /// The speech model a tier runs on `backend`.
 pub fn speech_on(_tier: Tier, backend: Backend) -> SpeechModel {
     match backend {
+        // The processor's own build once it is published (components.json), else the GPU's.
+        Backend::Cpu if utter_runtime::component(SpeechModel::I8.component()).is_ok() => SpeechModel::I8,
         Backend::Cuda | Backend::Cpu => SpeechModel::W8,
         Backend::Vulkan | Backend::Metal => SpeechModel::Fp16,
     }

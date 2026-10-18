@@ -24,6 +24,11 @@ use crate::log::{DictationLog, Entry};
 /// While listening, a recognizer pass at least this often keeps the GPU's clocks up
 /// (docs/eval-results.md, "Idle GPU").
 const KEEPALIVE: Duration = Duration::from_millis(150);
+/// Whether keep-alive passes are worth their cost: on a GPU they hold its clocks up; on the
+/// processor they only took cores from the passes that matter and from the cleanup server.
+fn keeps_gpu_busy() -> bool {
+    utter_runtime::backend() != utter_runtime::Backend::Cpu
+}
 /// How often the live words are refreshed while speaking; these passes also keep the GPU busy.
 const PREVIEW_EVERY: Duration = Duration::from_millis(300);
 /// The least unfinished speech worth a preview pass (0.4 s).
@@ -265,7 +270,9 @@ impl Session {
     pub fn start(rec: &mut Recognizer, rule: CleanRule) -> Self {
         rec.generation += 1;
         rec.vad.reset();
-        let _ = rec.jobs.send(Job::KeepAlive);
+        if keeps_gpu_busy() {
+            let _ = rec.jobs.send(Job::KeepAlive);
+        }
         let now = Instant::now();
         Self {
             generation: rec.generation,
@@ -371,7 +378,7 @@ impl Session {
                 .send(Job::Preview { generation: self.generation, audio: self.audio[self.last_cut..].to_vec() });
             self.last_preview = Instant::now();
             self.last_job = self.last_preview;
-        } else if self.last_job.elapsed() >= KEEPALIVE {
+        } else if keeps_gpu_busy() && self.last_job.elapsed() >= KEEPALIVE {
             let _ = rec.jobs.send(Job::KeepAlive);
             self.last_job = Instant::now();
         }

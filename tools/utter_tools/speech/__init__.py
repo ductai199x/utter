@@ -2,6 +2,7 @@
 
 utter-speech export      the checkpoint to the ONNX graphs the Rust core runs
 utter-speech quantize    the encoder's weights in 8 bits, as the app runs it
+utter-speech quantize-cpu    the encoder in int8 for computers without a graphics card
 utter-speech check       the export against Transformers, token for token
 utter-speech export-litert   the encoder for Android's GPU (LiteRT)
 """
@@ -40,6 +41,20 @@ def quantize_cmd(
     from utter_tools.speech.export import quantize
 
     quantize(src, dst, bits, block_size)
+
+
+@app.command("quantize-cpu")
+def quantize_cpu_cmd(
+    src: str = typer.Option("parakeet-ultra", help="A float32 export under <data dir>/models."),
+    dst: str = typer.Option(
+        "parakeet-ultra-i8", help="The int8 copy's folder under <data dir>/models."
+    ),
+    per_channel: bool = typer.Option(True, help="One weight scale per output channel."),
+) -> None:
+    """Quantize the encoder for the processor: int8 weights, int8 activations at run time."""
+    from utter_tools.speech.export import quantize_cpu
+
+    quantize_cpu(src, dst, per_channel)
 
 
 @app.command("export-litert")
