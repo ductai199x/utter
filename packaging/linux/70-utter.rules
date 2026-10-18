@@ -1,0 +1,7 @@
+# Utter (https://github.com/ductai199x/utter): the person at this computer's seat may
+# - read the keyboards, so the hold-to-talk key works over every window, Wayland's included;
+# - make a virtual keyboard, which sends the paste keys (Ctrl+V) after a dictation.
+# "uaccess" grants it to the user logged in at the seat only, for as long as they are, and to
+# no one else (not remote logins); nothing runs as root.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+SUBSYSTEM=="misc", KERNEL=="uinput", TAG+="uaccess", OPTIONS+="static_node=uinput"

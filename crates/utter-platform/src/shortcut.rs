@@ -134,9 +134,17 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: seen in the keyboard stream every key goes through (linux_input.rs), under X11 and
+/// Wayland alike. The keys still reach the focused app (Linux has no way to hold them back for
+/// a normal program); Alt+Shift+Z and Alt+Shift+X are bound to nothing in common apps.
+#[cfg(target_os = "linux")]
 mod imp {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
     use super::{Shortcut, ShortcutError, Shortcuts};
+    use crate::linux_input::{self, ALT, SHIFT};
 
     pub fn keys(s: Shortcut) -> &'static str {
         match s {
@@ -145,12 +153,51 @@ mod imp {
         }
     }
 
-    /// Phase 4 (Linux, GNOME): the GlobalShortcuts portal (DESIGN.md section 7).
-    pub fn register(_on: Box<dyn FnMut(Shortcut) + Send>) -> Result<Shortcuts, ShortcutError> {
-        Err(ShortcutError("not implemented on this platform yet".into()))
+    pub fn register(mut on: Box<dyn FnMut(Shortcut) + Send>) -> Result<Shortcuts, ShortcutError> {
+        let rx = linux_input::subscribe().map_err(ShortcutError)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        std::thread::Builder::new()
+            .name("utter-shortcuts".into())
+            .spawn(move || {
+                while !stopping.load(Ordering::Relaxed) {
+                    let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) else { continue };
+                    // A press (not its auto-repeat) with exactly Alt and Shift held.
+                    if !e.down || e.injected || linux_input::modifiers() != ALT | SHIFT {
+                        continue;
+                    }
+                    match e.vk {
+                        0x5A => on(Shortcut::PasteLast),
+                        0x58 => on(Shortcut::CopyLast),
+                        _ => {}
+                    }
+                }
+            })
+            .map_err(|e| ShortcutError(e.to_string()))?;
+        Ok(Shortcuts { stop: Box::new(move || stop.store(true, Ordering::Relaxed)), taken: Vec::new() })
     }
 
     pub fn modifiers_down() -> bool {
-        false
+        linux_input::modifiers() != 0
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod imp {
+    use super::{Shortcut, ShortcutError, Shortcuts};
+
+    pub fn keys(s: Shortcut) -> &'static str {
+        match s {
+            Shortcut::PasteLast => "Ctrl+Cmd+V",
+            Shortcut::CopyLast => "Ctrl+Cmd+C",
+        }
+    }
+
+    pub fn register(on: Box<dyn FnMut(Shortcut) + Send>) -> Result<Shortcuts, ShortcutError> {
+        crate::macos::register_shortcuts(on).map_err(ShortcutError)
+    }
+
+    pub fn modifiers_down() -> bool {
+        crate::macos::modifiers_down()
     }
 }

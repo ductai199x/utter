@@ -111,6 +111,20 @@ what Wispr Flow uses), but none can be measured without a Mac (below).
    same udev `uaccess` rule that grants the hotkey's `/dev/input` grants.
    Still to check: that `wl-copy` never flashes a focus-taking surface (the XWayland setter is
    the safe default), the clipboard restore, terminals' Ctrl+Shift+V, Xorg and KDE.
+3. **AT-SPI names the focused app and reads the caret.** One walk of the accessibility tree at
+   start (the active window, then the object with the focused state) and the
+   `object:state-changed:focused` events after it give the focused object; the bus's
+   `GetConnectionUnixProcessID` gives its pid; the Text interface's `CaretOffset` property and
+   `GetText` give the text before the cursor, exactly. The program name comes from
+   `/proc/PID/exe`, not `comm`, which the kernel cuts at 15 characters (`gnome-terminal-`).
+   GNOME Text Editor checked; Firefox, Chromium, Electron and Qt still to check.
+4. **PDEATHSIG from one long-lived spawner thread works:** a child started through
+   `process::spawn_tied` died with its parent.
+
+The platform layer (`crates/utter-platform`, `examples/probe.rs`) passes all of these in the
+VM: the hold-to-talk key (Right Ctrl held starts and finishes, tapped cancels) read from evdev
+under Wayland, the paste through Utter's own uinput keyboard into the focused editor, the
+clipboard restored after it.
 
 ## The work, in order
 

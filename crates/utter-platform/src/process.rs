@@ -105,9 +105,10 @@ mod imp {
 /// Starts `cmd` so that it ends when this process ends, even by a crash: Windows puts it in a
 /// job object; Linux has the kernel kill it when its parent goes (`PR_SET_PDEATHSIG`); macOS has
 /// no such tie (Utter sweeps a leftover server when it next starts, utter-llm).
-pub fn spawn_tied(mut cmd: std::process::Command) -> std::io::Result<std::process::Child> {
+pub fn spawn_tied(cmd: std::process::Command) -> std::io::Result<std::process::Child> {
     #[cfg(windows)]
     {
+        let mut cmd = cmd;
         let child = cmd.spawn()?;
         if let Err(e) = tie_to_this_process(&child) {
             tracing::warn!("{e}: the child may outlive a crash of Utter");
@@ -120,6 +121,7 @@ pub fn spawn_tied(mut cmd: std::process::Command) -> std::io::Result<std::proces
     }
     #[cfg(all(unix, not(target_os = "linux")))]
     {
+        let mut cmd = cmd;
         cmd.spawn()
     }
 }

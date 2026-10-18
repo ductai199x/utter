@@ -45,6 +45,7 @@ windows-sys = { workspace = true, features = [
 libc = "0.2.191"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-arboard = { version = "3.7.0", default-features = false }
+arboard = { version = "3.7.0", default-features = false, features = ["image-data"] }
 ash = { version = "0.38.0", default-features = false, features = ["loaded", "std"] }
 evdev = "0.13.2"
+zbus = { version = "5.19", default-features = false, features = ["blocking-api", "async-io"] }

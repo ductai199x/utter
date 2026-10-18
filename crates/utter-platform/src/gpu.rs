@@ -95,13 +95,76 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: Vulkan's physical devices, through the driver's loader (libvulkan.so.1): discrete
+/// cards first, then integrated ones; CPU implementations (lavapipe, llvmpipe) skipped, as DXGI's
+/// software adapters are on Windows. The free memory is not asked (it takes an extension), so it
+/// is unknown.
+#[cfg(target_os = "linux")]
+mod imp {
+    use ash::vk;
+
+    use super::Adapter;
+
+    pub fn adapters() -> Vec<Adapter> {
+        // SAFETY: loading the system's Vulkan loader; Vulkan calls with valid create infos, the
+        // instance destroyed before returning.
+        unsafe {
+            let Ok(entry) = ash::Entry::load() else { return Vec::new() };
+            let app = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_1);
+            let info = vk::InstanceCreateInfo::default().application_info(&app);
+            let Ok(instance) = entry.create_instance(&info, None) else { return Vec::new() };
+            let mut found: Vec<(u8, Adapter)> = instance
+                .enumerate_physical_devices()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|device| {
+                    let p = instance.get_physical_device_properties(device);
+                    let rank = match p.device_type {
+                        vk::PhysicalDeviceType::DISCRETE_GPU => 0,
+                        vk::PhysicalDeviceType::INTEGRATED_GPU => 1,
+                        vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
+                        _ => return None,
+                    };
+                    let memory = instance.get_physical_device_memory_properties(device);
+                    let local = memory.memory_heaps[..memory.memory_heap_count as usize]
+                        .iter()
+                        .filter(|h| h.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL))
+                        .map(|h| h.size)
+                        .max()
+                        .unwrap_or(0);
+                    let name = p.device_name_as_c_str().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    Some((
+                        rank,
+                        Adapter {
+                            name,
+                            vendor_id: p.vendor_id,
+                            device_id: p.device_id,
+                            luid: (0, 0),
+                            memory_bytes: local,
+                            free_bytes: None,
+                        },
+                    ))
+                })
+                .collect();
+            instance.destroy_instance(None);
+            found.sort_by_key(|(rank, a)| (*rank, std::cmp::Reverse(a.memory_bytes)));
+            found.into_iter().map(|(_, a)| a).collect()
+        }
+    }
+
+    /// The loader is there and offers a real GPU.
+    pub fn vulkan_available() -> bool {
+        !adapters().is_empty()
+    }
+}
+
+/// macOS: Apple Silicon's GPU, through Metal (macos.rs).
+#[cfg(target_os = "macos")]
 mod imp {
     use super::Adapter;
 
-    /// Linux: Vulkan's physical devices; macOS: Metal. Built with those platforms.
     pub fn adapters() -> Vec<Adapter> {
-        Vec::new()
+        crate::macos::gpu_adapters()
     }
 
     pub fn vulkan_available() -> bool {
