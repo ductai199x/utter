@@ -103,8 +103,16 @@ impl Bar {
         if let Some(h) = hwnd {
             overlay::make_overlay(h);
         }
-        #[cfg(not(windows))]
-        let _ = window.set_focusable(false);
+        // Never focused: "focusable": false in tauri.conf.json (set at run time instead, it lost to
+        // tao, which makes a window created unfocused focusable again at its first draw). On
+        // Linux that is not enough: GTK 3 windows offer WM_TAKE_FOCUS, so KWin still made the
+        // Bar the active window and the paste keys went to it, not to the app (Plasma 6,
+        // 2026-10-18). A notification-type window is never activated; set before it is mapped.
+        #[cfg(target_os = "linux")]
+        if let Ok(gtk_window) = window.gtk_window() {
+            use gtk::prelude::GtkWindowExt;
+            gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Notification);
+        }
         // Click-through. GTK sets it on the native window, which a never-shown window does not
         // have yet (tao unwraps it: the app aborted at start on Linux), so there it is set at
         // each show (bar_bottom_center).
@@ -646,8 +654,13 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("run Utter");
+        .build(tauri::generate_context!())
+        .expect("build Utter")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                utter_platform::focus::shutdown();
+            }
+        });
 }
 
 /// Logs to stderr (a development build's console) and to the rotating `logs/utter.log`

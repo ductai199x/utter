@@ -45,6 +45,13 @@ pub fn refuses_input(w: &Window) -> bool {
     imp::refuses_input(w.process_id)
 }
 
+/// Undoes what following the focus changed in the session, at quit (Linux: the accessibility
+/// switch, if Utter turned it on; linux_a11y.rs).
+pub fn shutdown() {
+    #[cfg(target_os = "linux")]
+    crate::linux_a11y::stop();
+}
+
 /// The apps with a visible window now, by name, each once: for "Add an app" (paste rules).
 pub fn open_apps() -> Vec<App> {
     let mut apps = imp::open_apps();

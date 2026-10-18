@@ -149,7 +149,19 @@ and after authorizing, dictation working without a logout. Found and fixed there
 aborted at start (click-through set on a never-shown window), and the dialog showed the raw
 shell commands. Then on Xorg (GDM with Wayland off), the AppImage with no FUSE 2 installed:
 it starts (the static runtime), the Bar shows its words, the dictation lands in GNOME Terminal
-(2.7 s on the CPU). Not yet: KDE, Fedora, Ubuntu 26.04, a real GPU (CUDA or Vulkan) on Linux.
+(2.7 s on the CPU).
+
+Ubuntu 26.04 (packages built there): GNOME 50, Wayland: first run, the Bar, the dictation into
+Ptyxis (its paste rule) and Text Editor, the tray menu, Quit leaving no process. KDE Plasma 6,
+Wayland: "Start at login" started Utter at sign-in, the tray icon, and the dictation into
+Konsole after two fixes found there: Qt apps join the accessibility bus only while the
+session's accessibility switch is on, which Plasma leaves off, so Konsole was unknown and got
+Ctrl+V (Utter now turns the switch on at start and back off at quit if it turned it on); and
+KWin made the Bar the active window (GTK 3 offers WM_TAKE_FOCUS whatever the window's focus
+setting), so the paste keys went to the Bar (the Bar is now a notification-type window, which
+KWin never activates, and unfocusable in its config). Once, before those fixes, Utter exited
+silently mid-dictation on Plasma; not seen again in four fresh starts after them.
+Not yet: Fedora, AMD or Intel graphics (Vulkan) on Linux.
 
 **Linux on a real GPU** (WSL 2, Ubuntu 24.04, this PC's RTX 3090 Ti, `utter-cli e2e-bench`,
 Quality, 20 clips each of en-ami and en-voxpopuli, the same command on Windows):
