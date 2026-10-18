@@ -171,3 +171,36 @@ fn make_findable(dirs: &[PathBuf]) -> Result<(), AsrError> {
         pending = failed.into_iter().map(|(p, _)| p).collect();
     }
 }
+
+/// Linux: ends the process at exit before onnxruntime tears itself down. The ort crate releases
+/// its environment from the executable's .fini_array, which runs after the C++ destructors of
+/// libraries opened at run time, onnxruntime and its CUDA provider among them: the release then
+/// freed memory a second time and glibc aborted ("corrupted double-linked list") at every exit
+/// after a CUDA session (WSL, RTX 3090 Ti, 2026-10-18; Windows and macOS release it earlier).
+/// on_exit handlers run before the destructors registered earlier, so this one, registered once
+/// a session exists, flushes C's buffers and leaves with the exit status; the OS and the driver
+/// take back the rest.
+#[cfg(target_os = "linux")]
+pub(crate) fn skip_teardown_at_exit() {
+    use std::ffi::{c_int, c_void};
+    unsafe extern "C" {
+        fn on_exit(function: extern "C" fn(c_int, *mut c_void), arg: *mut c_void) -> c_int;
+        fn fflush(stream: *mut c_void) -> c_int;
+        fn _exit(status: c_int) -> !;
+    }
+    extern "C" fn leave(status: c_int, _: *mut c_void) {
+        // SAFETY: flushing every C stream, then ending the process; called by exit() only.
+        unsafe {
+            fflush(std::ptr::null_mut());
+            _exit(status)
+        }
+    }
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    // SAFETY: registers a handler with glibc; it lives as long as the process.
+    REGISTERED.call_once(|| unsafe {
+        on_exit(leave, std::ptr::null_mut());
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn skip_teardown_at_exit() {}

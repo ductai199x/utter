@@ -151,6 +151,20 @@ shell commands. Then on Xorg (GDM with Wayland off), the AppImage with no FUSE 2
 it starts (the static runtime), the Bar shows its words, the dictation lands in GNOME Terminal
 (2.7 s on the CPU). Not yet: KDE, Fedora, Ubuntu 26.04, a real GPU (CUDA or Vulkan) on Linux.
 
+**Linux on a real GPU** (WSL 2, Ubuntu 24.04, this PC's RTX 3090 Ti, `utter-cli e2e-bench`,
+Quality, 20 clips each of en-ami and en-voxpopuli, the same command on Windows):
+
+| | key up -> text ready p50 | p95 | speech text | final text WER vs reference |
+|---|---|---|---|---|
+| Windows | 199 ms | 345 ms | (baseline) | 8.0% |
+| Linux | 197 ms | 393 ms | identical, 40 of 40 | 7.0% |
+
+Each OS repeats itself exactly; 13 of the 40 cleaned texts differ between them (the two CUDA
+builds of llama.cpp round differently, and greedy decoding follows), with no loss of quality.
+Found and fixed there: Linux's onnxruntime CUDA provider would not load without cuRAND (a
+component now), and every exit after a CUDA session aborted with heap corruption, from the ort
+crate releasing its environment after onnxruntime's own teardown (`skip_teardown_at_exit`).
+
 **macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
 listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
 pasteboard saved whole and restored, Cmd+V and typing as CoreGraphics key events, the

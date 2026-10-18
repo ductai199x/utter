@@ -459,7 +459,10 @@ fn session(path: &Path, device: Device, opts: &ParakeetOptions) -> Result<Sessio
         builder = builder.with_intra_threads(opts.cpu_threads)?;
     }
     builder = builder.with_intra_op_spinning(opts.cpu_spinning)?;
-    builder.commit_from_file(path).map_err(|e| AsrError::Model(format!("{}: {e}", path.display())))
+    let session = builder.commit_from_file(path).map_err(|e| AsrError::Model(format!("{}: {e}", path.display())))?;
+    // After the session, so after the execution provider's library has loaded.
+    crate::runtime::skip_teardown_at_exit();
+    Ok(session)
 }
 
 fn argmax(values: &[f32]) -> usize {
