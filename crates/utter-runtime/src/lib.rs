@@ -643,6 +643,10 @@ fn extract_archive(id: &str, patterns: &[String], archive: &Path, dest: &Path) -
         builder.add(g.clone());
     }
     let set: GlobSet = builder.build().map_err(|e| fail(e.to_string()))?;
+    let name = archive.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        return extract_tar(id, patterns, &set, archive, dest);
+    }
     let file = File::open(archive).map_err(io_err(archive))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| fail(e.to_string()))?;
     let mut matched = vec![false; globs.len()];
@@ -679,9 +683,146 @@ fn extract_archive(id: &str, patterns: &[String], archive: &Path, dest: &Path) -
     Ok(written)
 }
 
+/// [`extract_archive`] for a gzipped tar (the Linux and macOS builds). Shared libraries come as
+/// a file and links to it under the names programs ask for (`libggml.so.0 -> libggml.so.0.26.0`):
+/// a matching link becomes a link to its target's base name in the same flat folder (every
+/// target in these archives sits beside its link), or on Windows a copy. Executable bits are
+/// kept.
+fn extract_tar(
+    id: &str,
+    patterns: &[String],
+    set: &GlobSet,
+    archive: &Path,
+    dest: &Path,
+) -> Result<Vec<String>, RuntimeError> {
+    let fail = |message: String| RuntimeError::Archive { id: id.to_owned(), message };
+    let file = File::open(archive).map_err(io_err(archive))?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(io::BufReader::new(file)));
+    let mut matched = vec![false; patterns.len()];
+    let mut written = Vec::new();
+    let mut links: Vec<(String, String)> = Vec::new();
+    for entry in tar.entries().map_err(|e| fail(e.to_string()))? {
+        let mut entry = entry.map_err(|e| fail(e.to_string()))?;
+        let kind = entry.header().entry_type();
+        if !(kind.is_file() || kind.is_symlink()) {
+            continue;
+        }
+        let path = entry.path().map_err(|e| fail(e.to_string()))?.to_string_lossy().into_owned();
+        let path = path.strip_prefix("./").unwrap_or(&path).to_owned();
+        let hits = set.matches(&path);
+        if hits.is_empty() {
+            continue;
+        }
+        for h in hits {
+            matched[h] = true;
+        }
+        let base = path.rsplit('/').next().unwrap_or(&path).to_owned();
+        if written.contains(&base) || links.iter().any(|(b, _)| *b == base) {
+            return Err(fail(format!("two entries named {base}")));
+        }
+        if kind.is_symlink() {
+            let target = entry
+                .link_name()
+                .map_err(|e| fail(e.to_string()))?
+                .ok_or_else(|| fail(format!("{path}: link without a target")))?;
+            let target = target.to_string_lossy();
+            let target = target.rsplit('/').next().unwrap_or(&target).to_owned();
+            links.push((base, target));
+            continue;
+        }
+        let out_path = dest.join(&base);
+        let mut out = BufWriter::new(File::create(&out_path).map_err(io_err(&out_path))?);
+        io::copy(&mut entry, &mut out).map_err(io_err(&out_path))?;
+        out.flush().map_err(io_err(&out_path))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = entry.header().mode().map_err(|e| fail(e.to_string()))? & 0o755;
+            std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(mode | 0o644))
+                .map_err(io_err(&out_path))?;
+        }
+        written.push(base);
+    }
+    // Links to links (libggml.so -> libggml.so.0 -> libggml.so.0.26.0): place each once its
+    // target is there, in passes.
+    while !links.is_empty() {
+        let before = links.len();
+        let mut later = Vec::new();
+        for (base, target) in links {
+            if !written.contains(&target) {
+                later.push((base, target));
+                continue;
+            }
+            let link = dest.join(&base);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &link).map_err(io_err(&link))?;
+            #[cfg(not(unix))]
+            std::fs::copy(dest.join(&target), &link).map_err(io_err(&link))?;
+            written.push(base);
+        }
+        if later.len() == before {
+            let (base, target) = &later[0];
+            return Err(fail(format!("{base} links to {target}, which is not extracted")));
+        }
+        links = later;
+    }
+    if let Some(i) = matched.iter().position(|m| !m) {
+        return Err(fail(format!("nothing matches {}", patterns[i])));
+    }
+    written.sort();
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A gzipped tar laid out as llama.cpp's Linux builds: a folder, a library with a chain of
+    /// links to it, an executable, and a file not asked for.
+    fn llama_like_tar(path: &Path) {
+        let mut b =
+            tar::Builder::new(flate2::write::GzEncoder::new(File::create(path).unwrap(), flate2::Compression::fast()));
+        let mut file = |name: &str, body: &[u8], mode: u32| {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(body.len() as u64);
+            h.set_mode(mode);
+            h.set_cksum();
+            b.append_data(&mut h, name, body).unwrap();
+        };
+        file("llama-b1/libggml.so.0.26.0", b"lib", 0o644);
+        file("llama-b1/llama-server", b"#!exe", 0o755);
+        file("llama-b1/llama-bench", b"skip", 0o755);
+        for (name, target) in [("llama-b1/libggml.so", "libggml.so.0"), ("llama-b1/libggml.so.0", "libggml.so.0.26.0")]
+        {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Symlink);
+            h.set_size(0);
+            h.set_mode(0o777);
+            b.append_link(&mut h, name, target).unwrap();
+        }
+        b.into_inner().unwrap().finish().unwrap();
+    }
+
+    #[test]
+    fn a_tar_extracts_flat_with_its_link_chain_and_executable() {
+        let dir = std::env::temp_dir().join(format!("utter-tar-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("out")).unwrap();
+        let archive = dir.join("llama.tar.gz");
+        llama_like_tar(&archive);
+        let patterns = vec!["**/llama-server".to_owned(), "**/libggml.so*".to_owned()];
+        let files = extract_archive("t", &patterns, &archive, &dir.join("out")).unwrap();
+        assert_eq!(files, ["libggml.so", "libggml.so.0", "libggml.so.0.26.0", "llama-server"]);
+        assert_eq!(fs::read(dir.join("out/libggml.so")).unwrap(), b"lib");
+        assert!(!dir.join("out/llama-bench").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert!(fs::symlink_metadata(dir.join("out/libggml.so")).unwrap().file_type().is_symlink());
+            assert_eq!(fs::metadata(dir.join("out/llama-server")).unwrap().permissions().mode() & 0o111, 0o111);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     /// Serves `body` on localhost, honoring "Range: bytes=N-" when `ranges`; returns the URL
     /// and the Range headers it saw.

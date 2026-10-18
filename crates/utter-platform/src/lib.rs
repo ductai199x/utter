@@ -10,6 +10,7 @@ pub mod focus;
 pub mod gpu;
 pub mod hotkey;
 pub mod insert;
+pub mod memory;
 pub mod overlay;
 pub mod process;
 pub mod shell;

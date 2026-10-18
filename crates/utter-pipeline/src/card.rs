@@ -21,6 +21,8 @@ pub enum Driver {
     Cuda(i32),
     /// Whether it installed Vulkan.
     Vulkan(bool),
+    /// Metal and the CPU: nothing to install beyond the system.
+    System,
 }
 
 impl Driver {
@@ -29,6 +31,7 @@ impl Driver {
         match self {
             Driver::Cuda(version) => version >= utter_runtime::gpu::MIN_DRIVER_CUDA,
             Driver::Vulkan(present) => present,
+            Driver::System => true,
         }
     }
 }
@@ -49,6 +52,22 @@ pub fn graphics_card() -> Result<Card, String> {
                 memory_bytes: a.memory_bytes,
                 free_bytes: a.free_bytes,
                 driver: Driver::Vulkan(utter_platform::gpu::vulkan_available()),
+            })
+        }
+        // Apple Silicon's GPU shares the system's memory; the CPU path uses it too.
+        backend @ (Backend::Metal | Backend::Cpu) => {
+            let memory = utter_platform::memory::total().ok_or("the system's memory is unknown")?;
+            let name = match backend {
+                Backend::Metal => {
+                    utter_platform::gpu::high_performance_adapter().map_or("Apple GPU".into(), |a| a.name)
+                }
+                _ => "the processor (no GPU)".into(),
+            };
+            Ok(Card {
+                name,
+                memory_bytes: memory,
+                free_bytes: utter_platform::memory::available(),
+                driver: Driver::System,
             })
         }
     }

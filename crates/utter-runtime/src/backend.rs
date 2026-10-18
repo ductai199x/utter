@@ -1,7 +1,11 @@
-//! Which GPU backend Utter runs on (docs/plan-vulkan.md): CUDA on an NVIDIA card, where it is
-//! fastest (the Vulkan build processes prompts twice as slowly there, 2026-10-13); Vulkan
-//! everywhere else (AMD, Intel), with the speech model on onnxruntime's WebGPU provider. Each
-//! backend has its own runtime components (utter_pipeline::components_for).
+//! Which GPU backend Utter runs on (docs/plan-vulkan.md, docs/plan-cross-platform.md): CUDA on
+//! an NVIDIA card, where it is fastest (the Vulkan build processes prompts twice as slowly there,
+//! 2026-10-13); Vulkan on other cards (AMD, Intel) on Windows and Linux; Metal on Apple Silicon.
+//! On Vulkan and Metal the speech model runs on onnxruntime's WebGPU provider (Dawn over D3D12,
+//! Vulkan or Metal). Each backend has its own runtime components (utter_pipeline::components_for).
+//!
+//! `Cpu` runs everything on the processor: chosen only by `UTTER_GPU_BACKEND=cpu`, for machines
+//! without a usable GPU such as test VMs (whether to offer it to people is not decided).
 
 use std::sync::OnceLock;
 
@@ -10,6 +14,8 @@ use std::sync::OnceLock;
 pub enum Backend {
     Cuda,
     Vulkan,
+    Metal,
+    Cpu,
 }
 
 impl Backend {
@@ -17,19 +23,33 @@ impl Backend {
         match name.to_ascii_lowercase().as_str() {
             "cuda" => Some(Backend::Cuda),
             "vulkan" => Some(Backend::Vulkan),
+            "metal" => Some(Backend::Metal),
+            "cpu" => Some(Backend::Cpu),
             _ => None,
         }
     }
+
+    /// Runs the speech model on onnxruntime's WebGPU provider (Vulkan, Metal).
+    pub fn uses_webgpu(self) -> bool {
+        matches!(self, Backend::Vulkan | Backend::Metal)
+    }
 }
 
-/// The backend for this process, decided once: CUDA when the NVIDIA driver answers
-/// (gpu::probe), Vulkan otherwise. `UTTER_GPU_BACKEND` (cuda or vulkan) overrides it, to run the
-/// Vulkan path on an NVIDIA card for testing.
+/// The backend for this process, decided once: Metal on macOS; elsewhere CUDA when the NVIDIA
+/// driver answers (gpu::probe), Vulkan otherwise. `UTTER_GPU_BACKEND` (cuda, vulkan, metal, cpu)
+/// overrides it, to run another path for testing.
 pub fn backend() -> Backend {
     static BACKEND: OnceLock<Backend> = OnceLock::new();
     *BACKEND.get_or_init(|| {
         let chosen = std::env::var("UTTER_GPU_BACKEND").ok().and_then(|v| Backend::from_name(&v));
-        let backend = chosen.unwrap_or(if crate::gpu::probe().is_ok() { Backend::Cuda } else { Backend::Vulkan });
+        let detected = if cfg!(target_os = "macos") {
+            Backend::Metal
+        } else if crate::gpu::probe().is_ok() {
+            Backend::Cuda
+        } else {
+            Backend::Vulkan
+        };
+        let backend = chosen.unwrap_or(detected);
         tracing::info!(?backend, overridden = chosen.is_some(), "GPU backend");
         backend
     })
@@ -43,6 +63,8 @@ mod tests {
     fn backends_are_named_as_the_override_spells_them() {
         assert_eq!(Backend::from_name("Vulkan"), Some(Backend::Vulkan));
         assert_eq!(Backend::from_name("cuda"), Some(Backend::Cuda));
-        assert_eq!(Backend::from_name("metal"), None);
+        assert_eq!(Backend::from_name("metal"), Some(Backend::Metal));
+        assert_eq!(Backend::from_name("CPU"), Some(Backend::Cpu));
+        assert_eq!(Backend::from_name("directml"), None);
     }
 }

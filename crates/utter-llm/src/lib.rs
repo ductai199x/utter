@@ -174,21 +174,19 @@ impl LlamaServer {
         // runtime component yet), with the system's CUDA. The app never sets it.
         let backend = utter_runtime::backend();
         let given = opts.exe.is_some();
-        let (exe, path) =
-            match (opts.exe.clone().or_else(|| std::env::var_os("UTTER_LLAMA_SERVER").map(PathBuf::from)), backend) {
-                (Some(exe), _) => (exe, None),
-                (None, Backend::Cuda) => {
-                    let llama = utter_runtime::component("llama-cpp")?.installed_dir()?;
-                    let cuda = utter_runtime::component("cuda-runtime")?.installed_dir()?;
-                    // The CUDA runtime comes from Utter's component, for this child only.
-                    (llama.join(SERVER_EXE), Some(prepend_path(&[llama, cuda])))
+        let (exe, path) = match opts.exe.clone().or_else(|| std::env::var_os("UTTER_LLAMA_SERVER").map(PathBuf::from)) {
+            Some(exe) => (exe, None),
+            None => {
+                let llama = utter_runtime::component(llama_component(backend))?.installed_dir()?;
+                let mut dirs = vec![llama.clone()];
+                // The CUDA runtime comes from Utter's component, for this child only. The Vulkan
+                // and Metal builds need nothing beside them but the driver.
+                if backend == Backend::Cuda {
+                    dirs.push(utter_runtime::component("cuda-runtime")?.installed_dir()?);
                 }
-                // The Vulkan build needs nothing beside it but the driver's vulkan-1.dll.
-                (None, Backend::Vulkan) => {
-                    let llama = utter_runtime::component("llama-cpp-vulkan")?.installed_dir()?;
-                    (llama.join(SERVER_EXE), Some(prepend_path(&[llama])))
-                }
-            };
+                (llama.join(SERVER_EXE), Some(library_path(&dirs)))
+            }
+        };
         let device = match backend {
             Backend::Vulkan if !given => Some(vulkan_device(&exe)?),
             _ => None,
@@ -205,7 +203,8 @@ impl LlamaServer {
         let mut cmd = Command::new(&exe);
         cmd.arg("--model").arg(&opts.model);
         cmd.args(["--host", "127.0.0.1", "--port", &port.to_string()]);
-        cmd.args(["--ctx-size", &opts.context.to_string(), "--n-gpu-layers", &opts.gpu_layers.to_string()]);
+        let gpu_layers = if backend == Backend::Cpu { 0 } else { opts.gpu_layers };
+        cmd.args(["--ctx-size", &opts.context.to_string(), "--n-gpu-layers", &gpu_layers.to_string()]);
         // --no-warmup: the caller's first request warms it (cleanup sends a real one), so the
         // server's own empty pass only delays ready.
         cmd.args(["--parallel", "1", "--no-webui", "--jinja", "--no-warmup"]);
@@ -214,7 +213,7 @@ impl LlamaServer {
         let flash = match (opts.flash_attention, backend) {
             (false, _) => "off",
             (true, Backend::Cuda) => "on",
-            (true, Backend::Vulkan) => "auto",
+            (true, Backend::Vulkan | Backend::Metal | Backend::Cpu) => "auto",
         };
         cmd.args(["--flash-attn", flash]);
         if let Some(device) = &device {
@@ -224,23 +223,26 @@ impl LlamaServer {
         }
         cmd.args(&opts.extra_args);
         if let Some(path) = path {
-            cmd.env("PATH", path);
+            cmd.env(LIBRARY_PATH_VAR, path);
         }
         // Its output goes to the rotating log (utter_core::logs), or nowhere when logs are off.
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         utter_platform::process::no_console_window(&mut cmd);
-        let mut child = cmd.spawn().map_err(|source| LlmError::Io { path: exe.clone(), source })?;
+        // If Utter dies without running Drop, the OS ends the server, so it never keeps
+        // holding the GPU's memory (macOS has no such tie: a leftover is swept at the next
+        // start). Drop still stops it in the normal case.
+        #[cfg(target_os = "macos")]
+        leftovers::sweep();
+        let mut child =
+            utter_platform::process::spawn_tied(cmd).map_err(|source| LlmError::Io { path: exe.clone(), source })?;
+        #[cfg(target_os = "macos")]
+        leftovers::record(child.id());
         server_log(&format!("--- llama-server started, model {}\n", opts.model.display()));
         if let Some(out) = child.stdout.take() {
             copy_to_log(out);
         }
         if let Some(err) = child.stderr.take() {
             copy_to_log(err);
-        }
-        // If Utter dies without running Drop, the OS ends the server, so it never keeps
-        // holding the GPU's memory. Drop still stops it in the normal case.
-        if let Err(e) = utter_platform::process::tie_to_this_process(&child) {
-            tracing::warn!("{e}: llama-server may outlive a crash of Utter");
         }
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(120)))
@@ -418,9 +420,60 @@ fn find_vulkan_device(listed: &str, name: &str) -> Option<String> {
     })
 }
 
-fn prepend_path(dirs: &[PathBuf]) -> std::ffi::OsString {
+/// macOS cannot tie a child to its parent, so each server's id is written down while it runs
+/// and a server left by a crashed Utter is ended when Utter next starts one.
+#[cfg(target_os = "macos")]
+mod leftovers {
+    use std::path::PathBuf;
+
+    fn dir() -> PathBuf {
+        utter_core::data_dir().join("run")
+    }
+
+    pub fn record(pid: u32) {
+        let _ = std::fs::create_dir_all(dir());
+        let _ = std::fs::write(dir().join(format!("llama-server-{pid}")), "");
+    }
+
+    pub fn sweep() {
+        let Ok(entries) = std::fs::read_dir(dir()) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(pid) = name.strip_prefix("llama-server-").and_then(|p| p.parse::<i32>().ok()) else { continue };
+            // Only if that id is still a llama-server (ids are reused).
+            let comm = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output();
+            if comm.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim().ends_with("llama-server")) {
+                tracing::warn!(pid, "ending a llama-server left by an earlier Utter");
+                // SAFETY: a plain signal to a process id just checked to be a llama-server.
+                unsafe { libc::kill(pid, libc::SIGKILL) };
+            }
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The runtime component holding llama-server for a backend.
+pub fn llama_component(backend: Backend) -> &'static str {
+    match backend {
+        Backend::Cuda => "llama-cpp",
+        Backend::Vulkan => "llama-cpp-vulkan",
+        Backend::Metal => "llama-cpp-metal",
+        Backend::Cpu => "llama-cpp-cpu",
+    }
+}
+
+/// Where each OS's loader looks for a program's libraries, as the child process starts.
+#[cfg(windows)]
+const LIBRARY_PATH_VAR: &str = "PATH";
+#[cfg(target_os = "macos")]
+const LIBRARY_PATH_VAR: &str = "DYLD_LIBRARY_PATH";
+#[cfg(all(unix, not(target_os = "macos")))]
+const LIBRARY_PATH_VAR: &str = "LD_LIBRARY_PATH";
+
+/// `dirs` in front of the library search variable's current value.
+fn library_path(dirs: &[PathBuf]) -> std::ffi::OsString {
     let mut paths: Vec<PathBuf> = dirs.to_vec();
-    if let Some(existing) = std::env::var_os("PATH") {
+    if let Some(existing) = std::env::var_os(LIBRARY_PATH_VAR) {
         paths.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(paths).unwrap_or_default()

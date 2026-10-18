@@ -117,7 +117,8 @@ impl From<DeviceArg> for Device {
         match d {
             DeviceArg::Gpu => match utter_runtime::backend() {
                 utter_runtime::Backend::Cuda => Device::Cuda,
-                utter_runtime::Backend::Vulkan => Device::WebGpu,
+                utter_runtime::Backend::Vulkan | utter_runtime::Backend::Metal => Device::WebGpu,
+                utter_runtime::Backend::Cpu => Device::Cpu,
             },
             DeviceArg::Cuda => Device::Cuda,
             DeviceArg::Webgpu => Device::WebGpu,
@@ -534,10 +535,7 @@ fn llm_bench(
             // points at (the eval on Linux).
             "llama_cpp": match std::env::var("UTTER_LLAMA_SERVER") {
                 Ok(path) => path,
-                Err(_) => utter_runtime::component(match utter_runtime::backend() {
-                    utter_runtime::Backend::Cuda => "llama-cpp",
-                    utter_runtime::Backend::Vulkan => "llama-cpp-vulkan",
-                })?
+                Err(_) => utter_runtime::component(utter_llm::llama_component(utter_runtime::backend()))?
                 .version
                 .clone(),
             },
@@ -919,10 +917,16 @@ fn record(out: &Path, seconds: f64, device: Option<String>) -> Result<()> {
 /// them, and they are not missing.
 fn other_backend_only() -> Vec<&'static str> {
     use utter_runtime::Backend;
-    let mine = utter_runtime::backend();
-    let other = if mine == Backend::Cuda { Backend::Vulkan } else { Backend::Cuda };
-    let mine = utter_pipeline::runtime_for(mine);
-    utter_pipeline::runtime_for(other).iter().copied().filter(|id| !mine.contains(id)).collect()
+    let mine = utter_pipeline::runtime_for(utter_runtime::backend());
+    let mut others: Vec<&'static str> = [Backend::Cuda, Backend::Vulkan, Backend::Metal, Backend::Cpu]
+        .into_iter()
+        .flat_map(utter_pipeline::runtime_for)
+        .copied()
+        .filter(|id| !mine.contains(id))
+        .collect();
+    others.sort_unstable();
+    others.dedup();
+    others
 }
 
 fn doctor() -> Result<()> {

@@ -96,8 +96,82 @@ mod imp {
 
     use super::ProcessError;
 
-    /// Phase 4 (Linux) uses prctl(PR_SET_PDEATHSIG); until then this is a stated gap.
+    /// The tie is made as the child starts ([`super::spawn_tied`]), not after.
     pub fn tie(_child: &Child) -> Result<(), ProcessError> {
-        Err(ProcessError("not implemented on this platform yet".into()))
+        Err(ProcessError("start it with process::spawn_tied".into()))
+    }
+}
+
+/// Starts `cmd` so that it ends when this process ends, even by a crash: Windows puts it in a
+/// job object; Linux has the kernel kill it when its parent goes (`PR_SET_PDEATHSIG`); macOS has
+/// no such tie (Utter sweeps a leftover server when it next starts, utter-llm).
+pub fn spawn_tied(mut cmd: std::process::Command) -> std::io::Result<std::process::Child> {
+    #[cfg(windows)]
+    {
+        let child = cmd.spawn()?;
+        if let Err(e) = tie_to_this_process(&child) {
+            tracing::warn!("{e}: the child may outlive a crash of Utter");
+        }
+        Ok(child)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::spawn(cmd)
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        cmd.spawn()
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::io;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Child, Command};
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    use std::sync::mpsc::{self, Sender};
+
+    type Job = (Command, Sender<io::Result<Child>>);
+
+    /// One thread that lives as long as the process spawns every tied child: the parent-death
+    /// signal fires when the *thread* that forked the child exits, and Utter starts children
+    /// from short-lived threads.
+    fn spawner() -> &'static Mutex<Sender<Job>> {
+        static SPAWNER: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
+        SPAWNER.get_or_init(|| {
+            let (tx, rx) = mpsc::channel::<Job>();
+            std::thread::Builder::new()
+                .name("utter-spawner".into())
+                .spawn(move || {
+                    for (mut cmd, reply) in rx {
+                        let parent = std::process::id() as libc::pid_t;
+                        // SAFETY: the closure runs in the forked child before exec and calls
+                        // only async-signal-safe functions (prctl, getppid).
+                        unsafe {
+                            cmd.pre_exec(move || {
+                                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                                    return Err(io::Error::last_os_error());
+                                }
+                                // The parent may have died between fork and prctl.
+                                if libc::getppid() != parent {
+                                    return Err(io::Error::other("parent gone"));
+                                }
+                                Ok(())
+                            });
+                        }
+                        let _ = reply.send(cmd.spawn());
+                    }
+                })
+                .expect("spawn the process spawner");
+            Mutex::new(tx)
+        })
+    }
+
+    pub fn spawn(cmd: Command) -> io::Result<Child> {
+        let (tx, rx) = mpsc::channel();
+        spawner().lock().expect("spawner lock").send((cmd, tx)).map_err(|_| io::Error::other("spawner gone"))?;
+        rx.recv().map_err(|_| io::Error::other("spawner gone"))?
     }
 }

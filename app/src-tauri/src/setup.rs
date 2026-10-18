@@ -376,6 +376,7 @@ pub fn setup_check(before_choice: bool) -> Checks {
                     if present { "Vulkan" } else { "No Vulkan" }.to_owned(),
                     "Update the graphics driver from your card maker's site, then check again.",
                 ),
+                Driver::System => ("Built in".to_owned(), ""),
             };
             checks.push(Check { id: "driver", ok, value, fix: (!ok).then(|| fix.into()) });
         }

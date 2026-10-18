@@ -131,6 +131,8 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
             match utter_runtime::backend() {
                 utter_runtime::Backend::Cuda => "Update the NVIDIA driver, restart the computer, then retry.",
                 utter_runtime::Backend::Vulkan => "Update the graphics driver, restart the computer, then retry.",
+                utter_runtime::Backend::Metal => "Update macOS, restart the computer, then retry.",
+                utter_runtime::Backend::Cpu => "Restart the computer, then retry.",
             }
             .into(),
             vec!["retry", "logs", "quit"],

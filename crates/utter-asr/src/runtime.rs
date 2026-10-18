@@ -1,13 +1,15 @@
 //! Loading ONNX Runtime, which `ort` loads at run time (`load-dynamic`), from Utter's own
-//! runtime components (`utter-runtime`), each pinned and checksummed. On the CUDA backend:
-//! onnxruntime's GPU build, the CUDA runtime with cuBLAS, and cuDNN. On the Vulkan backend
-//! (AMD, Intel; docs/plan-vulkan.md): onnxruntime's CPU build and its WebGPU plugin provider,
-//! registered here. Nothing is taken from other applications or from the system beyond the GPU
-//! driver: verified by transcribing with a PATH holding only Windows' own folders.
+//! runtime components (`utter-runtime`), each pinned and checksummed:
+//! - CUDA: onnxruntime's GPU build, the CUDA runtime with cuBLAS, and cuDNN;
+//! - Vulkan and Metal (docs/plan-vulkan.md, docs/plan-cross-platform.md): onnxruntime's CPU
+//!   build and its WebGPU plugin provider (Dawn over D3D12, Vulkan or Metal), registered here;
+//! - CPU: onnxruntime's CPU build alone.
 //!
-//! `UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build or for
-//! platforms without pinned components yet (Linux, e.g. a GPU cluster): that build then finds its CUDA
-//! libraries itself (`LD_LIBRARY_PATH`), and no component is required.
+//! Nothing is taken from other applications or from the system beyond the GPU driver: verified
+//! on Windows by transcribing with a PATH holding only Windows' own folders.
+//!
+//! `UTTER_ORT_DYLIB` names a different onnxruntime library, for testing another build: that
+//! build then finds its own GPU libraries, and no component is required.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -18,7 +20,9 @@ use crate::AsrError;
 
 #[cfg(windows)]
 const ORT_LIB: &str = "onnxruntime.dll";
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+const ORT_LIB: &str = "libonnxruntime.dylib";
+#[cfg(all(unix, not(target_os = "macos")))]
 const ORT_LIB: &str = "libonnxruntime.so";
 
 /// The components onnxruntime's CUDA provider loads its libraries from. cuFFT and cuRAND,
@@ -28,7 +32,12 @@ pub const CUDA_COMPONENTS: &[&str] = &["cuda-runtime", "cudnn"];
 
 /// The WebGPU plugin provider's component, its library, and the name sessions ask for it by.
 pub const WEBGPU_COMPONENT: &str = "onnxruntime-ep-webgpu";
+#[cfg(windows)]
 const WEBGPU_LIB: &str = "onnxruntime_providers_webgpu.dll";
+#[cfg(target_os = "macos")]
+const WEBGPU_LIB: &str = "libonnxruntime_providers_webgpu.dylib";
+#[cfg(all(unix, not(target_os = "macos")))]
+const WEBGPU_LIB: &str = "libonnxruntime_providers_webgpu.so";
 pub const WEBGPU_EP: &str = "WebGpuExecutionProvider";
 
 static INIT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
@@ -46,31 +55,39 @@ pub fn init() -> Result<PathBuf, AsrError> {
     INIT.get_or_init(|| init_inner().map_err(|e| e.to_string())).clone().map_err(AsrError::Runtime)
 }
 
+/// The onnxruntime build a backend runs.
+pub fn ort_component(backend: Backend) -> &'static str {
+    match backend {
+        Backend::Cuda => "onnxruntime-gpu",
+        Backend::Vulkan | Backend::Metal | Backend::Cpu => "onnxruntime",
+    }
+}
+
 fn init_inner() -> Result<PathBuf, AsrError> {
     let backend = utter_runtime::backend();
     let custom = LIBRARY.get().cloned().or_else(|| std::env::var_os("UTTER_ORT_DYLIB").map(PathBuf::from));
-    let lib = match (&custom, backend) {
-        (Some(path), _) => path.clone(),
-        (None, Backend::Cuda) => component_dir("onnxruntime-gpu")?.join(ORT_LIB),
-        (None, Backend::Vulkan) => component_dir("onnxruntime")?.join(ORT_LIB),
+    let lib = match &custom {
+        Some(path) => path.clone(),
+        None => component_dir(ort_component(backend))?.join(ORT_LIB),
     };
     if !lib.is_file() {
         return Err(AsrError::Runtime(format!("{} does not exist", lib.display())));
     }
-    // The plugin's folder also holds the shader compiler it loads (dxcompiler.dll, dxil.dll). A
-    // custom onnxruntime build brings its own providers.
-    let webgpu = match (backend, &custom) {
-        (Backend::Vulkan, None) => Some(component_dir(WEBGPU_COMPONENT)?),
+    // On Windows the plugin's folder also holds the shader compiler it loads (dxcompiler.dll,
+    // dxil.dll). A custom onnxruntime build brings its own providers.
+    let webgpu = match (backend.uses_webgpu(), &custom) {
+        (true, None) => Some(component_dir(WEBGPU_COMPONENT)?),
         _ => None,
     };
     if custom.is_none() {
         // Only the installed ones: a GPU session without them fails when it is created,
         // saying so.
-        let dirs: Vec<PathBuf> = match &webgpu {
-            Some(dir) => vec![dir.clone()],
-            None => CUDA_COMPONENTS.iter().filter_map(|id| component_dir(id).ok()).collect(),
+        let dirs: Vec<PathBuf> = match (&webgpu, backend) {
+            (Some(dir), _) => vec![dir.clone()],
+            (None, Backend::Cuda) => CUDA_COMPONENTS.iter().filter_map(|id| component_dir(id).ok()).collect(),
+            (None, _) => Vec::new(),
         };
-        prepend_library_path(&dirs)?;
+        make_findable(&dirs)?;
     }
     let builder = ort::init_from(&lib).map_err(|e| AsrError::Runtime(format!("{}: {e}", lib.display())))?;
     builder.with_name("utter").commit();
@@ -92,7 +109,7 @@ fn component_dir(id: &str) -> Result<PathBuf, AsrError> {
 
 /// Windows searches PATH, as it is at the moment of each load, for a DLL's dependencies.
 #[cfg(windows)]
-fn prepend_library_path(dirs: &[PathBuf]) -> Result<(), AsrError> {
+fn make_findable(dirs: &[PathBuf]) -> Result<(), AsrError> {
     let var = "PATH";
     let mut paths: Vec<PathBuf> = dirs.to_vec();
     if let Some(existing) = std::env::var_os(var) {
@@ -105,10 +122,47 @@ fn prepend_library_path(dirs: &[PathBuf]) -> Result<(), AsrError> {
     Ok(())
 }
 
-/// Linux's loader reads LD_LIBRARY_PATH only at process start, so changing it here would do
-/// nothing. Phase 4 (Linux) preloads these libraries itself; until then there are no Linux
-/// components, and `component_dir` has already failed.
-#[cfg(not(windows))]
-fn prepend_library_path(_dirs: &[PathBuf]) -> Result<(), AsrError> {
-    Ok(())
+/// Linux's and macOS's loaders read their search variables only at process start, but reuse a
+/// library already loaded under the same name: so every shared library in `dirs` is loaded now,
+/// by full path, for good (the CUDA runtime, cuBLAS, cuDNN and the libraries cuDNN opens by
+/// name later). They depend on one another; loading repeats until nothing more loads, so no
+/// order has to be kept by hand.
+#[cfg(unix)]
+fn make_findable(dirs: &[PathBuf]) -> Result<(), AsrError> {
+    use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
+
+    let mut pending: Vec<PathBuf> = dirs
+        .iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            name.contains(".so") || name.ends_with(".dylib")
+        })
+        .collect();
+    pending.sort();
+    loop {
+        let before = pending.len();
+        let mut failed = Vec::new();
+        for path in pending {
+            // SAFETY: loading Utter's own pinned, checksummed libraries; their initializers
+            // have no preconditions. Kept loaded for the life of the process.
+            match unsafe { Library::open(Some(&path), RTLD_NOW | RTLD_GLOBAL) } {
+                Ok(lib) => std::mem::forget(lib),
+                Err(e) => failed.push((path, e.to_string())),
+            }
+        }
+        if failed.is_empty() {
+            return Ok(());
+        }
+        if failed.len() == before {
+            // Nothing more loads: the sessions will say what is missing; log what did not.
+            for (path, e) in &failed {
+                tracing::warn!(lib = %path.display(), "not preloaded: {e}");
+            }
+            return Ok(());
+        }
+        pending = failed.into_iter().map(|(p, _)| p).collect();
+    }
 }
