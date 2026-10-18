@@ -726,16 +726,9 @@ mod imp {
     pub use crate::macos::insert::*;
 }
 
-#[cfg(windows)]
-mod warm_imp {
-    pub fn warm() {}
-}
-
 /// Prepares what the first paste needs (Linux: Utter's virtual keyboard, which the compositor
-/// takes about a second to listen to), so it does not wait.
+/// takes about a second to listen to), so it does not wait. Windows needs nothing.
 pub fn warm() {
-    #[cfg(windows)]
-    warm_imp::warm();
     #[cfg(not(windows))]
     imp::warm();
 }

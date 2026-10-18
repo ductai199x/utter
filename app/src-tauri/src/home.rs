@@ -99,6 +99,10 @@ pub struct State {
     version: &'static str,
     data_dir: String,
     settings_path: String,
+    /// "windows", "linux" or "macos": for the words that differ (Start with Windows, Cmd+V).
+    os: &'static str,
+    /// The desktop shows tray icons; without them, Settings offers Quit.
+    tray: bool,
 }
 
 /// A dictation key as Settings lists it: its name in settings.toml and as people read it.
@@ -143,14 +147,22 @@ fn state() -> State {
         download_bytes: TIERS.into_iter().map(|(name, tier)| (name, to_download(tier))).collect(),
         gpu_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::gpu_need(tier))).collect(),
         card_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::card_need(tier))).collect(),
-        dictation_keys: DictationKey::ALL
+        dictation_keys: DictationKey::offered()
             .iter()
             .map(|k| KeyOption { id: utter_pipeline::settings::word(k), name: k.name() })
             .collect(),
         version: env!("CARGO_PKG_VERSION"),
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),
+        os: std::env::consts::OS,
+        tray: utter_platform::shell::tray_shown(),
     }
+}
+
+/// Quit, from Settings on a desktop without tray icons (the tray's Quit elsewhere).
+#[tauri::command]
+pub fn home_quit(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]

@@ -723,8 +723,9 @@ impl Pipeline {
             .name("utter-cleanup-start".into())
             .spawn(move || start_cleaner(&cleaner_cfg))
             .map_err(|_| PipelineError::WorkerGone)?;
-        // The caret reader sets itself up now, not at the first dictation.
+        // The caret reader and the paste keys set themselves up now, not at the first dictation.
         utter_platform::caret::warm();
+        utter_platform::insert::warm();
         stage("speech");
         let (job_tx, done_rx) = start_speech(speech_for(cfg.tier), &cfg.dictionary)?;
         stage("cleanup");

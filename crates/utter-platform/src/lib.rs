@@ -14,6 +14,8 @@ pub mod insert;
 mod linux_a11y;
 #[cfg(target_os = "linux")]
 mod linux_input;
+#[cfg(target_os = "macos")]
+mod macos;
 pub mod memory;
 pub mod overlay;
 pub mod process;

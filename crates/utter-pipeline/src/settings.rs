@@ -28,7 +28,8 @@ lists = true
 start_at_login = true
 
 # The key you hold to dictate: \"right-ctrl\", \"left-ctrl\", \"right-shift\", \"scroll-lock\", or
-# \"f13\" to \"f24\" (extra keys on some keyboards). Double-tap it for hands-free.
+# \"f13\" to \"f24\" (extra keys on some keyboards); on a Mac also \"right-option\" and
+# \"right-command\". Double-tap it for hands-free.
 dictation_key = \"right-ctrl\"
 
 # The microphone: part of its name, or \"\" for the system default.
@@ -83,12 +84,13 @@ pub struct Settings {
 }
 
 /// The key held to dictate. Only keys that do nothing on their own when pressed alone: not Alt
-/// (letting it go opens an app's menu), Caps Lock or Insert (they toggle), or the mouse's side
-/// buttons (Back and Forward). Utter only listens: the key still reaches the app.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// on Windows and Linux (letting it go opens an app's menu), Caps Lock or Insert (they toggle),
+/// or the mouse's side buttons (Back and Forward). Utter only listens: the key still reaches the
+/// app. A Mac's Option and Command do nothing alone, and most Mac keyboards have no Right
+/// Control: there Right Option is the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DictationKey {
-    #[default]
     RightCtrl,
     LeftCtrl,
     RightShift,
@@ -105,9 +107,25 @@ pub enum DictationKey {
     F22,
     F23,
     F24,
+    /// macOS only.
+    RightOption,
+    RightCommand,
+}
+
+impl Default for DictationKey {
+    fn default() -> Self {
+        if cfg!(target_os = "macos") { DictationKey::RightOption } else { DictationKey::RightCtrl }
+    }
 }
 
 impl DictationKey {
+    /// The keys Settings offers on this OS.
+    pub fn offered() -> Vec<DictationKey> {
+        let mac = cfg!(target_os = "macos");
+        let first = mac.then_some([DictationKey::RightOption, DictationKey::RightCommand]).into_iter().flatten();
+        first.chain(Self::ALL).collect()
+    }
+
     pub const ALL: [DictationKey; 16] = [
         DictationKey::RightCtrl,
         DictationKey::LeftCtrl,
@@ -135,15 +153,23 @@ impl DictationKey {
             DictationKey::LeftCtrl => VK_LCONTROL,
             DictationKey::RightShift => VK_RSHIFT,
             DictationKey::ScrollLock => VK_SCROLL,
+            // VK_RMENU and VK_RWIN, as macos.rs maps the Mac's keys.
+            DictationKey::RightOption => 0xA5,
+            DictationKey::RightCommand => 0x5C,
             f => VK_F13 + (f as u32 - DictationKey::F13 as u32),
         }
     }
 
-    /// Its name as people read it ("Right Ctrl", "F13").
+    /// Its name as people read it ("Right Ctrl", "F13"; "Right Control" on a Mac).
     pub fn name(self) -> String {
+        let mac = cfg!(target_os = "macos");
         match self {
+            DictationKey::RightCtrl if mac => "Right Control".into(),
+            DictationKey::LeftCtrl if mac => "Left Control".into(),
             DictationKey::RightCtrl => "Right Ctrl".into(),
             DictationKey::LeftCtrl => "Left Ctrl".into(),
+            DictationKey::RightOption => "Right Option".into(),
+            DictationKey::RightCommand => "Right Command".into(),
             DictationKey::RightShift => "Right Shift".into(),
             DictationKey::ScrollLock => "Scroll Lock".into(),
             f => format!("F{}", 13 + (f as u32 - DictationKey::F13 as u32)),
@@ -300,13 +326,22 @@ impl Settings {
         utter_core::data_dir().join("settings.toml")
     }
 
+    /// The commented default file: TEMPLATE, with a Mac's default key on macOS.
+    fn template() -> String {
+        if cfg!(target_os = "macos") {
+            TEMPLATE.replace("dictation_key = \"right-ctrl\"", "dictation_key = \"right-option\"")
+        } else {
+            TEMPLATE.to_owned()
+        }
+    }
+
     /// Reads the settings file, writing the commented default first if there is none.
     pub fn load_or_create(path: &Path) -> Result<Self, String> {
         if !path.exists() {
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
             }
-            std::fs::write(path, TEMPLATE).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::fs::write(path, Self::template()).map_err(|e| format!("{}: {e}", path.display()))?;
         }
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Self::parse(&text)
@@ -324,7 +359,7 @@ impl Settings {
         let text = if path.exists() {
             std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?
         } else {
-            TEMPLATE.to_owned()
+            Self::template()
         };
         Self::parse(&text).map_err(|e| format!("settings.toml has an error, so it was not changed: {e}"))?;
         let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
@@ -426,7 +461,7 @@ mod tests {
 
     #[test]
     fn the_template_parses_to_the_defaults() {
-        assert_eq!(Settings::parse(TEMPLATE).unwrap(), Settings::default());
+        assert_eq!(Settings::parse(&Settings::template()).unwrap(), Settings::default());
     }
 
     #[test]
@@ -448,7 +483,7 @@ mod tests {
         let path = temp("create");
         let _ = std::fs::remove_file(&path);
         assert_eq!(Settings::load_or_create(&path).unwrap(), Settings::default());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), TEMPLATE);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), Settings::template());
     }
 
     #[test]
@@ -507,8 +542,11 @@ mod tests {
 
     #[test]
     fn every_dictation_key_has_its_own_code_and_name() {
-        let codes: std::collections::HashSet<u32> = DictationKey::ALL.iter().map(|k| k.vk()).collect();
-        assert_eq!(codes.len(), DictationKey::ALL.len());
+        let every: Vec<DictationKey> =
+            DictationKey::ALL.into_iter().chain([DictationKey::RightOption, DictationKey::RightCommand]).collect();
+        let codes: std::collections::HashSet<u32> = every.iter().map(|k| k.vk()).collect();
+        assert_eq!(codes.len(), every.len());
+        assert_eq!(word(&DictationKey::RightOption), "right-option");
         assert_eq!(DictationKey::F24.vk(), 0x87);
         assert_eq!(DictationKey::F24.name(), "F24");
         assert_eq!(word(&DictationKey::RightShift), "right-shift");

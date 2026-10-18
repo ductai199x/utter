@@ -327,6 +327,13 @@ fn gb(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }
 
+/// What the keyboard check and problem ask for (problem.rs too).
+pub const KEYBOARD_FIX: &str = if cfg!(target_os = "macos") {
+    "Utter needs Input Monitoring, to hear the dictation key, and Accessibility, to paste. Allow opens System Settings: turn Utter on in both, then open Utter again."
+} else {
+    "Utter needs to read the dictation key and press the paste keys. Allow it once; your password is asked."
+};
+
 #[tauri::command]
 pub fn setup_check(before_choice: bool) -> Checks {
     let gpu = utter_pipeline::card::graphics_card();
@@ -385,6 +392,20 @@ pub fn setup_check(before_choice: bool) -> Checks {
             checks.push(Check { id: "gpu", ok: false, value: "None found".into(), fix: None });
         }
     }
+    // Linux: a udev rule; macOS: the Input Monitoring and Accessibility permissions.
+    if cfg!(any(target_os = "linux", target_os = "macos")) {
+        let access = utter_platform::hotkey::input_access();
+        if let Err(e) = &access {
+            tracing::info!("keyboard access: {e}");
+        }
+        let ok = access.is_ok();
+        checks.push(Check {
+            id: "keyboard",
+            ok,
+            value: if ok { "Allowed" } else { "Not allowed" }.into(),
+            fix: (!ok).then(|| KEYBOARD_FIX.into()),
+        });
+    }
     let dir = utter_core::data_dir();
     let _ = std::fs::create_dir_all(&dir);
     match utter_platform::disk::free_bytes(&dir) {
@@ -404,6 +425,13 @@ pub fn setup_check(before_choice: bool) -> Checks {
         }
     }
     Checks { checks, no_gpu, download_bytes: need }
+}
+
+/// "Allow" on the keyboard check (Linux): installs the udev rule through the desktop's password
+/// dialog. Async, so the UI thread never waits on the person answering it.
+#[tauri::command]
+pub async fn setup_allow_input() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(utter_platform::hotkey::allow_input).await.map_err(|e| e.to_string())?
 }
 
 /// The microphone open for the level check while step 2 shows, and which feed of its level is

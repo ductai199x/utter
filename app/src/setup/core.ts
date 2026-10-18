@@ -2,13 +2,14 @@
 // (`npm run dev`, then setup.html) a stand-in core plays every state so the page can be reviewed
 // without the app:
 // - ?mode=first|update|repair|problem picks the mode (the core opens the window with it);
-// - ?problem=gpu-memory|no-microphone|damaged|driver|other picks the problem shown;
-// - ?fail=driver|gpu|download|start|mic plays a failure once.
+// - ?problem=gpu-memory|no-microphone|keyboard|damaged|driver|other picks the problem shown;
+// - ?fail=driver|gpu|keyboard|download|start|mic plays a failure once.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 export interface Check {
-  id: 'gpu' | 'memory' | 'driver' | 'disk';
+  /** "keyboard" on Linux only: the udev rule for the keyboards and the paste keys. */
+  id: 'gpu' | 'memory' | 'driver' | 'keyboard' | 'disk';
   ok: boolean;
   value: string;
   fix: string | null;
@@ -30,11 +31,11 @@ export interface Progress {
 }
 
 export interface Problem {
-  kind: 'gpu-memory' | 'no-microphone' | 'damaged' | 'driver' | 'other';
+  kind: 'gpu-memory' | 'no-microphone' | 'keyboard' | 'damaged' | 'driver' | 'other';
   title: string;
   message: string;
   detail: string;
-  actions: ('retry' | 'repair' | 'logs' | 'quit' | 'close')[];
+  actions: ('retry' | 'repair' | 'allow' | 'logs' | 'quit' | 'close')[];
 }
 
 export type Mode = 'first' | 'update' | 'model' | 'repair' | 'problem';
@@ -69,9 +70,25 @@ export function check(beforeChoice = false): Promise<Checks> {
                 fix: 'Update the NVIDIA driver to version 580 or newer, then check again.',
               }
             : { id: 'driver', ok: true, value: 'CUDA 13.4', fix: null },
+          ...(fail === 'keyboard'
+            ? [
+                {
+                  id: 'keyboard' as const,
+                  ok: false,
+                  value: 'Not allowed',
+                  fix: 'Utter needs to read the dictation key and press the paste keys. Allow it once; your password is asked.',
+                },
+              ]
+            : []),
           { id: 'disk', ok: true, value: '186.2 GB free, 6.0 GB needed', fix: null },
         ];
   return new Promise((r) => setTimeout(() => r({ checks, noGpu: fail === 'gpu', downloadBytes: 5.95e9 }), 600));
+}
+
+/** "Allow" on the keyboard check: the desktop asks for the password; rejects with why it failed. */
+export function allowInput(): Promise<void> {
+  if (inTauri) return invoke('setup_allow_input');
+  return new Promise((r) => setTimeout(() => ((fail = null), r()), 800));
 }
 
 export const microphones = (): Promise<string[]> =>
@@ -177,6 +194,13 @@ const MOCK_PROBLEMS: Record<Problem['kind'], Problem> = {
     message: 'Plug in a microphone or headset, then retry.',
     detail: 'no input device',
     actions: ['retry', 'quit'],
+  },
+  keyboard: {
+    kind: 'keyboard',
+    title: 'Utter cannot use the keyboard',
+    message: 'Utter needs to read the dictation key and press the paste keys. Allow it once; your password is asked.',
+    detail: 'hotkey: the keyboard devices are not open to this user (Utter\'s udev rule, packaging/linux/70-utter.rules)',
+    actions: ['allow', 'logs', 'quit'],
   },
   damaged: {
     kind: 'damaged',

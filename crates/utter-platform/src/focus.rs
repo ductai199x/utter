@@ -356,20 +356,105 @@ mod imp {
             .collect()
     }
 
+    /// Desktop services on the accessibility bus, which own no window a person types into.
     fn is_service(exe: &str) -> bool {
-        exe.starts_with("gsd-")
-            || exe.starts_with("ibus")
+        const PREFIXES: &[&str] =
+            &["gsd-", "ibus", "xdg-desktop-portal", "evolution-", "gjs", "vmtoolsd", "vmware-", "at-spi"];
+        PREFIXES.iter().any(|p| exe.starts_with(p))
             || matches!(
                 exe,
-                "gnome-shell" | "gjs" | "vmware-user" | "evolution-alarm" | "xdg-desktop-por" | "plasmashell" | "kded6"
+                "gnome-shell" | "plasmashell" | "kded6" | "kwin_wayland" | "kwin_x11" | "xdg-permission-store"
             )
     }
 
-    /// What people call an app: its executable's file name, capitalized ("gnome-text-editor"
-    /// stays as it is; the desktop entry's name would be better, and is not looked up yet).
-    fn app_name(exe: &str, path: &str) -> String {
-        let base = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(exe);
-        base.to_owned()
+    /// What people call an app: the Name of its desktop entry ("Text Editor" for
+    /// gnome-text-editor), else the program's file name.
+    fn app_name(exe: &str, _path: &str) -> String {
+        desktop_names().get(exe).cloned().unwrap_or_else(|| exe.to_owned())
+    }
+
+    /// Program file name to the Name of the desktop entry that starts it (its Exec or TryExec
+    /// program, or its StartupWMClass), from the system's, Flatpak's and the person's entries;
+    /// read once.
+    fn desktop_names() -> &'static std::collections::HashMap<String, String> {
+        static NAMES: std::sync::OnceLock<std::collections::HashMap<String, String>> = std::sync::OnceLock::new();
+        NAMES.get_or_init(|| {
+            let mut dirs: Vec<std::path::PathBuf> = std::env::var("XDG_DATA_DIRS")
+                .unwrap_or_else(|_| "/usr/local/share:/usr/share".into())
+                .split(':')
+                .map(std::path::PathBuf::from)
+                .collect();
+            dirs.push("/var/lib/flatpak/exports/share".into());
+            if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+                dirs.push(home.join(".local/share/flatpak/exports/share"));
+                dirs.push(home.join(".local/share"));
+            }
+            let mut names = std::collections::HashMap::new();
+            // Later directories win: the person's own entries over the system's.
+            for dir in dirs {
+                let Ok(entries) = std::fs::read_dir(dir.join("applications")) else { continue };
+                for entry in entries.flatten() {
+                    if entry.path().extension().is_some_and(|e| e == "desktop")
+                        && let Ok(text) = std::fs::read_to_string(entry.path())
+                    {
+                        for (program, name) in desktop_entry(&text) {
+                            names.insert(program, name.clone());
+                        }
+                    }
+                }
+            }
+            names
+        })
+    }
+
+    /// The programs a desktop entry names, each with the entry's Name.
+    fn desktop_entry(text: &str) -> Vec<(String, String)> {
+        let (mut name, mut programs, mut in_entry) = (None, Vec::new(), false);
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                in_entry = line == "[Desktop Entry]";
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=').filter(|_| in_entry) else { continue };
+            match key.trim() {
+                "Name" => name = Some(value.trim().to_owned()),
+                "Exec" | "TryExec" => {
+                    // The program after any "env VAR=x"; Flatpak's entries start `flatpak run`,
+                    // and their windows are matched by StartupWMClass instead.
+                    let program = value.split_whitespace().find(|w| *w != "env" && !w.contains('='));
+                    if let Some(base) = program.and_then(|p| p.rsplit('/').next()).filter(|b| *b != "flatpak") {
+                        programs.push(base.trim_matches('"').to_owned());
+                    }
+                }
+                "StartupWMClass" => programs.push(value.trim().to_owned()),
+                _ => {}
+            }
+        }
+        name.map(|n| programs.into_iter().map(|p| (p, n.clone())).collect()).unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn a_desktop_entry_names_its_programs() {
+            let entry = "[Desktop Entry]\nName=Text Editor\nExec=gnome-text-editor %U\nTryExec=gnome-text-editor\n\
+                         [Desktop Action new-window]\nName=New Window\nExec=gnome-text-editor --new-window\n";
+            let found = super::desktop_entry(entry);
+            assert!(found.iter().all(|(p, n)| p == "gnome-text-editor" && n == "Text Editor"));
+            assert_eq!(found.len(), 2);
+            let env = "[Desktop Entry]\nName=Thing\nExec=env FOO=1 /opt/thing/bin/thing-app --x\n";
+            assert_eq!(super::desktop_entry(env), [("thing-app".to_owned(), "Thing".to_owned())]);
+        }
+
+        #[test]
+        fn services_are_not_apps() {
+            for exe in ["evolution-alarm-notify", "xdg-desktop-portal-gtk", "gjs-console", "vmtoolsd", "gsd-media-keys"]
+            {
+                assert!(super::is_service(exe), "{exe}");
+            }
+            assert!(!super::is_service("gnome-text-editor"));
+        }
     }
 }
 

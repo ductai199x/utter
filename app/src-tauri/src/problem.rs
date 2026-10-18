@@ -11,13 +11,13 @@ use utter_runtime::RuntimeError;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Problem {
-    /// "gpu-memory", "no-microphone", "damaged", "driver" or "other".
+    /// "gpu-memory", "no-microphone", "keyboard", "damaged", "driver" or "other".
     pub kind: &'static str,
     pub title: String,
     pub message: String,
     /// The error itself, for "Details".
     pub detail: String,
-    /// The actions offered, in order: "retry", "repair", "logs", "quit" or "close".
+    /// The actions offered, in order: "retry", "repair", "allow", "logs", "quit" or "close".
     pub actions: Vec<&'static str>,
 }
 
@@ -45,6 +45,9 @@ const DRIVER: &[&str] = &[
     "errordevicelost",
     "vk_error_device_lost",
     "vulkan-1.dll",
+    // Linux and macOS: the driver's own libraries, which Utter never ships.
+    "libcuda.so",
+    "libvulkan.so",
     "no graphics card found",
     "webgpu does not offer",
     "vulkan does not offer",
@@ -65,6 +68,9 @@ const DAMAGED: &[&str] = &[
     "not a valid win32 application",
     "could not load library",
     "the specified module could not be found",
+    // Linux (dlopen) and macOS (dyld).
+    "cannot open shared object file",
+    "library not loaded",
 ];
 
 fn gb(bytes: u64) -> String {
@@ -101,6 +107,14 @@ pub fn diagnose(e: &PipelineError, tier: Tier) -> Problem {
             "No microphone found",
             "Plug in a microphone or headset, then retry.".into(),
             vec!["retry", "quit"],
+        );
+    }
+    if matches!(e, PipelineError::Hotkey(_)) && utter_platform::hotkey::input_access().is_err() {
+        return problem(
+            "keyboard",
+            "Utter cannot use the keyboard",
+            crate::setup::KEYBOARD_FIX.into(),
+            vec!["allow", "logs", "quit"],
         );
     }
     if has(OUT_OF_MEMORY) || free.is_some_and(|f| f < need) {
@@ -229,6 +243,18 @@ mod tests {
             "Failed to allocate memory for requested buffer of size 52428800".into(),
         ));
         assert_eq!(diagnose(&e, Tier::Quality).kind, "gpu-memory");
+    }
+
+    #[test]
+    fn linux_library_failures_split_into_driver_and_damaged() {
+        let no_driver = PipelineError::Asr(utter_asr::AsrError::Runtime(
+            "libcuda.so.1: cannot open shared object file: No such file or directory".into(),
+        ));
+        assert_eq!(diagnose(&no_driver, Tier::Quality).kind, "driver");
+        let ours = PipelineError::Asr(utter_asr::AsrError::Runtime(
+            "libonnxruntime.so.1: cannot open shared object file: No such file or directory".into(),
+        ));
+        assert_eq!(diagnose(&ours, Tier::Quality).kind, "damaged");
     }
 
     #[test]

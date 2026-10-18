@@ -93,8 +93,9 @@ struct Applied {
 
 impl Bar {
     fn new(window: WebviewWindow) -> Self {
-        // A native handle for utter_platform::overlay (Windows: the HWND). Other platforms place
-        // the Bar their own way (docs/plan-cross-platform.md) and have none yet.
+        // Windows places the Bar through utter_platform::overlay, by its HWND. Elsewhere Tauri
+        // does (bar_bottom_center): on Linux the window runs under XWayland, where an X11 client
+        // may keep itself above others and place itself (docs/plan-cross-platform.md).
         #[cfg(windows)]
         let hwnd = window.hwnd().ok().map(|h| h.0 as isize);
         #[cfg(not(windows))]
@@ -102,6 +103,8 @@ impl Bar {
         if let Some(h) = hwnd {
             overlay::make_overlay(h);
         }
+        #[cfg(not(windows))]
+        let _ = window.set_focusable(false);
         let _ = window.set_ignore_cursor_events(true);
         Self {
             window,
@@ -112,8 +115,24 @@ impl Bar {
         }
     }
 
-    fn handle(&self) -> Option<isize> {
-        self.hwnd
+    /// Shows the Bar at the bottom centre of the monitor holding `near` (a window, from focus),
+    /// without activating it and without waiting for the UI thread.
+    fn show(&self, near: Option<isize>) {
+        if let Some(h) = self.hwnd {
+            overlay::show_bottom_center(h, near, BAR_SIZE, BAR_BOTTOM_MARGIN);
+            return;
+        }
+        let window = self.window.clone();
+        let _ = self.window.run_on_main_thread(move || bar_bottom_center(&window));
+    }
+
+    fn hide(&self) {
+        match self.hwnd {
+            Some(h) => overlay::hide(h),
+            None => {
+                let _ = self.window.hide();
+            }
+        }
     }
 
     fn emit_state(&self, state: BarState) {
@@ -129,8 +148,8 @@ impl Bar {
                 }
                 // State first, so the page has reset before the window becomes visible.
                 self.emit_state(BarState { hands_free: Some(hands_free), ..BarState::new("listening") });
-                if first && let Some(h) = self.handle() {
-                    overlay::show_bottom_center(h, target, BAR_SIZE, BAR_BOTTOM_MARGIN);
+                if first {
+                    self.show(target);
                 }
             }
             Event::Words { committed, preview } => {
@@ -218,9 +237,7 @@ impl Bar {
                 // Outside a dictation: a new generation, so an old timer cannot hide it.
                 self.generation.fetch_add(1, Ordering::Relaxed);
                 self.emit_state(BarState { message: Some(text), ok: Some(ok), ..BarState::new("notice") });
-                if let Some(h) = self.handle() {
-                    overlay::show_bottom_center(h, None, BAR_SIZE, BAR_BOTTOM_MARGIN);
-                }
+                self.show(None);
                 self.leave_after(if ok { NOTICE_HOLD } else { ERROR_HOLD });
             }
         }
@@ -257,9 +274,7 @@ impl Bar {
         std::thread::spawn(move || {
             std::thread::sleep(delay);
             if bar.current(generation) {
-                if let Some(h) = bar.handle() {
-                    overlay::hide(h);
-                }
+                bar.hide();
                 bar.emit_state(BarState::new("hidden"));
             }
         });
@@ -440,7 +455,46 @@ fn since_launch() -> f64 {
     LAUNCHED.get().map_or(0.0, |t| t.elapsed().as_secs_f64())
 }
 
+/// Places the Bar at the bottom centre of the work area of the monitor under the mouse (the
+/// primary one if unknown), scaled to it, and shows it: utter_platform::overlay's job on Windows,
+/// done here through Tauri elsewhere. Runs on the UI thread, which owns the window.
+fn bar_bottom_center(window: &WebviewWindow) {
+    let monitor = window
+        .cursor_position()
+        .ok()
+        .and_then(|p| window.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten());
+    if let Some(m) = monitor {
+        let scale = m.scale_factor();
+        let px = |v: u32| (v as f64 * scale).round() as i32;
+        let (w, h) = (px(BAR_SIZE.0), px(BAR_SIZE.1));
+        let area = m.work_area();
+        let x = area.position.x + (area.size.width as i32 - w) / 2;
+        let y = area.position.y + area.size.height as i32 - h - px(BAR_BOTTOM_MARGIN);
+        let _ = window.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
+    let _ = window.show();
+    // Some window managers forget "above" while a window is hidden.
+    let _ = window.set_always_on_top(true);
+}
+
+/// Linux: the windows run under XWayland on a Wayland desktop, the only way there for a window
+/// to stay above others and place itself (the Bar); and WebKitGTK's DMA-BUF renderer, which
+/// draws blank windows on some GPUs and VMs, is off. Either is the person's to override.
+#[cfg(target_os = "linux")]
+fn linux_display_defaults() {
+    for (key, value) in [("GDK_BACKEND", "x11,wayland"), ("WEBKIT_DISABLE_DMABUF_RENDERER", "1")] {
+        if std::env::var_os(key).is_none() {
+            // SAFETY: at the top of main, before any other thread exists.
+            unsafe { std::env::set_var(key, value) };
+        }
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "linux")]
+    linux_display_defaults();
     if !args::handle() {
         return;
     }
@@ -457,6 +511,7 @@ fn main() {
         .manage(setup::LastProblem::default())
         .invoke_handler(tauri::generate_handler![
             home::home_state,
+            home::home_quit,
             home::dictation_key,
             home::save_settings,
             home::open_path,
@@ -471,6 +526,7 @@ fn main() {
             history::paste_rules,
             history::open_paste_rules,
             setup::setup_check,
+            setup::setup_allow_input,
             setup::setup_microphones,
             setup::setup_mic_start,
             setup::setup_mic_stop,

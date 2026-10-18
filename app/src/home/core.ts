@@ -47,6 +47,9 @@ export interface HomeState {
   version: string;
   dataDir: string;
   settingsPath: string;
+  os: 'windows' | 'linux' | 'macos';
+  /** The desktop shows tray icons (GNOME without an AppIndicator extension does not). */
+  tray: boolean;
 }
 
 export interface Applied {
@@ -89,6 +92,8 @@ const mock: HomeState = {
   version: '0.0.1',
   dataDir: 'C:\\Users\\you\\AppData\\Local\\Utter',
   settingsPath: 'C:\\Users\\you\\AppData\\Local\\Utter\\settings.toml',
+  os: 'windows',
+  tray: new URLSearchParams(location.search).get('tray') !== '0',
 };
 const appliedHandlers: ((a: Applied) => void)[] = [];
 // JSON, not structuredClone: the page passes Svelte state proxies, which cannot be cloned.
@@ -106,6 +111,8 @@ export const saveSettings = (settings: Settings) => {
 };
 export const openPath = (which: 'settings' | 'data' | 'logs') =>
   inTauri ? invoke<void>('open_path', { which }) : Promise.resolve();
+/** Quits Utter: Settings offers it where the desktop shows no tray icons. */
+export const quit = () => (inTauri ? invoke<void>('home_quit') : Promise.resolve());
 
 export const onState = (f: (s: HomeState) => void): Promise<UnlistenFn> =>
   inTauri ? listen<HomeState>('home-state', (e) => f(e.payload)) : Promise.resolve(() => {});

@@ -194,7 +194,8 @@ mod imp {
     }
 
     pub fn register(on: Box<dyn FnMut(Shortcut) + Send>) -> Result<Shortcuts, ShortcutError> {
-        crate::macos::register_shortcuts(on).map_err(ShortcutError)
+        let stop = crate::macos::register_shortcuts(on).map_err(ShortcutError)?;
+        Ok(Shortcuts { stop, taken: Vec::new() })
     }
 
     pub fn modifiers_down() -> bool {
