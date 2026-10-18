@@ -12,6 +12,7 @@ mod clean;
 pub mod gate;
 pub mod history;
 pub mod log;
+pub mod runtime_choice;
 pub mod session;
 pub mod settings;
 
@@ -112,8 +113,13 @@ type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
 /// memory as far as quality allows; small latency costs are fine). On Vulkan float16: WebGPU
 /// runs 8 bits 34 ms slower a clip, not 5 (docs/plan-vulkan.md); Metal runs the same WebGPU
 /// provider. On the CPU the 8-bit build, half the memory traffic.
-pub fn speech_for(_tier: Tier) -> SpeechModel {
-    match utter_runtime::backend() {
+pub fn speech_for(tier: Tier) -> SpeechModel {
+    speech_on(tier, utter_runtime::backend())
+}
+
+/// The speech model a tier runs on `backend`.
+pub fn speech_on(_tier: Tier, backend: Backend) -> SpeechModel {
+    match backend {
         Backend::Cuda | Backend::Cpu => SpeechModel::W8,
         Backend::Vulkan | Backend::Metal => SpeechModel::Fp16,
     }
@@ -148,8 +154,13 @@ pub fn card_need(tier: Tier) -> u64 {
 /// two models. On Vulkan: onnxruntime with its WebGPU provider, voice detection, the Vulkan
 /// llama-server, then the models; nothing of CUDA.
 pub fn components_for(tier: Tier) -> Vec<&'static str> {
-    let mut ids = runtime_for(utter_runtime::backend()).to_vec();
-    ids.extend([speech_for(tier).component(), tier.component()]);
+    components_on(tier, utter_runtime::backend())
+}
+
+/// The components a tier needs on `backend` (Settings' download size for another runtime).
+pub fn components_on(tier: Tier, backend: Backend) -> Vec<&'static str> {
+    let mut ids = runtime_for(backend).to_vec();
+    ids.extend([speech_on(tier, backend).component(), tier.component()]);
     ids
 }
 

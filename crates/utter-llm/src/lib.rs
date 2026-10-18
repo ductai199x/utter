@@ -398,6 +398,7 @@ fn vulkan_device(exe: &Path) -> Result<String, LlmError> {
             let mut cmd = Command::new(exe);
             cmd.arg("--list-devices").stdin(Stdio::null());
             utter_platform::process::no_console_window(&mut cmd);
+            utter_platform::process::outside_appimage(&mut cmd);
             let t = Instant::now();
             let out = cmd.output().map_err(|e| format!("{}: {e}", exe.display()))?;
             let listed = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
@@ -473,8 +474,10 @@ const LIBRARY_PATH_VAR: &str = "LD_LIBRARY_PATH";
 /// `dirs` in front of the library search variable's current value.
 fn library_path(dirs: &[PathBuf]) -> std::ffi::OsString {
     let mut paths: Vec<PathBuf> = dirs.to_vec();
+    // Not an AppImage's own libraries (utter_platform::process::outside_appimage).
+    let appdir = std::env::var_os("APPDIR").filter(|d| !d.is_empty()).map(PathBuf::from);
     if let Some(existing) = std::env::var_os(LIBRARY_PATH_VAR) {
-        paths.extend(std::env::split_paths(&existing));
+        paths.extend(std::env::split_paths(&existing).filter(|p| appdir.as_ref().is_none_or(|a| !p.starts_with(a))));
     }
     std::env::join_paths(paths).unwrap_or_default()
 }

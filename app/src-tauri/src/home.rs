@@ -86,8 +86,13 @@ pub struct State {
     microphones: Vec<String>,
     /// The light model is published (components.json): until then only Quality is offered.
     light_available: bool,
-    /// The GPU is big enough for the quality model (utter_pipeline::card_need).
+    /// The GPU is big enough for the quality model (utter_pipeline::card_need), and Utter runs
+    /// on a graphics card at all (not the processor).
     quality_fits: bool,
+    /// What runs the models now ("cuda", "vulkan", "metal" or "cpu").
+    running: utter_pipeline::settings::Runtime,
+    /// The runtimes this computer can run, best first, for Settings.
+    runtimes: Vec<RuntimeOption>,
     /// What choosing each model would download now, in bytes (0: installed).
     download_bytes: std::collections::HashMap<&'static str, u64>,
     /// The GPU memory each model needs, speech included (utter_pipeline::gpu_need), and the
@@ -103,6 +108,42 @@ pub struct State {
     os: &'static str,
     /// The desktop shows tray icons; without them, Settings offers Quit.
     tray: bool,
+}
+
+/// A runtime as Settings lists it.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeOption {
+    id: utter_pipeline::settings::Runtime,
+    name: &'static str,
+    detail: &'static str,
+    /// What switching to it downloads, for the model it would run (0: all here).
+    download_bytes: u64,
+}
+
+/// The runtimes this computer can run, with what each would download.
+fn runtimes() -> Vec<RuntimeOption> {
+    use utter_runtime::Backend;
+    let model = Settings::load_or_create(&Settings::path()).map(|s| s.model).unwrap_or_default();
+    utter_pipeline::runtime_choice::available()
+        .iter()
+        .map(|&backend| {
+            let (name, detail) = match backend {
+                Backend::Cuda => ("NVIDIA CUDA", "Fastest on NVIDIA graphics cards."),
+                Backend::Vulkan => ("Vulkan", "Any graphics card: AMD, Intel or NVIDIA."),
+                Backend::Metal => ("Apple GPU", "The Mac's own graphics."),
+                Backend::Cpu => ("Processor", "No graphics card needed. Slower; the Light model only."),
+            };
+            let runs = if utter_pipeline::runtime_choice::runs_on(model, backend) { model } else { Model::Light };
+            let download_bytes = utter_pipeline::components_on(runs.into(), backend)
+                .into_iter()
+                .filter_map(|id| utter_runtime::component(id).ok())
+                .filter(|c| !c.is_intact())
+                .map(|c| c.download_size())
+                .sum();
+            RuntimeOption { id: utter_pipeline::runtime_choice::setting_for(backend), name, detail, download_bytes }
+        })
+        .collect()
 }
 
 /// A dictation key as Settings lists it: its name in settings.toml and as people read it.
@@ -143,7 +184,10 @@ fn state() -> State {
         error,
         microphones: utter_audio::input_devices(),
         light_available: utter_llm::cleanup::Tier::Light.offered(),
-        quality_fits: gpu_memory().is_some_and(|m| m >= utter_pipeline::card_need(utter_llm::cleanup::Tier::Quality)),
+        quality_fits: utter_runtime::backend() != utter_runtime::Backend::Cpu
+            && gpu_memory().is_some_and(|m| m >= utter_pipeline::card_need(utter_llm::cleanup::Tier::Quality)),
+        running: utter_pipeline::runtime_choice::setting_for(utter_runtime::backend()),
+        runtimes: runtimes(),
         download_bytes: TIERS.into_iter().map(|(name, tier)| (name, to_download(tier))).collect(),
         gpu_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::gpu_need(tier))).collect(),
         card_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::card_need(tier))).collect(),
@@ -157,6 +201,13 @@ fn state() -> State {
         os: std::env::consts::OS,
         tray: utter_platform::shell::tray_shown(),
     }
+}
+
+/// Restart, to switch the runtime Settings saved (it is chosen once, at start).
+#[tauri::command]
+pub fn home_restart(app: tauri::AppHandle) {
+    tracing::info!("restarting to switch the runtime");
+    app.restart();
 }
 
 /// Quit, from Settings on a desktop without tray icons (the tray's Quit elsewhere).

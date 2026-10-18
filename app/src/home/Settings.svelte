@@ -14,6 +14,7 @@
     openPath,
     pasteRules,
     quit,
+    restart,
     ruleSource,
     withRule,
     withoutRule,
@@ -21,6 +22,7 @@
     type HomeState,
     type KeepHistory,
     type Model,
+    type Runtime,
     type PasteKeep,
     type PasteRules,
     type PasteWith,
@@ -47,7 +49,11 @@
   const needGb = (model: Model) => ((home?.gpuNeed[model] ?? 0) / 1e9).toFixed(1);
   // Why the quality model cannot be chosen, if it cannot.
   const qualityBlocked = $derived(
-    home && !home.qualityFits ? `needs a graphics card with ${cardGb(home.cardNeed.quality)} GB of memory.` : '',
+    home && !home.qualityFits
+      ? home.running === 'cpu'
+        ? 'needs a graphics card. On the processor, Utter runs Light.'
+        : `needs a graphics card with ${cardGb(home.cardNeed.quality)} GB of memory.`
+      : '',
   );
   // The two models: Quality, the bigger one, and Light, once its model is published.
   const MODELS = $derived(
@@ -57,7 +63,9 @@
         [
           'light',
           'Light',
-          `The smaller model, for ${cardGb(home?.cardNeed.light ?? 0)} GB graphics cards: about ${needGb('light')} GB.`,
+          home?.running === 'cpu'
+            ? `The smaller model, on the processor: about ${needGb('light')} GB of memory.`
+            : `The smaller model, for ${cardGb(home?.cardNeed.light ?? 0)} GB graphics cards: about ${needGb('light')} GB.`,
         ],
       ] as const
     ).filter(([id]) => id !== 'light' || home?.lightAvailable),
@@ -80,6 +88,18 @@
   const groups = $derived(groupRules(rules?.rules ?? []));
   const mine = $derived(groups.filter((g) => ruleSource(g) !== 'default'));
   const defaults = $derived(groups.length - mine.length);
+  // The model that runs: Light on the processor whatever settings.toml says (Quality needs a GPU).
+  const shownModel = $derived(home?.running === 'cpu' && settings?.model === 'quality' ? 'light' : settings?.model);
+  // The runtime: "auto" shows as the one it picks (the first, best one).
+  const chosenRuntime = $derived(
+    settings?.runtime && settings.runtime !== 'auto' && home?.runtimes.some((r) => r.id === settings?.runtime)
+      ? settings.runtime
+      : (home?.runtimes[0]?.id ?? 'cpu'),
+  );
+  const pendingRuntime = $derived(
+    home && chosenRuntime !== home.running ? home.runtimes.find((r) => r.id === chosenRuntime) : undefined,
+  );
+  const runtimeDesc = $derived(home?.runtimes.find((r) => r.id === chosenRuntime)?.detail ?? '');
   const loginLabel = $derived(home?.os === 'windows' ? 'Start with Windows' : 'Start at login');
   // GNOME shows no tray icons without an extension, so elsewhere it is "in the background".
   const loginDesc = $derived(
@@ -236,10 +256,42 @@
       </div>
 
       <h2>Cleanup model</h2>
+      {#if home.runtimes.length > 1}
+        <div class="row">
+          <div class="label">
+            <label for="runtime">Runs on</label>
+            <span class="desc">{runtimeDesc}</span>
+          </div>
+          <select
+            id="runtime"
+            value={chosenRuntime}
+            onchange={(e) => settings && save({ ...settings, runtime: e.currentTarget.value as Runtime })}
+          >
+            {#each home.runtimes as r (r.id)}
+              <option value={r.id}>{r.name}{r.id === home.runtimes[0]?.id ? ' (recommended)' : ''}</option>
+            {/each}
+          </select>
+        </div>
+        {#if pendingRuntime}
+          <div class="row">
+            <div class="label">
+              <span class="label-text">Utter restarts to switch to {pendingRuntime.name}</span>
+              <span class="desc"
+                >{pendingRuntime.downloadBytes > 0
+                  ? `It downloads ${(pendingRuntime.downloadBytes / 1e9).toFixed(1)} GB first; dictation is off until that is done.`
+                  : 'It takes a few seconds.'}{pendingRuntime.id === 'cpu' && settings.model === 'quality'
+                ? ' On the processor it runs the Light model.'
+                : ''}</span
+              >
+            </div>
+            <button class="primary" onclick={() => void restart()}>Restart now</button>
+          </div>
+        {/if}
+      {/if}
       <div class="row">
         <div class="label">
           <span class="label-text" id="model-label">Model</span>
-          <span class="desc">{MODELS.find(([id]) => id === settings?.model)?.[2] ?? ''}</span>
+          <span class="desc">{MODELS.find(([id]) => id === shownModel)?.[2] ?? ''}</span>
           {#if applied.model?.status === 'loading'}
             <span class="row-status"><span class="spinner" aria-hidden="true"></span>Loading...</span>
           {:else if applied.model?.status === 'error'}
@@ -251,7 +303,7 @@
             {@const blocked = id === 'quality' ? qualityBlocked : ''}
             <button
               role="radio"
-              aria-checked={settings.model === id}
+              aria-checked={shownModel === id}
               disabled={!!blocked}
               title={blocked ? `Quality ${blocked}` : downloadNote(id)}
               onclick={() => settings && save({ ...settings, model: id })}>{label}</button
@@ -259,7 +311,7 @@
           {/each}
         </div>
       </div>
-      {#if qualityBlocked && settings.model !== 'quality'}<p class="hint">Quality: {qualityBlocked}</p>{/if}
+      {#if qualityBlocked}<p class="hint">Quality {qualityBlocked}</p>{/if}
 
       <h2>Typing</h2>
       <div class="row">

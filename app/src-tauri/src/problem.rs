@@ -59,7 +59,11 @@ const DAMAGED: &[&str] = &[
     "not installed",
     "no such file",
     "cannot find the file",
-    "gguf",
+    // llama.cpp failing to read the model; not just "gguf": the server log's first line names
+    // the model file, so every failure of the server looked like damage (an AppImage's library
+    // clash was offered Repair, which could not help).
+    "gguf_init",
+    "error loading model",
     // The GPU libraries (cuDNN, CUDA, onnxruntime) failing or not loading: Utter's own pinned
     // copies, on a card and driver the system check passed, so most likely damaged.
     "cudnn failure",
@@ -255,6 +259,17 @@ mod tests {
             "libonnxruntime.so.1: cannot open shared object file: No such file or directory".into(),
         ));
         assert_eq!(diagnose(&ours, Tier::Quality).kind, "damaged");
+    }
+
+    #[test]
+    fn a_server_failure_is_not_damage_because_its_log_names_the_model() {
+        let detail = "--- llama-server started, model /x/utter-light-v2-q4_0.gguf
+llama-server: version OPENSSL_3.3.0 not found";
+        let e = PipelineError::Asr(utter_asr::AsrError::Runtime(detail.into()));
+        assert_eq!(diagnose(&e, Tier::Light).kind, "other");
+        let corrupt =
+            PipelineError::Asr(utter_asr::AsrError::Runtime("gguf_init_from_file_impl: failed to read magic".into()));
+        assert_eq!(diagnose(&corrupt, Tier::Light).kind, "damaged");
     }
 
     #[test]

@@ -6,7 +6,9 @@ use std::process::Command;
 
 /// Opens `path` with its default app and returns without waiting for it.
 pub fn open(path: &Path) -> std::io::Result<()> {
-    imp::command(path).spawn().map(drop)
+    let mut cmd = imp::command(path);
+    crate::process::outside_appimage(&mut cmd);
+    cmd.spawn().map(drop)
 }
 
 /// Whether the desktop shows tray icons. Windows and macOS always do; on Linux, a desktop

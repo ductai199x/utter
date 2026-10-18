@@ -25,10 +25,23 @@ export interface Settings {
   dictation_key: string;
   microphone: string;
   model: Model;
+  /** What runs the models; Utter restarts to switch. */
+  runtime: Runtime;
   keep_history: KeepHistory;
   debug_log: boolean;
   keep_logs: boolean;
   paste: PasteOverride[];
+}
+
+export type Runtime = 'auto' | 'cuda' | 'vulkan' | 'metal' | 'cpu';
+
+/** A runtime this computer can run, as Settings lists it. */
+export interface RuntimeOption {
+  id: Runtime;
+  name: string;
+  detail: string;
+  /** What switching to it downloads (0: all here). */
+  downloadBytes: number;
 }
 
 export interface HomeState {
@@ -36,6 +49,10 @@ export interface HomeState {
   error: string | null;
   microphones: string[];
   qualityFits: boolean;
+  /** What runs the models now. */
+  running: Runtime;
+  /** The runtimes this computer can run, best first. */
+  runtimes: RuntimeOption[];
   lightAvailable: boolean;
   /** What choosing each model would download now, in bytes (0: installed). */
   downloadBytes: Record<Model, number>;
@@ -70,6 +87,7 @@ const mock: HomeState = {
     dictation_key: 'right-ctrl',
     microphone: '',
     model: 'quality',
+    runtime: 'auto',
     keep_history: 'forever',
     debug_log: false,
     keep_logs: true,
@@ -93,6 +111,12 @@ const mock: HomeState = {
   dataDir: 'C:\\Users\\you\\AppData\\Local\\Utter',
   settingsPath: 'C:\\Users\\you\\AppData\\Local\\Utter\\settings.toml',
   os: 'windows',
+  running: 'cuda',
+  runtimes: [
+    { id: 'cuda', name: 'NVIDIA CUDA', detail: 'Fastest on NVIDIA graphics cards.', downloadBytes: 0 },
+    { id: 'vulkan', name: 'Vulkan', detail: 'Any graphics card: AMD, Intel or NVIDIA.', downloadBytes: 1.6e9 },
+    { id: 'cpu', name: 'Processor', detail: 'No graphics card needed. Slower; the Light model only.', downloadBytes: 3.6e9 },
+  ],
   tray: new URLSearchParams(location.search).get('tray') !== '0',
 };
 const appliedHandlers: ((a: Applied) => void)[] = [];
@@ -113,6 +137,8 @@ export const openPath = (which: 'settings' | 'data' | 'logs') =>
   inTauri ? invoke<void>('open_path', { which }) : Promise.resolve();
 /** Quits Utter: Settings offers it where the desktop shows no tray icons. */
 export const quit = () => (inTauri ? invoke<void>('home_quit') : Promise.resolve());
+/** Restarts Utter, to switch to the runtime Settings saved. */
+export const restart = () => (inTauri ? invoke<void>('home_restart') : Promise.resolve());
 
 export const onState = (f: (s: HomeState) => void): Promise<UnlistenFn> =>
   inTauri ? listen<HomeState>('home-state', (e) => f(e.payload)) : Promise.resolve(() => {});

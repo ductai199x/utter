@@ -27,6 +27,10 @@
   // Check.
   let checks = $state<Checks | null>(null);
   const allOk = $derived(checks !== null && checks.checks.every((c) => c.ok));
+  /** Only keyboard access is missing (Linux's udev rule, macOS's permissions). */
+  const onlyKeyboard = $derived(
+    checks !== null && checks.checks.some((c) => !c.ok) && checks.checks.every((c) => c.ok || c.id === 'keyboard'),
+  );
   const checkTitle =
     mode === 'update'
       ? 'Utter needs to download an update'
@@ -34,7 +38,9 @@
         ? 'Utter needs to download the model you chose'
         : mode === 'repair'
         ? "Some of Utter's files are missing or damaged"
-        : 'Welcome to Utter';
+        : mode === 'runtime'
+          ? 'Utter needs to download a few files'
+          : 'Welcome to Utter';
 
   // The key held to dictate, for the lines that say to hold it.
   let keyName = $state('Right Ctrl');
@@ -160,7 +166,11 @@
     try {
       await core.micStart(device);
     } catch {
-      micError = 'This microphone could not be opened. Choose another.';
+      // With none connected there is nothing else to choose: say what to do instead.
+      const none = (await core.microphones().catch(() => [] as string[])).length === 0;
+      micError = none
+        ? 'No microphone found. Plug in a microphone or headset; you can continue meanwhile.'
+        : 'This microphone could not be opened. Choose another.';
       if (device) {
         device = '';
         await core.micStart('').catch(() => {});
@@ -301,12 +311,16 @@
         ? 'Downloading the models'
         : mode === 'model'
           ? 'Downloading the model'
-          : 'Downloading the update',
+          : mode === 'runtime'
+            ? 'Downloading'
+            : 'Downloading the update',
   );
 
   const CHECK_LABELS: Record<string, string> = {
     gpu: 'Graphics card',
+    processor: 'Runs on',
     memory: 'GPU memory',
+    'shared-memory': 'Memory',
     driver: 'Graphics driver',
     keyboard: 'Keyboard access',
     disk: 'Disk space',
@@ -381,15 +395,8 @@
                 </span>
                 <span class="name">{CHECK_LABELS[c.id]}</span>
                 <span class="value">{r?.value ?? ''}</span>
-                {#if r?.fix}<span class="fix">{r.fix}</span>{/if}
-                {#if r && !r.ok && r.id === 'keyboard'}
-                  <span class="fix-action">
-                    <button onclick={allowInput} disabled={allowing}>
-                      {allowing ? 'Waiting for your password...' : 'Allow'}
-                    </button>
-                    {#if allowError}<span class="fix">{allowError}</span>{/if}
-                  </span>
-                {/if}
+                {#if r?.fix}<span class="fix" class:info={r.ok}>{r.fix}</span>{/if}
+                {#if r && !r.ok && r.id === 'keyboard' && allowError}<span class="fix">{allowError}</span>{/if}
               </li>
             {/each}
           </ul>
@@ -423,13 +430,13 @@
                   {/if}
                 </span>
                 {#if c.recommended}<span class="pill">Recommended</span>{/if}
-                <span class="card-line">{MODEL_TEXT[c.id].line}</span>
+                <span class="card-line">{c.onProcessor && c.id === 'light' ? 'The smaller model. Runs on the processor.' : MODEL_TEXT[c.id].line}</span>
                 <span class="card-facts">
                   {#if c.fits}
-                    <span>{gpuGb(c.gpuBytes)} GB GPU memory</span>
+                    <span>{gpuGb(c.gpuBytes)} GB {c.onProcessor ? 'memory' : 'GPU memory'}</span>
                     <span>{c.downloadBytes > 0 ? `${gb(c.downloadBytes)} GB download` : 'Installed'}</span>
                   {:else}
-                    <span class="card-why">Needs a {Math.ceil(c.cardBytes / 2 ** 30)} GB graphics card</span>
+                    <span class="card-why">{c.why}</span>
                   {/if}
                 </span>
               </button>
@@ -521,6 +528,11 @@
     {#if view === 'check'}
       {#if checks?.noGpu}
         <button class="primary" bind:this={primary} onclick={core.quit}>Quit</button>
+      {:else if checks && onlyKeyboard}
+        <!-- The one thing left is the person's to grant: Allow does it, then checks again. -->
+        <button class="primary" bind:this={primary} disabled={allowing} onclick={allowInput}>
+          {allowing ? 'Waiting for your password...' : 'Allow'}
+        </button>
       {:else if checks && !allOk}
         <button class="primary" bind:this={primary} onclick={runChecks}>Check again</button>
       {:else}
@@ -614,6 +626,11 @@
     flex: 1;
     display: grid;
     min-height: 0;
+    /* Content taller than the window scrolls here, never under the footer; the inset keeps
+       focus rings (the Try it box's) from being clipped by the scroll box. */
+    overflow-y: auto;
+    padding: 6px;
+    margin: -6px;
   }
   section {
     grid-area: 1 / 1;
@@ -692,15 +709,9 @@
     line-height: 18px;
     margin-top: 4px;
   }
-  .fix-action {
-    grid-column: 2 / 4;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 8px;
-  }
-  .fix-action .fix {
-    margin-top: 0;
+  /* A passing row's note (no graphics card: the processor runs Utter). */
+  .fix.info {
+    color: var(--home-muted);
   }
   .panel {
     margin: 20px 0 0;

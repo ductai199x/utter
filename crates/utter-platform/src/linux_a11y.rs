@@ -144,7 +144,7 @@ fn follow(conn: &Connection) -> zbus::Result<()> {
             continue;
         }
         let bus = sender.to_string();
-        let Some(pid) = pid_of(conn, &bus) else { continue };
+        let Some(pid) = pid_of(conn, &bus).map(app_pid) else { continue };
         *FOCUS.lock().unwrap_or_else(|e| e.into_inner()) = Some(Focused { bus, path: path.to_owned().into(), pid });
     }
     Ok(())
@@ -195,7 +195,7 @@ fn walk_for_focus(conn: &Connection) -> Option<Focused> {
                 }
                 budget -= 1;
                 if has_state(conn, &bus, path.as_str(), STATE_FOCUSED) {
-                    let pid = pid_of(conn, &bus)?;
+                    let pid = app_pid(pid_of(conn, &bus)?);
                     return Some(Focused { bus, path, pid });
                 }
                 stack.extend(children(conn, &bus, path.as_str()).into_iter().map(|(_, p)| p));
@@ -250,11 +250,27 @@ pub fn app_pids() -> Vec<u32> {
     let Some(conn) = bus() else { return Vec::new() };
     let mut pids: Vec<u32> = children(conn, "org.a11y.atspi.Registry", "/org/a11y/atspi/accessible/root")
         .into_iter()
-        .filter_map(|(b, _)| pid_of(conn, &b))
+        .filter_map(|(b, _)| pid_of(conn, &b).map(app_pid))
         .collect();
     pids.sort_unstable();
     pids.dedup();
     pids
+}
+
+/// The app a process belongs to: WebKitGTK draws pages in helper processes (WebKitWebProcess),
+/// and the accessibility bus names the helper, so a dictation into Utter's own windows was
+/// filed under "WebKitWebProcess"; its parent is the app (Utter, GNOME Web, ...).
+fn app_pid(pid: u32) -> u32 {
+    let helper = std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|c| c.trim().starts_with("WebKit"));
+    if !helper {
+        return pid;
+    }
+    // /proc/<pid>/stat: "pid (comm) state ppid ..."; comm may hold spaces, so after the last ')'.
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|s| s.rsplit_once(')').and_then(|(_, rest)| rest.split_whitespace().nth(1)?.parse().ok()))
+        .filter(|&ppid: &u32| ppid > 1)
+        .unwrap_or(pid)
 }
 
 /// A process's program name and its executable's path. The name is the executable's file name;

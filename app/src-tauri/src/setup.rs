@@ -31,9 +31,11 @@ fn required() -> Vec<&'static Component> {
         .collect()
 }
 
-/// The model in the settings (the default when the file cannot be read).
+/// The model in the settings (the default when the file cannot be read), as it runs on this
+/// backend: Light where Quality cannot (the processor; utter_pipeline::runtime_choice).
 pub fn chosen_model() -> utter_pipeline::settings::Model {
-    Settings::load_or_create(&Settings::path()).map(|s| s.model).unwrap_or_default()
+    let model = Settings::load_or_create(&Settings::path()).map(|s| s.model).unwrap_or_default();
+    utter_pipeline::runtime_choice::effective_model(model)
 }
 
 /// The chosen model's tier, or Quality when that one is not published yet.
@@ -55,6 +57,8 @@ pub fn fallback_model() -> Option<utter_pipeline::settings::Model> {
         let tier: Tier = m.into();
         m != chosen
             && tier.offered()
+            // Not Quality on the processor: the pipeline would run Light, which is missing.
+            && utter_pipeline::runtime_choice::runs_on(m, utter_runtime::backend())
             && utter_pipeline::components_for(tier)
                 .into_iter()
                 .all(|id| utter_runtime::component(id).is_ok_and(|c| c.is_intact()))
@@ -72,6 +76,9 @@ pub enum Mode {
     Update,
     /// The model chosen in Settings is not downloaded yet: the same, worded as that.
     Model,
+    /// What the runtime chosen in Settings runs on is not downloaded yet (or a new component
+    /// it needs): the same, worded as that; nothing runs until it is here.
+    Runtime,
     /// An installed component is damaged: the same, worded as a repair.
     Repair,
     /// Dictation could not start.
@@ -84,6 +91,7 @@ impl Mode {
             Mode::First => "first",
             Mode::Update => "update",
             Mode::Model => "model",
+            Mode::Runtime => "runtime",
             Mode::Repair => "repair",
             Mode::Problem => "problem",
         }
@@ -117,6 +125,9 @@ pub fn mode_for(missing: &[&Component]) -> Option<Mode> {
     } else if missing.iter().all(|c| !c.is_installed() && older_version_installed(c)) {
         // Every missing one replaces a version that is here: an update.
         Some(Mode::Update)
+    } else if missing.iter().all(|c| !c.is_installed() && !older_version_installed(c)) {
+        // None was ever here: another runtime's components, chosen in Settings.
+        Some(Mode::Runtime)
     } else {
         // Damaged, or gone with nothing it replaces.
         Some(Mode::Repair)
@@ -149,8 +160,12 @@ pub struct ModelCard {
     card_bytes: u64,
     /// What choosing it downloads now (0: installed).
     download_bytes: u64,
-    /// This GPU has the memory for it.
+    /// This GPU has the memory for it, and it runs on this backend.
     fits: bool,
+    /// Why not, when it does not fit.
+    why: Option<String>,
+    /// Everything runs on the processor: the cards speak of memory, not GPU memory.
+    on_processor: bool,
     recommended: bool,
     selected: bool,
 }
@@ -161,7 +176,13 @@ pub struct ModelCard {
 pub fn setup_models() -> Vec<ModelCard> {
     use utter_pipeline::settings::Model;
     let memory = utter_pipeline::card::graphics_card().map(|g| g.memory_bytes).unwrap_or(0);
-    let fits = |tier: Tier| memory >= utter_pipeline::card_need(tier);
+    let backend = utter_runtime::backend();
+    let on_processor = backend == utter_runtime::Backend::Cpu;
+    let runs = |tier: Tier| {
+        let model = if tier == Tier::Quality { Model::Quality } else { Model::Light };
+        utter_pipeline::runtime_choice::runs_on(model, backend)
+    };
+    let fits = |tier: Tier| runs(tier) && memory >= utter_pipeline::card_need(tier);
     let recommended = if fits(Tier::Quality) || !Tier::Light.available() { Tier::Quality } else { Tier::Light };
     let chosen = chosen_tier();
     [(Model::Quality, "quality"), (Model::Light, "light")]
@@ -179,6 +200,14 @@ pub fn setup_models() -> Vec<ModelCard> {
                 .map(|c| c.download_size())
                 .sum(),
             fits: fits(tier),
+            why: (!fits(tier)).then(|| {
+                if !runs(tier) {
+                    "Needs a graphics card".to_owned()
+                } else {
+                    format!("Needs a {} GB graphics card", utter_pipeline::card_need(tier).div_ceil(1 << 30))
+                }
+            }),
+            on_processor,
             recommended: tier == recommended,
             selected: tier == chosen,
         })
@@ -331,7 +360,7 @@ fn gb(bytes: u64) -> String {
 pub const KEYBOARD_FIX: &str = if cfg!(target_os = "macos") {
     "Utter needs Input Monitoring, to hear the dictation key, and Accessibility, to paste. Allow opens System Settings: turn Utter on in both, then open Utter again."
 } else {
-    "Utter needs to read the dictation key and press the paste keys. Allow it once; your password is asked."
+    "Utter needs this to hear the dictation key and paste for you. Allow asks for your password once."
 };
 
 #[tauri::command]
@@ -360,32 +389,58 @@ pub fn setup_check(before_choice: bool) -> Checks {
     let no_gpu = gpu.is_err();
     match &gpu {
         Ok(g) => {
-            checks.push(Check { id: "gpu", ok: true, value: g.name.clone(), fix: None });
+            if utter_runtime::backend() == utter_runtime::Backend::Cpu {
+                // No graphics card to run on (or the processor chosen in Settings): said plainly,
+                // with what it means.
+                let only = utter_pipeline::runtime_choice::available().len() == 1;
+                checks.push(Check {
+                    id: "processor",
+                    ok: true,
+                    value: if only { "The processor" } else { "The processor (your choice)" }.into(),
+                    fix: only.then(|| {
+                        "No graphics card found: Utter runs on the processor, slower, with the Light model.".into()
+                    }),
+                });
+            } else {
+                checks.push(Check { id: "gpu", ok: true, value: g.name.clone(), fix: None });
+            }
             // Enough for the smallest tier on offer: which one runs is the next step's choice.
             let smallest = utter_pipeline::card_need(if Tier::Light.available() { Tier::Light } else { Tier::Quality });
             let ok = g.memory_bytes >= smallest;
             let gib = g.memory_bytes as f64 / (1u64 << 30) as f64;
+            // The processor and Apple Silicon run on the system's memory: no graphics card to ask
+            // for, and no driver of its own to check.
+            let shared = g.driver == Driver::System;
             checks.push(Check {
-                id: "memory",
+                id: if shared { "shared-memory" } else { "memory" },
                 ok,
                 value: format!("{gib:.0} GB"),
                 fix: (!ok).then(|| {
-                    format!("Utter needs a graphics card with {} GB of memory or more.", smallest.div_ceil(1 << 30))
+                    let need = smallest.div_ceil(1 << 30);
+                    if shared {
+                        format!("Utter needs {need} GB of memory or more.")
+                    } else {
+                        format!("Utter needs a graphics card with {need} GB of memory or more.")
+                    }
                 }),
             });
-            let ok = g.driver.ok();
-            let (value, fix) = match g.driver {
-                Driver::Cuda(v) => (
-                    format!("CUDA {}.{}", v / 1000, v % 1000 / 10),
-                    "Update the NVIDIA driver to version 580 or newer, then check again.",
-                ),
-                Driver::Vulkan(present) => (
-                    if present { "Vulkan" } else { "No Vulkan" }.to_owned(),
-                    "Update the graphics driver from your card maker's site, then check again.",
-                ),
-                Driver::System => ("Built in".to_owned(), ""),
-            };
-            checks.push(Check { id: "driver", ok, value, fix: (!ok).then(|| fix.into()) });
+            if shared {
+                // Nothing more to check about the processor.
+            } else {
+                let ok = g.driver.ok();
+                let (value, fix) = match g.driver {
+                    Driver::Cuda(v) => (
+                        format!("CUDA {}.{}", v / 1000, v % 1000 / 10),
+                        "Update the NVIDIA driver to version 580 or newer, then check again.",
+                    ),
+                    Driver::Vulkan(present) => (
+                        if present { "Vulkan" } else { "No Vulkan" }.to_owned(),
+                        "Update the graphics driver from your card maker's site, then check again.",
+                    ),
+                    Driver::System => ("Built in".to_owned(), ""),
+                };
+                checks.push(Check { id: "driver", ok, value, fix: (!ok).then(|| fix.into()) });
+            }
         }
         Err(e) => {
             tracing::info!("no usable GPU: {e}");
@@ -624,11 +679,15 @@ pub fn open(app: &AppHandle, mode: Mode) -> tauri::Result<()> {
 
 /// [`open`]; `carry_on`: the person already asked for this (a repair that restarted Utter), so
 /// the download starts once the system check passes.
+/// The setup window's height: Linux and macOS check keyboard access too, and its row (with why,
+/// when it is missing) did not fit in Windows' 520 px; it scrolled out of sight.
+const SETUP_HEIGHT: f64 = if cfg!(windows) { 520.0 } else { 600.0 };
+
 pub fn open_with(app: &AppHandle, mode: Mode, carry_on: bool) -> tauri::Result<()> {
     let url = format!("setup.html?mode={}{}", mode.query(), if carry_on { "&go=1" } else { "" });
     tauri::WebviewWindowBuilder::new(app, "setup", tauri::WebviewUrl::App(url.into()))
         .title("Utter")
-        .inner_size(640.0, 520.0)
+        .inner_size(640.0, SETUP_HEIGHT)
         .resizable(false)
         .center()
         .build()

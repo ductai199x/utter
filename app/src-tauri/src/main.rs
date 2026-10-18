@@ -514,6 +514,9 @@ fn main() {
     }
     LAUNCHED.get_or_init(std::time::Instant::now);
     tracing_subscriber_init();
+    // What runs the models, before anything asks (utter_pipeline::runtime_choice).
+    let runtime = Settings::load_or_create(&Settings::path()).map(|s| s.runtime).unwrap_or_default();
+    utter_pipeline::runtime_choice::select(runtime);
     if let Some(old) = utter_core::move_legacy_data() {
         tracing::info!("moved {} to {}", old.display(), utter_core::data_dir().display());
     }
@@ -526,6 +529,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             home::home_state,
             home::home_quit,
+            home::home_restart,
             home::dictation_key,
             home::save_settings,
             home::open_path,
@@ -659,6 +663,7 @@ fn main() {
         .run(|_, event| {
             if let tauri::RunEvent::Exit = event {
                 utter_platform::focus::shutdown();
+                tracing::info!("Utter quits");
             }
         });
 }
