@@ -156,6 +156,10 @@ pub fn components_for(tier: Tier) -> Vec<&'static str> {
 /// The runtime components (everything but the models) a backend runs on.
 pub fn runtime_for(backend: Backend) -> &'static [&'static str] {
     match backend {
+        // Linux's CUDA provider cannot load without cuRAND (utter_asr::runtime::CUDA_COMPONENTS).
+        Backend::Cuda if cfg!(target_os = "linux") => {
+            &["onnxruntime-gpu", "cuda-runtime", "cudnn", "curand", "silero-vad", "llama-cpp"]
+        }
         Backend::Cuda => &["onnxruntime-gpu", "cuda-runtime", "cudnn", "silero-vad", "llama-cpp"],
         Backend::Vulkan => &["onnxruntime", "onnxruntime-ep-webgpu", "silero-vad", "llama-cpp-vulkan"],
         Backend::Metal => &["onnxruntime", "onnxruntime-ep-webgpu", "silero-vad", "llama-cpp-metal"],

@@ -212,6 +212,21 @@
       "purpose": "cuDNN, for onnxruntime's convolutions."
     },
     {
+      "id": "curand",
+      "version": "10.4.4.72",
+      "os": "linux",
+      "arch": "x86_64",
+      "url": "https://files.pythonhosted.org/packages/07/73/3ee8e5b4cb891401e603ffd3a59b35c6afe785fd2de123afe7c7029603dc/nvidia_curand-10.4.4.72-py3-none-manylinux_2_27_x86_64.whl",
+      "sha256": "25c3457ae7a224fdd484dab90b0fc5dc0e842fab5db3012afa4a5bd2af4eb7e5",
+      "size": 61498332,
+      "extract": [
+        "nvidia/cu13/lib/libcurand.so.10",
+        "nvidia_curand-*.dist-info/licenses/*"
+      ],
+      "license": "NVIDIA CUDA EULA, redistributable (NVIDIA's own PyPI package)",
+      "purpose": "cuRAND: Linux's onnxruntime CUDA provider names it as a dependency and does not load without it."
+    },
+    {
       "id": "llama-cpp",
       "version": "b11535",
       "os": "linux",
