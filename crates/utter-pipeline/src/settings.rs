@@ -310,7 +310,7 @@ impl Default for Settings {
             dictionary: Vec::new(),
             lists: true,
             start_at_login: true,
-            dictation_key: DictationKey::RightCtrl,
+            dictation_key: DictationKey::default(),
             microphone: String::new(),
             model: Model::Quality,
             keep_history: KeepHistory::Forever,

@@ -105,6 +105,10 @@ impl Bar {
         }
         #[cfg(not(windows))]
         let _ = window.set_focusable(false);
+        // Click-through. GTK sets it on the native window, which a never-shown window does not
+        // have yet (tao unwraps it: the app aborted at start on Linux), so there it is set at
+        // each show (bar_bottom_center).
+        #[cfg(windows)]
         let _ = window.set_ignore_cursor_events(true);
         Self {
             window,
@@ -475,6 +479,8 @@ fn bar_bottom_center(window: &WebviewWindow) {
         let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     }
     let _ = window.show();
+    // After show: requests run in order on this thread, so the native window exists by then.
+    let _ = window.set_ignore_cursor_events(true);
     // Some window managers forget "above" while a window is hidden.
     let _ = window.set_always_on_top(true);
 }

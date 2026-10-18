@@ -317,21 +317,34 @@ pub const UDEV_RULE: &str = include_str!("../../../packaging/linux/70-utter.rule
 /// the AppImage, and for a rule since removed.
 pub fn allow_input() -> Result<(), String> {
     use std::io::Write;
-    // Loads uinput (a static node otherwise, made accessible at boot), puts the rule in place
-    // and applies it to the devices there now, so it works without logging out.
-    const SCRIPT: &str = "modprobe uinput 2>/dev/null; \
-        cat > /etc/udev/rules.d/70-utter.rules && \
-        udevadm control --reload-rules && \
-        udevadm trigger --action=change --subsystem-match=input --subsystem-match=misc && \
-        udevadm settle --timeout=5";
-    let mut child = std::process::Command::new("pkexec")
-        .args(["/bin/sh", "-c", SCRIPT])
-        .stdin(std::process::Stdio::piped())
+    use std::os::unix::fs::PermissionsExt;
+    // The desktop's dialog names the program it runs as root: a script called
+    // utter-keyboard-access reads plainly there, where `/bin/sh -c ...` showed the shell
+    // commands. It loads uinput (otherwise a static node, made accessible at boot), puts the
+    // rule in place and applies it to the devices there now, so it works without logging out.
+    // It lives in the person's runtime folder, which only they can write.
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let path = dir.join("utter-keyboard-access");
+    let script = format!(
+        "#!/bin/sh\n# Utter: lets the person at this computer use the keyboard for dictation.\nset -e\n\
+         modprobe uinput 2>/dev/null || true\n\
+         cat > /etc/udev/rules.d/70-utter.rules <<'RULE'\n{UDEV_RULE}RULE\n\
+         udevadm control --reload-rules\n\
+         udevadm trigger --action=change --subsystem-match=input --subsystem-match=misc\n\
+         udevadm settle --timeout=5\n"
+    );
+    {
+        let mut f = std::fs::File::create(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        f.write_all(script.as_bytes()).map_err(|e| e.to_string())?;
+        f.set_permissions(std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    let out = std::process::Command::new("pkexec")
+        .arg(&path)
         .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("pkexec: {e}"))?;
-    child.stdin.take().expect("piped stdin").write_all(UDEV_RULE.as_bytes()).map_err(|e| e.to_string())?;
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        .output()
+        .map_err(|e| format!("pkexec: {e}"));
+    let _ = std::fs::remove_file(&path);
+    let out = out?;
     match out.status.code() {
         Some(0) => access(),
         // pkexec: the dialog was dismissed (126) or no agent could ask (127).
