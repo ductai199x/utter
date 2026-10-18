@@ -147,7 +147,9 @@ GNOME Terminal (Ctrl+Shift+V), 1.9-2.4 s from key up on the VM's CPU; with the r
 the problem screen, Allow, the desktop's dialog naming `utter-keyboard-access`, Cancel quiet,
 and after authorizing, dictation working without a logout. Found and fixed there: the app
 aborted at start (click-through set on a never-shown window), and the dialog showed the raw
-shell commands. Not yet: Xorg, KDE, Fedora, the AppImage on a stock system, a real GPU.
+shell commands. Then on Xorg (GDM with Wayland off), the AppImage with no FUSE 2 installed:
+it starts (the static runtime), the Bar shows its words, the dictation lands in GNOME Terminal
+(2.7 s on the CPU). Not yet: KDE, Fedora, Ubuntu 26.04, a real GPU (CUDA or Vulkan) on Linux.
 
 **macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
 listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
