@@ -46,11 +46,65 @@ fn bus() -> Option<&'static Connection> {
     .as_ref()
 }
 
+/// Whether Utter turned the session's accessibility on (so turns it off at quit).
+static ENABLED_BY_US: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The session's accessibility switch (org.a11y.Status IsEnabled). Qt apps (Konsole, every KDE
+/// app) and Chromium join the accessibility bus only while it is on: off, as Plasma leaves it,
+/// the focused terminal was unknown, so it got Ctrl+V, not its Ctrl+Shift+V, and nothing was
+/// pasted (Plasma 6, 2026-10-18). Apps already running join as soon as it turns on.
+fn set_accessibility(on: bool) -> zbus::Result<()> {
+    let session = Connection::session()?;
+    session.call_method(
+        Some("org.a11y.Bus"),
+        "/org/a11y/bus",
+        Some("org.freedesktop.DBus.Properties"),
+        "Set",
+        &("org.a11y.Status", "IsEnabled", zbus::zvariant::Value::from(on)),
+    )?;
+    Ok(())
+}
+
+fn accessibility_on() -> zbus::Result<bool> {
+    let session = Connection::session()?;
+    let value: OwnedValue = session
+        .call_method(
+            Some("org.a11y.Bus"),
+            "/org/a11y/bus",
+            Some("org.freedesktop.DBus.Properties"),
+            "Get",
+            &("org.a11y.Status", "IsEnabled"),
+        )?
+        .body()
+        .deserialize()?;
+    Ok(bool::try_from(value).unwrap_or(false))
+}
+
+/// Turns the session's accessibility back off if Utter turned it on (at quit).
+pub fn stop() {
+    if ENABLED_BY_US.swap(false, std::sync::atomic::Ordering::Relaxed)
+        && let Err(e) = set_accessibility(false)
+    {
+        tracing::warn!("accessibility off: {e}");
+    }
+}
+
 /// Starts following the focus (once per process).
 pub fn start() {
     static STARTED: OnceLock<()> = OnceLock::new();
     STARTED.get_or_init(|| {
         let _ = std::thread::Builder::new().name("utter-a11y".into()).spawn(|| {
+            match accessibility_on() {
+                Ok(false) => match set_accessibility(true) {
+                    Ok(()) => {
+                        ENABLED_BY_US.store(true, std::sync::atomic::Ordering::Relaxed);
+                        tracing::info!("accessibility turned on, for the focused app and the caret");
+                    }
+                    Err(e) => tracing::warn!("accessibility on: {e}"),
+                },
+                Ok(true) => {}
+                Err(e) => tracing::warn!("accessibility status: {e}"),
+            }
             let Some(conn) = bus() else { return };
             if let Some(found) = walk_for_focus(conn) {
                 *FOCUS.lock().unwrap_or_else(|e| e.into_inner()) = Some(found);
