@@ -1,6 +1,6 @@
 //! What runs the models on this computer: the backends it can run, Utter's pick among them, and
 //! the person's choice in Settings (2026-10-18: CUDA, Vulkan or the processor, offering only
-//! what the computer has; with no usable GPU, the processor and the Light model, Quality
+//! what the computer has; with no usable GPU, the processor with Light or Extra light, Quality
 //! unavailable).
 
 use std::sync::OnceLock;
@@ -70,14 +70,33 @@ pub fn setting_for(backend: Backend) -> Runtime {
 }
 
 /// Whether `model` runs on `backend`. Quality needs a graphics card: on the processor its
-/// cleanup takes several seconds (Light: about one).
+/// cleanup takes several seconds. Extra light is for the processor; with a graphics card Light
+/// is as fast.
 pub fn runs_on(model: Model, backend: Backend) -> bool {
-    !(model == Model::Quality && backend == Backend::Cpu)
+    match model {
+        Model::Quality => backend != Backend::Cpu,
+        Model::Light => true,
+        Model::Mini => backend == Backend::Cpu,
+    }
 }
 
-/// The model to run: `model`, or Light where `model` does not run on this process's backend.
+/// The models offered on `backend`, best first.
+pub fn models_on(backend: Backend) -> Vec<Model> {
+    [Model::Quality, Model::Light, Model::Mini].into_iter().filter(|&m| runs_on(m, backend)).collect()
+}
+
+/// The model to run: `model`, or where it does not run on this process's backend, the one
+/// there instead (Quality on the processor: Extra light, the fast one; Extra light with a
+/// graphics card: Light).
 pub fn effective_model(model: Model) -> Model {
-    if runs_on(model, utter_runtime::backend()) { model } else { Model::Light }
+    let backend = utter_runtime::backend();
+    if runs_on(model, backend) {
+        model
+    } else if backend == Backend::Cpu {
+        Model::Mini
+    } else {
+        Model::Light
+    }
 }
 
 #[cfg(test)]
@@ -89,6 +108,8 @@ mod tests {
         assert!(!runs_on(Model::Quality, Backend::Cpu));
         assert!(runs_on(Model::Light, Backend::Cpu));
         assert!(runs_on(Model::Quality, Backend::Vulkan));
+        assert!(runs_on(Model::Mini, Backend::Cpu));
+        assert!(!runs_on(Model::Mini, Backend::Cuda));
     }
 
     #[test]

@@ -30,6 +30,11 @@ pub enum Tier {
     /// memory. With the speech model, a light Utter of about 3.25 GB in all, everything on
     /// the GPU (2026-10-11: about 2.5 GB, a little more is fine).
     Light,
+    /// Gemma 3 1B fully fine-tuned on the same data (2 epochs, lr 2e-5; docs/plan-android.md):
+    /// the phone's model, and on a computer without a graphics card the fastest (
+    /// 2026-10-18). About 6 points behind Light on real speech; 1.5 s a cleanup on the phone's
+    /// CPU where Light takes 2.7 s.
+    Mini,
     /// Gemma 4 26B-A4B, prompted: about 15 GB of GPU memory. Never offered: the fine-tuned E4B
     /// beats it ([`Tier::offered`]); a reference for the eval tools only.
     Reference,
@@ -42,6 +47,7 @@ impl Tier {
             Tier::Quality => "utter-quality",
             Tier::Reference => "gemma4-26b-a4b-qat",
             Tier::Light => "utter-light",
+            Tier::Mini => "utter-mini",
         }
     }
 
@@ -50,6 +56,7 @@ impl Tier {
             Tier::Quality => "utter-quality-v2-q4_0.gguf",
             Tier::Reference => "gemma-4-26B_q4_0-it.gguf",
             Tier::Light => "utter-light-v2-q4_0.gguf",
+            Tier::Mini => "utter-mini-v1-q4_0.gguf",
         }
     }
 
@@ -57,7 +64,7 @@ impl Tier {
     /// [`FINE_TUNED_PROMPT`] and must get exactly it.
     pub fn system_prompt(self) -> &'static str {
         match self {
-            Tier::Quality | Tier::Light => FINE_TUNED_PROMPT,
+            Tier::Quality | Tier::Light | Tier::Mini => FINE_TUNED_PROMPT,
             Tier::Reference => SYSTEM_PROMPT,
         }
     }

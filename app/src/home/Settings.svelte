@@ -51,7 +51,7 @@
   const qualityBlocked = $derived(
     home && !home.qualityFits
       ? home.running === 'cpu'
-        ? 'needs a graphics card. On the processor, Utter runs Light.'
+        ? 'needs a graphics card.'
         : `needs a graphics card with ${cardGb(home.cardNeed.quality)} GB of memory.`
       : '',
   );
@@ -67,8 +67,9 @@
             ? `The smaller model, on the processor: about ${needGb('light')} GB of memory.`
             : `The smaller model, for ${cardGb(home?.cardNeed.light ?? 0)} GB graphics cards: about ${needGb('light')} GB.`,
         ],
+        ['mini', 'Extra light', `The smallest model, fastest on the processor: about ${needGb('mini')} GB of memory.`],
       ] as const
-    ).filter(([id]) => id !== 'light' || home?.lightAvailable),
+    ).filter(([id]) => (id !== 'light' || home?.lightAvailable) && (id === 'quality' || home?.models.includes(id))),
   );
   /** "Downloads 3.9 GB" when choosing `model` needs a download first. */
   function downloadNote(model: Model): string | undefined {
@@ -88,8 +89,15 @@
   const groups = $derived(groupRules(rules?.rules ?? []));
   const mine = $derived(groups.filter((g) => ruleSource(g) !== 'default'));
   const defaults = $derived(groups.length - mine.length);
-  // The model that runs: Light on the processor whatever settings.toml says (Quality needs a GPU).
-  const shownModel = $derived(home?.running === 'cpu' && settings?.model === 'quality' ? 'light' : settings?.model);
+  // The model that runs (runtime_choice::effective_model): Extra light on the processor in place
+  // of Quality, which needs a graphics card; Light with a graphics card in place of Extra light.
+  const shownModel = $derived(
+    settings && home && !home.models.includes(settings.model)
+      ? home.running === 'cpu'
+        ? 'mini'
+        : 'light'
+      : settings?.model,
+  );
   // The runtime: "auto" shows as the one it picks (the first, best one).
   const chosenRuntime = $derived(
     settings?.runtime && settings.runtime !== 'auto' && home?.runtimes.some((r) => r.id === settings?.runtime)
@@ -280,7 +288,7 @@
                 >{pendingRuntime.downloadBytes > 0
                   ? `It downloads ${(pendingRuntime.downloadBytes / 1e9).toFixed(1)} GB first; dictation is off until that is done.`
                   : 'It takes a few seconds.'}{pendingRuntime.id === 'cpu' && settings.model === 'quality'
-                ? ' On the processor it runs the Light model.'
+                ? ' On the processor it runs Extra light.'
                 : ''}</span
               >
             </div>

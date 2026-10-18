@@ -86,6 +86,8 @@ pub struct State {
     microphones: Vec<String>,
     /// The light model is published (components.json): until then only Quality is offered.
     light_available: bool,
+    /// The models that run on this backend and are published, best first.
+    models: Vec<Model>,
     /// The GPU is big enough for the quality model (utter_pipeline::card_need), and Utter runs
     /// on a graphics card at all (not the processor).
     quality_fits: bool,
@@ -132,7 +134,7 @@ fn runtimes() -> Vec<RuntimeOption> {
                 Backend::Cuda => ("NVIDIA CUDA", "Fastest on NVIDIA graphics cards."),
                 Backend::Vulkan => ("Vulkan", "Any graphics card: AMD, Intel or NVIDIA."),
                 Backend::Metal => ("Apple GPU", "The Mac's own graphics."),
-                Backend::Cpu => ("Processor", "No graphics card needed. Slower; the Light model only."),
+                Backend::Cpu => ("Processor", "No graphics card needed. Slower; Light and Extra light only."),
             };
             let runs = if utter_pipeline::runtime_choice::runs_on(model, backend) { model } else { Model::Light };
             let download_bytes = utter_pipeline::components_on(runs.into(), backend)
@@ -161,8 +163,11 @@ fn gpu_memory() -> Option<u64> {
 
 /// Bytes `tier` still needs downloaded (its components that are not installed and intact).
 /// The models offered, by the name the settings and the page use.
-const TIERS: [(&str, utter_llm::cleanup::Tier); 2] =
-    [("quality", utter_llm::cleanup::Tier::Quality), ("light", utter_llm::cleanup::Tier::Light)];
+const TIERS: [(&str, utter_llm::cleanup::Tier); 3] = [
+    ("quality", utter_llm::cleanup::Tier::Quality),
+    ("light", utter_llm::cleanup::Tier::Light),
+    ("mini", utter_llm::cleanup::Tier::Mini),
+];
 
 fn to_download(tier: utter_llm::cleanup::Tier) -> u64 {
     utter_pipeline::components_for(tier)
@@ -184,6 +189,10 @@ fn state() -> State {
         error,
         microphones: utter_audio::input_devices(),
         light_available: utter_llm::cleanup::Tier::Light.offered(),
+        models: utter_pipeline::runtime_choice::models_on(utter_runtime::backend())
+            .into_iter()
+            .filter(|&m| utter_llm::cleanup::Tier::from(m).offered())
+            .collect(),
         quality_fits: utter_runtime::backend() != utter_runtime::Backend::Cpu
             && gpu_memory().is_some_and(|m| m >= utter_pipeline::card_need(utter_llm::cleanup::Tier::Quality)),
         running: utter_pipeline::runtime_choice::setting_for(utter_runtime::backend()),

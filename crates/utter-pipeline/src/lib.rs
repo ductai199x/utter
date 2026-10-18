@@ -138,6 +138,10 @@ pub fn gpu_need(tier: Tier) -> u64 {
         // Metal and the CPU use the system's memory: Vulkan's figures until measured there.
         (Backend::Metal | Backend::Cpu, Tier::Quality) => 6_200_000_000,
         (Backend::Metal | Backend::Cpu, Tier::Light) => 4_500_000_000,
+        // The 1B (720 MB) and the speech model: Light's figures less the difference in size
+        // of the two cleanup models, until measured.
+        (Backend::Cuda, Tier::Mini) => 2_000_000_000,
+        (_, Tier::Mini) => 3_000_000_000,
         (_, Tier::Reference) => 18_000_000_000,
     }
 }

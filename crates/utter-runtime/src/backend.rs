@@ -5,7 +5,7 @@
 //! Vulkan or Metal). Each backend has its own runtime components (utter_pipeline::components_for).
 //!
 //! `Cpu` runs everything on the processor: a computer without a usable GPU, or the person's choice
-//! in Settings (2026-10-18; the Light model only). The app picks the backend
+//! in Settings (2026-10-18; Light and Extra light only). The app picks the backend
 //! (utter_pipeline::runtime_choice) and [`select`]s it before anything asks.
 
 use std::sync::OnceLock;

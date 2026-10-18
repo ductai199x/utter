@@ -85,6 +85,8 @@ enum TierArg {
     Quality,
     /// The smaller fine-tuned model (E2B).
     Light,
+    /// The smallest fine-tuned model (Gemma 3 1B), Extra light: computers without a GPU.
+    Mini,
     /// The prompted 26B, for comparisons.
     Reference,
 }
@@ -94,6 +96,7 @@ impl From<TierArg> for utter_llm::cleanup::Tier {
         match t {
             TierArg::Quality => Self::Quality,
             TierArg::Light => Self::Light,
+            TierArg::Mini => Self::Mini,
             TierArg::Reference => Self::Reference,
         }
     }
