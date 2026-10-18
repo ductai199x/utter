@@ -28,3 +28,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tauri = { version = "2.12.2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2.5.2"
+
+# The Bar's transparent window needs macOS's private window API.
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri = { version = "2.12.2", features = ["macos-private-api"] }

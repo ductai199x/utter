@@ -60,3 +60,17 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace
+
+      # The app bundle builds, ad-hoc signed, with the keys macOS needs merged into its
+      # Info.plist (no microphone description: macOS refuses the microphone). Not uploaded.
+      - name: macOS app bundle
+        if: runner.os == 'macOS'
+        working-directory: app
+        env:
+          RUSTFLAGS: ""
+        run: |
+          npx tauri build --bundles app
+          plist=../target/release/bundle/macos/Utter.app/Contents/Info.plist
+          plutil -extract NSMicrophoneUsageDescription raw "$plist"
+          plutil -extract LSUIElement raw "$plist"
+          codesign -dv ../target/release/bundle/macos/Utter.app 2>&1 | grep -E "Signature|Identifier"
