@@ -276,3 +276,41 @@ def quantize(src: str, dst: str, bits: int = 8, block_size: int = 32) -> None:
     size = (dst_dir / "encoder.onnx").stat().st_size / 1e6
     n = sum(1 for node in out.graph.node if node.op_type == "MatMulNBits")
     print(f"{dst}: {n} MatMulNBits nodes, encoder.onnx {size:.0f} MB")
+
+
+def quantize_cpu(src: str, dst: str, per_channel: bool = True) -> None:
+    """The encoder of <data_dir>/models/<src> (float32) for the processor, in <data_dir>/models/<dst>:
+    int8 weights and int8 activations quantized at run time (onnxruntime's dynamic quantization:
+    DynamicQuantizeLinear and MatMulInteger, which use VNNI where the processor has it).
+
+    The GPU builds' 8-bit weights (quantize(): MatMulNBits over a float16 graph) run on the
+    processor dequantized to float32, the float16 graph cast to and fro: 753 ms for a 9 s clip on
+    a Ryzen 9 9900X (12 threads), against 237 ms for the float32 export and 142 ms for this one
+    (2026-10-18). MatMulNBits with int8 compute (accuracy_level 4) returned nothing at all."""
+    from onnxruntime.quantization import QuantType, quantize_dynamic
+
+    src_dir, dst_dir = data_dir() / "models" / src, data_dir() / "models" / dst
+    cfg = json.loads((src_dir / "config.json").read_text(encoding="utf-8"))
+    if cfg.get("encoder_dtype", "fp32") != "fp32":
+        raise SystemExit(f"{src} has a {cfg['encoder_dtype']} encoder: quantize a float32 export")
+    if dst_dir.exists():
+        shutil.rmtree(dst_dir)
+    dst_dir.mkdir(parents=True)
+    for f in src_dir.iterdir():
+        if not f.name.startswith("encoder.onnx"):
+            shutil.copy2(f, dst_dir / f.name)
+    quantize_dynamic(
+        str(src_dir / "encoder.onnx"),
+        str(dst_dir / "encoder.onnx"),
+        op_types_to_quantize=["MatMul"],
+        per_channel=per_channel,
+        weight_type=QuantType.QInt8,
+    )
+    cfg["encoder_weights"] = "int8 (dynamic: MatMulInteger, activations quantized at run time" + (
+        ", per-channel weight scales)" if per_channel else ")"
+    )
+    (dst_dir / "config.json").write_text(
+        json.dumps(cfg, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
+    size = (dst_dir / "encoder.onnx").stat().st_size / 1e6
+    print(f"{dst}: encoder.onnx {size:.0f} MB")

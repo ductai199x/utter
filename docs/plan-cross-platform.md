@@ -195,6 +195,31 @@ cleanup column does: Extra light 21% faster at p50, 26% at p95, on a fast deskto
 Extra light recommended, dictations at 2.0-2.1 s (cleanup 224-526 ms), Quit, relaunch ready in
 6.6 s, nothing left running.
 
+**The processor, made fast** (2026-10-18, same bench, Extra light, quiet machine). Speech was
+most of every dictation, for three reasons, each measured away:
+
+| | key up -> text p50 | p95 | speech after key up p50 |
+|---|---|---|---|
+| as it was | 1.84 s | 2.48 s | 1,608 ms |
+| speech on the processor's cores, not 2 threads | 1.20 s | 2.04 s | 1,014 ms |
+| + int8 speech model, no keep-alive passes | 0.38 s | 0.82 s | 73 ms |
+| + threads by physical cores (6 here) | **0.37 s** | **0.73 s** | 70 ms |
+
+- The GPU builds' 8-bit speech model (MatMulNBits over a float16 graph) runs on the processor
+  dequantized to float32 with float16 casts: 114.6 ms of encoder per second of audio, against
+  28.0 for the float32 export and 17.7 for int8 (`utter-speech quantize-cpu`: dynamic
+  quantization, int8 weights per channel, MatMulInteger with AVX-512 VNNI here). WER over 500
+  clips of five public sets: 6.09%, 6.11%, 6.29%. MatMulNBits with int8 compute
+  (accuracy_level 4) was 3x faster and returned empty transcripts.
+- The int8 encoder is fastest with 4-6 threads (123 ms for a 9 s clip; 141 ms with 12, 146 with
+  24): threads are the physical cores, at most 6 (`utter_platform::cpu::physical_cores`).
+- Keep-alive passes hold a GPU's clocks up; on the processor they took cores from real work.
+- llama.cpp already uses everything this CPU has (AVX-512, VNNI, BF16, weights repacked to
+  q4_0_8x8 at load, one thread per physical core).
+- Light with all of it: 0.50 s / 1.15 s at 7.2% final-text WER (Extra light 9.1%).
+The int8 speech model reaches the app once published (`parakeet-ultra-onnx-i8`); until then the
+processor runs the 8-bit one.
+
 **macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
 listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
 pasteboard saved whole and restored, Cmd+V and typing as CoreGraphics key events, the

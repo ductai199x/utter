@@ -44,8 +44,13 @@ pub enum SpeechModel {
     #[default]
     Fp16,
     /// The encoder's weights in 8 bits, float16 activations (export/quantize_encoder.py): about
-    /// 1.3 GB, some 5 ms slower, the same transcripts. What both tiers run.
+    /// 1.3 GB, some 5 ms slower, the same transcripts. What both tiers run on CUDA.
     W8,
+    /// For the processor: the float32 export with int8 weights and int8 activations quantized at
+    /// run time (utter-speech quantize-cpu; MatMulInteger, VNNI where there is one). On a Ryzen 9
+    /// 9900X a 9 s clip takes 142 ms of encoder, where W8 took 753 ms: W8's 8-bit weights run
+    /// dequantized to float32 there, its float16 graph cast to and fro (2026-10-18).
+    I8,
 }
 
 impl SpeechModel {
@@ -53,6 +58,7 @@ impl SpeechModel {
         match self {
             SpeechModel::Fp16 => MODEL_COMPONENT,
             SpeechModel::W8 => "parakeet-ultra-onnx-w8",
+            SpeechModel::I8 => "parakeet-ultra-onnx-i8",
         }
     }
 
@@ -67,10 +73,15 @@ impl SpeechModel {
             utter_runtime::Backend::Vulkan | utter_runtime::Backend::Metal => Device::WebGpu,
             utter_runtime::Backend::Cpu => Device::Cpu,
         };
-        let base = ParakeetOptions { encoder, ..ParakeetOptions::default() };
+        let mut base = ParakeetOptions { encoder, ..ParakeetOptions::default() };
+        if encoder == Device::Cpu {
+            // The whole model on the processor: 2 threads (right for a GPU session's few CPU
+            // nodes) left speech at 80% of a dictation's time (2026-10-18).
+            base.cpu_threads = cpu_session_threads();
+        }
         match self {
             SpeechModel::Fp16 => ParakeetOptions { weights_outside_pool: true, ..base },
-            SpeechModel::W8 => base,
+            SpeechModel::W8 | SpeechModel::I8 => base,
         }
     }
 
@@ -79,6 +90,14 @@ impl SpeechModel {
         let c = utter_runtime::component(self.component()).map_err(|e| AsrError::Runtime(e.to_string()))?;
         c.installed_dir().map_err(|e| AsrError::Runtime(e.to_string()))
     }
+}
+
+/// Threads for the speech model when it runs on the processor: the physical cores, at most 6
+/// and at least 2. The int8 encoder (SpeechModel::I8) takes a 9 s clip in 123 ms with 4-6 threads
+/// on a Ryzen 9 9900X (12 cores), 141 ms with 12 and 146 ms with 24: its matrices are small
+/// enough that more threads cost more than they add, and fewer leave cores to the cleanup server.
+pub fn cpu_session_threads() -> usize {
+    utter_platform::cpu::physical_cores().clamp(2, 6)
 }
 
 /// The installed GPU speech model's folder, or an error naming how to install it.
