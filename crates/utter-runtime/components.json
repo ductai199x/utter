@@ -543,6 +543,22 @@
       "purpose": "Cleanup model, Light: Gemma 4 E2B fine-tuned for dictation cleanup, v2 (trained on ductai199x/dictation-to-text), Q4_0; about 1.8 GB of GPU memory. Expects crates/utter-llm/prompts/cleanup-ft.md."
     },
     {
+      "id": "utter-mini",
+      "version": "5c5b6e0e",
+      "os": "any",
+      "arch": "any",
+      "files": [
+        {
+          "name": "utter-mini-v1-q4_0.gguf",
+          "url": "https://huggingface.co/ductai199x/utter/resolve/5c5b6e0e9d3d1eeca81e5f19908d640b1dbb2212/utter-mini-v1-q4_0.gguf",
+          "sha256": "8cd6850731222133a727ef163f1ad9bb8e7e1d4e8949ac84b829ac6eedbb8dc4",
+          "size": 720426176
+        }
+      ],
+      "license": "Gemma Terms of Use (Gemma 3 1B fine-tuned by Utter, ductai199x/utter; ai.google.dev/gemma/terms)",
+      "purpose": "Cleanup model, Extra light: Gemma 3 1B fully fine-tuned for dictation cleanup, v1 (trained on ductai199x/dictation-to-text), Q4_0; for computers without a graphics card. Expects crates/utter-llm/prompts/cleanup-ft.md."
+    },
+    {
       "id": "gemma4-26b-a4b-qat",
       "version": "d1c082be",
       "os": "any",

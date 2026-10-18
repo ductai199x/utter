@@ -177,6 +177,15 @@ Found and fixed there: Linux's onnxruntime CUDA provider would not load without 
 component now), and every exit after a CUDA session aborted with heap corruption, from the ort
 crate releasing its environment after onnxruntime's own teardown (`skip_teardown_at_exit`).
 
+**Without a graphics card** (Tai, 2026-10-18): Utter runs on the processor, picked by itself,
+with Light or **Extra light**, the phone's Gemma 3 1B (`utter-mini-v1-q4_0.gguf`, published in
+ductai199x/utter under the Gemma terms), recommended there; Quality is grayed. Settings'
+"Runs on" lists CUDA, Vulkan and the processor as the computer has them. Measured on this PC's
+processor (`utter-cli e2e-bench`, 40 clips): Extra light p50 1.85 s / p95 2.67 s, Light
+2.38 / 3.71 s; speech recognition is most of it (1.55-1.64 s). In an Ubuntu VM: first run with
+Extra light recommended, dictations at 2.0-2.1 s (cleanup 224-526 ms), Quit, relaunch ready in
+6.6 s, nothing left running.
+
 **macOS, written and compile-checked only** (`crates/utter-platform/src/macos.rs`): one
 listen-only event tap for the hotkey and the shortcuts (Ctrl+Cmd+V, Ctrl+Cmd+C), the
 pasteboard saved whole and restored, Cmd+V and typing as CoreGraphics key events, the

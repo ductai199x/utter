@@ -36,12 +36,13 @@ dictation_key = \"right-ctrl\"
 microphone = \"\"
 
 # The model: \"quality\" (the bigger one, about 4.8 GB of GPU memory, for graphics cards with
-# 6 GB or more) or \"light\" (the smaller one, about 3.3 GB, for graphics cards with 4 GB).
+# 6 GB or more), \"light\" (the smaller one, about 3.3 GB, for graphics cards with 4 GB) or
+# \"mini\" (the smallest, for computers without a graphics card).
 model = \"quality\"
 
 # What runs Utter: \"auto\" (the best this computer has: an NVIDIA card through CUDA, another
 # graphics card through Vulkan, an Apple GPU through Metal, else the processor), \"cuda\",
-# \"vulkan\", \"metal\" or \"cpu\". The processor is slower and runs the Light model only.
+# \"vulkan\", \"metal\" or \"cpu\". The processor is slower and runs Light and Extra light only.
 # Utter restarts to switch.
 runtime = \"auto\"
 
@@ -313,6 +314,19 @@ pub enum Model {
     /// was its name for an afternoon.
     #[serde(alias = "extra-light")]
     Light,
+    /// The smallest model, for computers without a graphics card ("Extra light" in the app).
+    Mini,
+}
+
+/// A tier's setting (the Reference tier, never offered, maps to Quality).
+impl From<Tier> for Model {
+    fn from(t: Tier) -> Self {
+        match t {
+            Tier::Quality | Tier::Reference => Model::Quality,
+            Tier::Light => Model::Light,
+            Tier::Mini => Model::Mini,
+        }
+    }
 }
 
 impl From<Model> for Tier {
@@ -320,6 +334,7 @@ impl From<Model> for Tier {
         match m {
             Model::Quality => Tier::Quality,
             Model::Light => Tier::Light,
+            Model::Mini => Tier::Mini,
         }
     }
 }
@@ -400,6 +415,7 @@ impl Settings {
         let model = match self.model {
             Model::Quality => "quality",
             Model::Light => "light",
+            Model::Mini => "mini",
         };
         set(&mut doc, "model", model.into());
         set(&mut doc, "runtime", word(&self.runtime).into());

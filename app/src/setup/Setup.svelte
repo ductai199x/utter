@@ -124,6 +124,7 @@
   const MODEL_TEXT: Record<ModelId, { name: string; line: string }> = {
     quality: { name: 'Quality', line: 'The bigger model. Most accurate; best for most cards.' },
     light: { name: 'Light', line: 'The smaller model. Runs on 4 GB graphics cards.' },
+    mini: { name: 'Extra light', line: 'The smallest model. Fastest on the processor.' },
   };
 
   async function loadModels() {

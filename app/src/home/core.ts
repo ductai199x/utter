@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type Model = 'quality' | 'light';
+export type Model = 'quality' | 'light' | 'mini';
 
 export type KeepHistory = 'forever' | '30-days' | '24-hours' | 'off';
 export type PasteWith = 'ctrl-v' | 'ctrl-shift-v' | 'shift-insert' | 'type';
@@ -54,6 +54,8 @@ export interface HomeState {
   /** The runtimes this computer can run, best first. */
   runtimes: RuntimeOption[];
   lightAvailable: boolean;
+  /** The models that run on this runtime, best first (Extra light only on the processor). */
+  models: Model[];
   /** What choosing each model would download now, in bytes (0: installed). */
   downloadBytes: Record<Model, number>;
   /** GPU memory each model needs, speech included, and the smallest card it runs on (bytes). */
@@ -97,9 +99,10 @@ const mock: HomeState = {
   microphones: ['Microphone (Shure MV7)', 'Headset (Jabra Evolve2 65)'],
   qualityFits: true,
   lightAvailable: true,
-  downloadBytes: { quality: 0, light: 4.14e9 },
-  gpuNeed: { quality: 4.8e9, light: 3.25e9 },
-  cardNeed: { quality: 5.8e9, light: 4.25e9 },
+  models: ['quality', 'light'],
+  downloadBytes: { quality: 0, light: 4.14e9, mini: 2.1e9 },
+  gpuNeed: { quality: 4.8e9, light: 3.25e9, mini: 3e9 },
+  cardNeed: { quality: 5.8e9, light: 4.25e9, mini: 4e9 },
   dictationKeys: [
     { id: 'right-ctrl', name: 'Right Ctrl' },
     { id: 'left-ctrl', name: 'Left Ctrl' },
@@ -115,7 +118,7 @@ const mock: HomeState = {
   runtimes: [
     { id: 'cuda', name: 'NVIDIA CUDA', detail: 'Fastest on NVIDIA graphics cards.', downloadBytes: 0 },
     { id: 'vulkan', name: 'Vulkan', detail: 'Any graphics card: AMD, Intel or NVIDIA.', downloadBytes: 1.6e9 },
-    { id: 'cpu', name: 'Processor', detail: 'No graphics card needed. Slower; the Light model only.', downloadBytes: 3.6e9 },
+    { id: 'cpu', name: 'Processor', detail: 'No graphics card needed. Slower; Light and Extra light only.', downloadBytes: 3.6e9 },
   ],
   tray: new URLSearchParams(location.search).get('tray') !== '0',
 };

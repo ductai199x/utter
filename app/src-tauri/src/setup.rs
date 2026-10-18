@@ -53,11 +53,11 @@ pub fn fallback_model() -> Option<utter_pipeline::settings::Model> {
         return None;
     }
     let chosen = chosen_model();
-    [Model::Quality, Model::Light].into_iter().find(|&m| {
+    [Model::Quality, Model::Light, Model::Mini].into_iter().find(|&m| {
         let tier: Tier = m.into();
         m != chosen
             && tier.offered()
-            // Not Quality on the processor: the pipeline would run Light, which is missing.
+            // Only what runs here: the pipeline would run another model, which is missing.
             && utter_pipeline::runtime_choice::runs_on(m, utter_runtime::backend())
             && utter_pipeline::components_for(tier)
                 .into_iter()
@@ -178,17 +178,23 @@ pub fn setup_models() -> Vec<ModelCard> {
     let memory = utter_pipeline::card::graphics_card().map(|g| g.memory_bytes).unwrap_or(0);
     let backend = utter_runtime::backend();
     let on_processor = backend == utter_runtime::Backend::Cpu;
-    let runs = |tier: Tier| {
-        let model = if tier == Tier::Quality { Model::Quality } else { Model::Light };
-        utter_pipeline::runtime_choice::runs_on(model, backend)
-    };
+    let runs = |tier: Tier| utter_pipeline::runtime_choice::runs_on(tier.into(), backend);
     let fits = |tier: Tier| runs(tier) && memory >= utter_pipeline::card_need(tier);
-    let recommended = if fits(Tier::Quality) || !Tier::Light.available() { Tier::Quality } else { Tier::Light };
+    // The best that fits; on the processor the fastest (latency first), Extra light.
+    let recommended = if on_processor && Tier::Mini.offered() {
+        Tier::Mini
+    } else if fits(Tier::Quality) || !Tier::Light.available() {
+        Tier::Quality
+    } else {
+        Tier::Light
+    };
     let chosen = chosen_tier();
-    [(Model::Quality, "quality"), (Model::Light, "light")]
+    [(Model::Quality, "quality"), (Model::Light, "light"), (Model::Mini, "mini")]
         .into_iter()
         .map(|(model, id)| (Tier::from(model), id))
-        .filter(|(tier, _)| tier.offered())
+        // Quality shows grayed on the processor (it needs a graphics card); Extra light shows
+        // only there (with a graphics card Light is as fast).
+        .filter(|&(tier, _)| tier.offered() && (tier != Tier::Mini || on_processor))
         .map(|(tier, id)| ModelCard {
             id,
             gpu_bytes: utter_pipeline::gpu_need(tier),
@@ -369,9 +375,9 @@ pub fn setup_check(before_choice: bool) -> Checks {
     // Before first run's model step the person can still pick the smaller model: the disk
     // must hold the smallest download on offer (the model step checks the chosen one).
     let need: u64 = if before_choice {
-        [Tier::Quality, Tier::Light]
+        [Tier::Quality, Tier::Light, Tier::Mini]
             .into_iter()
-            .filter(|t| t.offered())
+            .filter(|&t| t.offered() && utter_pipeline::runtime_choice::runs_on(t.into(), utter_runtime::backend()))
             .map(|t| {
                 utter_pipeline::components_for(t)
                     .into_iter()
@@ -398,7 +404,7 @@ pub fn setup_check(before_choice: bool) -> Checks {
                     ok: true,
                     value: if only { "The processor" } else { "The processor (your choice)" }.into(),
                     fix: only.then(|| {
-                        "No graphics card found: Utter runs on the processor, slower, with the Light model.".into()
+                        "No graphics card found: Utter runs on the processor, with its smaller models.".into()
                     }),
                 });
             } else {

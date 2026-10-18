@@ -237,7 +237,7 @@ function mockStart() {
   } else emit({ done: 0, total: 0, stage: 'ready', label: '' });
 }
 
-export type ModelId = 'quality' | 'light';
+export type ModelId = 'quality' | 'light' | 'mini';
 
 export interface ModelCard {
   id: ModelId;
@@ -254,7 +254,7 @@ export interface ModelCard {
 }
 
 // ?gpu=4 plays a 4 GB card (Quality does not fit, Light is recommended); ?gpu=0, no graphics
-// card (the processor: Light only).
+// card (the processor: Light and Extra light).
 const mockGpuGb = Number(params.get('gpu') ?? 24);
 const cpu = mockGpuGb === 0;
 
@@ -263,7 +263,10 @@ export function models(): Promise<ModelCard[]> {
   const quality = !cpu && mockGpuGb >= 5.4;
   return Promise.resolve([
     { id: 'quality', gpuBytes: 4.8e9, cardBytes: 5.8e9, downloadBytes: 5.95e9, fits: quality, why: quality ? null : (cpu ? 'Needs a graphics card' : 'Needs a 6 GB graphics card'), onProcessor: cpu, recommended: quality, selected: true },
-    { id: 'light', gpuBytes: 3.25e9, cardBytes: 4.25e9, downloadBytes: 4.14e9, fits: cpu || mockGpuGb >= 3.96, why: cpu || mockGpuGb >= 3.96 ? null : 'Needs a 4 GB graphics card', onProcessor: cpu, recommended: !quality, selected: false },
+    { id: 'light', gpuBytes: 3.25e9, cardBytes: 4.25e9, downloadBytes: 4.14e9, fits: cpu || mockGpuGb >= 3.96, why: cpu || mockGpuGb >= 3.96 ? null : 'Needs a 4 GB graphics card', onProcessor: cpu, recommended: !quality && !cpu, selected: false },
+    ...(cpu
+      ? [{ id: 'mini' as const, gpuBytes: 3e9, cardBytes: 4e9, downloadBytes: 2.1e9, fits: true, why: null, onProcessor: true, recommended: true, selected: false }]
+      : []),
   ]);
 }
 
