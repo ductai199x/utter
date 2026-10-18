@@ -27,8 +27,13 @@ const ORT_LIB: &str = "libonnxruntime.so";
 
 /// The components onnxruntime's CUDA provider loads its libraries from. cuFFT and cuRAND,
 /// which the provider can also load, are not needed by these graphs: without them, 100 of 100
-/// transcripts came out identical (2026-10-09).
+/// transcripts came out identical (2026-10-09). On Windows the provider loads them lazily; on
+/// Linux its library names libcurand.so.10 as a dependency, so it does not load without it
+/// (WSL, 2026-10-18).
+#[cfg(not(target_os = "linux"))]
 pub const CUDA_COMPONENTS: &[&str] = &["cuda-runtime", "cudnn"];
+#[cfg(target_os = "linux")]
+pub const CUDA_COMPONENTS: &[&str] = &["cuda-runtime", "cudnn", "curand"];
 
 /// The WebGPU plugin provider's component, its library, and the name sessions ask for it by.
 pub const WEBGPU_COMPONENT: &str = "onnxruntime-ep-webgpu";
