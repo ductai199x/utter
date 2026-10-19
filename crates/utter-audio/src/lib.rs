@@ -123,15 +123,14 @@ impl Shared {
         c.taken = 0;
     }
 
-    /// Hands over what was recorded since the last call and forgets it: the recording holds
-    /// only what was not taken, so an hours-long dictation is not kept twice.
     fn take_new(&self) -> Vec<f32> {
         let mut c = self.capture.lock().expect("capture lock");
         let Capture { recording, taken, .. } = &mut *c;
         match recording {
             Some(rec) => {
-                *taken += rec.len();
-                std::mem::take(rec)
+                let new = rec[*taken..].to_vec();
+                *taken = rec.len();
+                new
             }
             None => Vec::new(),
         }
@@ -142,8 +141,6 @@ impl Shared {
         let mut c = self.capture.lock().expect("capture lock");
         c.taken = 0;
         let mut recording = c.recording.take().unwrap_or_default();
-        // What came after `until` is left out of what was not taken yet (what was taken
-        // already, a few milliseconds at most, stays).
         let cut = trim(c.newest_at, until);
         recording.truncate(recording.len().saturating_sub(cut));
         recording
@@ -315,8 +312,8 @@ impl Microphone {
         self.shared.take_new()
     }
 
-    /// Ends the utterance at `until` (when the key went up) and returns what [`take_new`] had
-    /// not handed over (all of it, pre-roll included, when it was never called). The worker first resamples what it still holds, so the end of the last word
+    /// Ends the utterance at `until` (when the key went up) and returns all of it, pre-roll
+    /// included. The worker first resamples what it still holds, so the end of the last word
     /// is in; audio that arrived well after `until` (the pipeline got to the key up late) is
     /// left out.
     pub fn stop(&self, until: Instant) -> Vec<f32> {
