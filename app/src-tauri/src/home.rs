@@ -369,9 +369,9 @@ fn fit_on_screen(w: &tauri::WebviewWindow) {
     let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
-/// Opens the Home window for a second start of Utter. On Linux the window manager raises a
-/// window only for the launch that asked (its startup token); without it GNOME leaves Home
-/// behind the focused window and shows "Utter is ready" instead. The second start's token
+/// Opens Utter: for a second start of it, and the tray's Open Utter. On Linux the window manager
+/// raises a window only for the launch that asked (its startup token); without it GNOME leaves
+/// Home behind the focused window and shows "Utter is ready" instead. The second start's token
 /// reaches here through a file (keep_launch_token): the single-instance plugin passes only
 /// arguments, and GTK takes the variable out of the environment as it starts.
 ///
@@ -435,7 +435,7 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
         .spawn(move || {
             let path = Settings::path();
             let mut seen: Option<SystemTime> = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
-            let mut chosen: Option<Model> = None;
+            let mut chosen: Option<Model> = Settings::load_or_create(&path).ok().map(|s| s.model);
             loop {
                 std::thread::sleep(WATCH_EVERY);
                 let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
@@ -449,6 +449,7 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
                     apply_logs(settings);
                     let models = app.state::<Models>();
                     // A model chosen again may be tried again, even one that failed.
+                    let model_changed = chosen != Some(settings.model);
                     if chosen.is_some_and(|m| m != settings.model) {
                         models.clear_failed();
                     }
@@ -460,7 +461,10 @@ pub fn watch(app: AppHandle, link: PipelineLink) {
                         // makes missing is a newly chosen model. Setup fetches it, and hands the
                         // model over when done (setup_download); the rest applies now. A file of
                         // the running model gone missing is for the next start to find.
-                        if settings.model != running
+                        // Only when the model was just chosen: after the person closed the
+                        // download, saving another setting reopened it (2026-10-19).
+                        if model_changed
+                            && settings.model != running
                             && !crate::setup::missing().is_empty()
                             && app.get_webview_window("setup").is_none()
                             && let Err(e) = crate::setup::open(&app, crate::setup::Mode::Model)
