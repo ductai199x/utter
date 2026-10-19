@@ -459,6 +459,8 @@ pub fn llama_component(backend: Backend) -> &'static str {
         Backend::Cuda => "llama-cpp",
         Backend::Vulkan => "llama-cpp-vulkan",
         Backend::Metal => "llama-cpp-metal",
+        // The Mac's build runs on the processor too, with no layers on the GPU (start_server).
+        Backend::Cpu if cfg!(target_os = "macos") => "llama-cpp-metal",
         Backend::Cpu => "llama-cpp-cpu",
     }
 }

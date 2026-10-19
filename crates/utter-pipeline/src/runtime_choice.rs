@@ -11,14 +11,14 @@ use crate::settings::{Model, Runtime};
 
 /// The backends this computer can run, best first: CUDA where NVIDIA's driver is (fastest on
 /// its cards), Vulkan where a graphics card offers it (any maker's, NVIDIA's too), then the
-/// processor; Metal alone on a Mac. Asked once per process.
+/// processor; on a Mac, Metal then the processor. Asked once per process.
 pub fn available() -> &'static [Backend] {
     static AVAILABLE: OnceLock<Vec<Backend>> = OnceLock::new();
     AVAILABLE.get_or_init(|| {
         let mut found = Vec::new();
         if cfg!(target_os = "macos") {
-            // Every Apple Silicon Mac has Metal; there is no processor-only build there.
-            return vec![Backend::Metal];
+            // Every Apple Silicon Mac has Metal.
+            found.push(Backend::Metal);
         } else {
             if utter_runtime::gpu::probe().is_ok() {
                 found.push(Backend::Cuda);
@@ -113,7 +113,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
     fn the_processor_is_always_there() {
         assert_eq!(available().last(), Some(&Backend::Cpu));
         assert_eq!(resolve(Runtime::Cpu), Backend::Cpu);
