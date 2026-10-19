@@ -181,6 +181,9 @@ impl Bar {
                 // History shows it at once (docs/ux/history.md, "Live").
                 let _ = self.window.emit_to("home", "history-changed", ());
                 match (&d.inserted, d.text.trim().is_empty()) {
+                    (_, true) if d.silent => {
+                        self.leave_with_error("No sound from the microphone: is it connected and unmuted?")
+                    }
                     (_, true) => self.leave_with_error("Didn't catch that"),
                     (Err(e), false) => {
                         tracing::warn!("not inserted: {e}");

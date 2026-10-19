@@ -53,6 +53,13 @@
   let mics = $state<string[]>([]);
   let device = $state('');
   let micError = $state('');
+  // Silence after a few seconds: no microphone behind the system default (Linux offers one
+  // with none connected), or a muted one. Said once nothing has been heard for QUIET_MS.
+  const QUIET_MS = 6000;
+  const HEARD_LEVEL = 0.01;
+  let heard = false;
+  let quiet = $state(false);
+  let quietTimer: ReturnType<typeof setTimeout> | undefined;
   const wave = new Waveform({ bars: 64, barW: 3, gap: 3, min: 3, max: 40 }, 90);
   let meter = $state<HTMLCanvasElement>();
 
@@ -167,6 +174,10 @@
 
   async function openMic() {
     micError = '';
+    heard = false;
+    quiet = false;
+    clearTimeout(quietTimer);
+    quietTimer = setTimeout(() => (quiet = !heard && view === 'mic'), QUIET_MS);
     try {
       await core.micStart(device);
     } catch {
@@ -346,11 +357,18 @@
       void core.microphones().then((m) => (mics = m));
       void loadModels();
     }
-    const offs = [core.onLevel((l) => wave.push(l)), core.onProgress(onProgress)];
+    const offs = [core.onLevel((l) => {
+        wave.push(l);
+        if (l > HEARD_LEVEL) {
+          heard = true;
+          quiet = false;
+        }
+      }), core.onProgress(onProgress)];
     raf = requestAnimationFrame(frame);
     focusMain();
     return () => {
       cancelAnimationFrame(raf);
+      clearTimeout(quietTimer);
       offs.forEach((p) => void p.then((off) => off()));
     };
   });
@@ -457,7 +475,10 @@
             <option value="">System default</option>
             {#each mics as m (m)}<option value={m}>{m}</option>{/each}
           </select>
-          <p class="error" aria-live="polite">{micError}</p>
+          <p class="error" aria-live="polite">
+            {micError ||
+              (quiet ? 'Nothing heard yet. Check that a microphone is plugged in and not muted, or choose another.' : '')}
+          </p>
           <div class="meter" aria-hidden="true">
             <canvas bind:this={meter} style:width="{wave.width}px" style:height="40px"></canvas>
           </div>
