@@ -110,6 +110,12 @@
     try {
       await core.allowInput();
       await runChecks();
+      // macOS: Allow opened System Settings; the check passes once the switch is turned on.
+      for (let i = 0; i < 120 && checks?.checks.some((c) => c.id === 'keyboard' && !c.ok); i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const now = await core.check(mode === 'first');
+        if (now.checks.find((c) => c.id === 'keyboard')?.ok) checks = now;
+      }
     } catch (e) {
       // Dismissing the password dialog is an answer, not an error.
       if (e !== 'cancelled') allowError = `It did not work: ${String(e)}`;
