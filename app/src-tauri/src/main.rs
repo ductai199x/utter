@@ -455,6 +455,10 @@ pub fn restart(app: &AppHandle) {
         Ok(exe) => {
             let mut cmd = std::process::Command::new(exe);
             cmd.args([args::RESTARTED_FROM_ARG, &std::process::id().to_string()]);
+            // An AppImage's new copy mounts the image again and sets its own paths: inherited ones
+            // name this copy's mount, which then never closed (the cleanup server kept loading a
+            // library from it; Ubuntu 24.04, 2026-10-19).
+            utter_platform::process::outside_appimage(&mut cmd);
             if let Err(e) = cmd.spawn() {
                 tracing::error!("restart: could not start Utter again: {e}");
                 return;
