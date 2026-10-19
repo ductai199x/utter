@@ -89,7 +89,12 @@ pub fn models_on(backend: Backend) -> Vec<Model> {
 /// there instead (Quality on the processor: Extra light, the fast one; Extra light with a
 /// graphics card: Light).
 pub fn effective_model(model: Model) -> Model {
-    let backend = utter_runtime::backend();
+    model_on(model, utter_runtime::backend())
+}
+
+/// The model that runs on `backend` when `model` is chosen (effective_model, for a backend
+/// this process may not run on: what switching to it would download).
+pub fn model_on(model: Model, backend: Backend) -> Model {
     if runs_on(model, backend) {
         model
     } else if backend == Backend::Cpu {
@@ -102,6 +107,13 @@ pub fn effective_model(model: Model) -> Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_model_that_does_not_run_there_gives_way() {
+        assert_eq!(model_on(Model::Quality, Backend::Cpu), Model::Mini);
+        assert_eq!(model_on(Model::Mini, Backend::Cuda), Model::Light);
+        assert_eq!(model_on(Model::Light, Backend::Cpu), Model::Light);
+    }
 
     #[test]
     fn quality_does_not_run_on_the_processor() {

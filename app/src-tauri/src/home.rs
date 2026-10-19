@@ -140,7 +140,7 @@ fn runtimes() -> Vec<RuntimeOption> {
                 Backend::Metal => ("Apple GPU", "The Mac's own graphics."),
                 Backend::Cpu => ("Processor", "No graphics card needed. Slower; Light and Extra light only."),
             };
-            let runs = if utter_pipeline::runtime_choice::runs_on(model, backend) { model } else { Model::Light };
+            let runs = utter_pipeline::runtime_choice::model_on(model, backend);
             let download_bytes = utter_pipeline::components_on(runs.into(), backend)
                 .into_iter()
                 .filter_map(|id| utter_runtime::component(id).ok())
@@ -234,7 +234,7 @@ pub fn set_started_threads(threads: CpuThreads) {
 #[tauri::command]
 pub fn home_restart(app: tauri::AppHandle) {
     tracing::info!("restarting to apply the runtime or processor threads");
-    app.restart();
+    crate::restart(&app);
 }
 
 /// Quit, from Settings on a desktop without tray icons (the tray's Quit elsewhere).

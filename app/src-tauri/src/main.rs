@@ -447,6 +447,27 @@ fn run_pipeline(
 }
 
 /// The tray's tooltip while dictation runs, naming the key to hold.
+/// Restarts Utter: starts a new copy that waits for this one to end (args::RESTARTED_FROM_ARG),
+/// then quits. Tauri's own restart started the new copy while this one still held the
+/// one-instance lock, so the new copy handed over to this one and quit with it.
+pub fn restart(app: &AppHandle) {
+    match tauri::process::current_binary(&app.env()) {
+        Ok(exe) => {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.args([args::RESTARTED_FROM_ARG, &std::process::id().to_string()]);
+            if let Err(e) = cmd.spawn() {
+                tracing::error!("restart: could not start Utter again: {e}");
+                return;
+            }
+        }
+        Err(e) => {
+            tracing::error!("restart: Utter's program not found: {e}");
+            return;
+        }
+    }
+    app.exit(0);
+}
+
 fn ready_status() -> String {
     format!("Utter: hold {} to dictate", home::dictation_key_name())
 }
