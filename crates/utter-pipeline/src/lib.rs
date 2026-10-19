@@ -180,6 +180,8 @@ pub fn runtime_for(backend: Backend) -> &'static [&'static str] {
         Backend::Cuda => &["onnxruntime-gpu", "cuda-runtime", "cudnn", "silero-vad", "llama-cpp"],
         Backend::Vulkan => &["onnxruntime", "onnxruntime-ep-webgpu", "silero-vad", "llama-cpp-vulkan"],
         Backend::Metal => &["onnxruntime", "onnxruntime-ep-webgpu", "silero-vad", "llama-cpp-metal"],
+        // The Mac's llama.cpp build runs on the processor too (utter_llm::llama_component).
+        Backend::Cpu if cfg!(target_os = "macos") => &["onnxruntime", "silero-vad", "llama-cpp-metal"],
         Backend::Cpu => &["onnxruntime", "silero-vad", "llama-cpp-cpu"],
     }
 }
