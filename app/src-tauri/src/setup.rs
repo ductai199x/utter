@@ -714,8 +714,11 @@ pub fn setup_finish(app: AppHandle, tried: Option<bool>) {
     if tried == Some(true) {
         mark_tried();
     }
-    if let Some(w) = app.get_webview_window("setup") {
-        let _ = w.destroy();
+    tracing::info!(tried, "setup finished: its window closes");
+    if let Some(w) = app.get_webview_window("setup")
+        && let Err(e) = w.destroy()
+    {
+        tracing::error!("the setup window did not close: {e}");
     }
 }
 

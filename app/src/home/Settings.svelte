@@ -371,7 +371,7 @@
         <div class="label">
           <span class="label-text">Paste rules</span>
           <span class="desc">
-            Most apps paste with Ctrl+V and read the clipboard at once. Utter knows {defaults}
+            Most apps paste with {home.pasteKeys} and read the clipboard at once. Utter knows {defaults}
             {defaults === 1 ? 'app' : 'apps'} that don't{mine.length ? `, and you have ${mine.length} of your own` : ''}.
           </span>
         </div>
@@ -464,16 +464,16 @@
       <div class="row">
         <div class="label">
           <span class="label-text">Paste last dictation</span>
-          <span class="desc">Into the app you are in. Also in the tray menu.</span>
+          <span class="desc">Into the app you are in. Also in the {home.os === 'macos' ? 'menu bar' : 'tray'} menu.</span>
         </div>
-        <kbd>Alt+Shift+Z</kbd>
+        <kbd>{home.pasteLastKeys}</kbd>
       </div>
       <div class="row">
         <div class="label">
           <span class="label-text">Copy last dictation</span>
           <span class="desc">To the clipboard, without pasting.</span>
         </div>
-        <kbd>Alt+Shift+X</kbd>
+        <kbd>{home.copyLastKeys}</kbd>
       </div>
     {/if}
 

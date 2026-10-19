@@ -115,6 +115,11 @@ pub struct State {
     settings_path: String,
     /// "windows", "linux" or "macos": for the words that differ (Start with Windows, Cmd+V).
     os: &'static str,
+    /// The keys that paste ("Ctrl+V"; "Cmd+V" on macOS) and the paste-last and copy-last
+    /// shortcuts as this platform binds them.
+    paste_keys: &'static str,
+    paste_last_keys: &'static str,
+    copy_last_keys: &'static str,
     /// The desktop shows tray icons; without them, Settings offers Quit.
     tray: bool,
 }
@@ -223,6 +228,9 @@ fn state() -> State {
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),
         os: std::env::consts::OS,
+        paste_keys: utter_platform::insert::primary_keys(),
+        paste_last_keys: utter_platform::shortcut::Shortcut::PasteLast.keys(),
+        copy_last_keys: utter_platform::shortcut::Shortcut::CopyLast.keys(),
         tray: utter_platform::shell::tray_shown(),
     }
 }
