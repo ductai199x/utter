@@ -224,6 +224,31 @@ impl Component {
             .map(|(_, dir)| dir)
     }
 
+    /// Bytes still to download: what an interrupted download left (whole files and `.part`
+    /// files, which resume) counts as fetched. Setup's "1.4 GB to download" after a pause.
+    pub fn remaining_download(&self) -> u64 {
+        if self.is_installed() {
+            return 0;
+        }
+        let have = |path: &Path, size: u64| -> u64 {
+            match fs::metadata(path) {
+                Ok(m) if m.len() == size => size,
+                _ => fs::metadata(staging_dir(path)).map(|m| m.len()).unwrap_or(0).min(size),
+            }
+        };
+        let fetched = match &self.source {
+            Source::Archive { archive, .. } => {
+                let file_name = archive.url.rsplit('/').next().unwrap_or(&self.id);
+                have(&downloads_dir().join(file_name), archive.size)
+            }
+            Source::Files { files } => {
+                let staging = staging_dir(&self.dir());
+                files.iter().map(|f| have(&staging.join(&f.name), f.file.size)).sum()
+            }
+        };
+        self.download_size().saturating_sub(fetched)
+    }
+
     /// Bytes to download.
     pub fn download_size(&self) -> u64 {
         match &self.source {

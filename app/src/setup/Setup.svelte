@@ -514,9 +514,9 @@
         {:else if view === 'try'}
           <h1>Try it</h1>
           <p class="lede">Hold <kbd>{keyName}</kbd>, say this, then let go:</p>
-          {#if !dictationReady}<p class="muted">Getting ready...</p>{/if}
           <blockquote>{SENTENCE}</blockquote>
           <textarea bind:this={box} bind:value={typed} rows="3" aria-label="Your first dictation"></textarea>
+          {#if !dictationReady}<p class="muted">Getting ready...</p>{/if}
           <div class="success" class:shown={arrived} aria-live="polite">
             {#if arrived}
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>

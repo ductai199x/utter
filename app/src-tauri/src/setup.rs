@@ -228,7 +228,7 @@ pub fn setup_models() -> Vec<ModelCard> {
                 .into_iter()
                 .filter_map(|c| utter_runtime::component(c).ok())
                 .filter(|c| !c.is_intact())
-                .map(|c| c.download_size())
+                .map(|c| c.remaining_download())
                 .sum(),
             fits: fits(tier),
             why: (!fits(tier)).then(|| {
@@ -409,13 +409,13 @@ pub fn setup_check(before_choice: bool) -> Checks {
                     .into_iter()
                     .filter_map(|id| utter_runtime::component(id).ok())
                     .filter(|c| !c.is_intact())
-                    .map(|c| c.download_size())
+                    .map(|c| c.remaining_download())
                     .sum::<u64>()
             })
             .min()
             .unwrap_or(0)
     } else {
-        missing().iter().map(|c| c.download_size()).sum()
+        missing().iter().map(|c| c.remaining_download()).sum()
     };
     let mut checks = Vec::new();
     let no_gpu = gpu.is_err();
