@@ -105,6 +105,9 @@ pub struct State {
     /// smallest graphics card it runs on (card_need), in bytes.
     gpu_need: std::collections::HashMap<&'static str, u64>,
     card_need: std::collections::HashMap<&'static str, u64>,
+    /// The GPU uses the system's memory (Apple Silicon, the only Macs Utter runs on): no
+    /// graphics card to speak of.
+    shared_memory: bool,
     /// The keys the person can dictate with.
     dictation_keys: Vec<KeyOption>,
     version: &'static str,
@@ -211,6 +214,7 @@ fn state() -> State {
         download_bytes: TIERS.into_iter().map(|(name, tier)| (name, to_download(tier))).collect(),
         gpu_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::gpu_need(tier))).collect(),
         card_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::card_need(tier))).collect(),
+        shared_memory: cfg!(target_os = "macos"),
         dictation_keys: DictationKey::offered()
             .iter()
             .map(|k| KeyOption { id: utter_pipeline::settings::word(k), name: k.name() })

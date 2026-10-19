@@ -208,6 +208,8 @@ pub struct ModelCard {
     why: Option<String>,
     /// Everything runs on the processor: the cards speak of memory, not GPU memory.
     on_processor: bool,
+    /// The GPU uses the system's memory (Apple Silicon): memory, not a graphics card.
+    shared_memory: bool,
     recommended: bool,
     selected: bool,
 }
@@ -252,10 +254,16 @@ pub fn setup_models() -> Vec<ModelCard> {
                 if !runs(tier) {
                     "Needs a graphics card".to_owned()
                 } else {
-                    format!("Needs a {} GB graphics card", utter_pipeline::card_need(tier).div_ceil(1 << 30))
+                    let gb = utter_pipeline::card_need(tier).div_ceil(1 << 30);
+                    if cfg!(target_os = "macos") {
+                        format!("Needs {gb} GB of memory")
+                    } else {
+                        format!("Needs a {gb} GB graphics card")
+                    }
                 }
             }),
             on_processor,
+            shared_memory: cfg!(target_os = "macos"),
             recommended: tier == recommended,
             selected: tier == chosen,
         })
@@ -536,6 +544,18 @@ pub fn setup_check(before_choice: bool) -> Checks {
 #[tauri::command]
 pub async fn setup_allow_input() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(utter_platform::hotkey::allow_input).await.map_err(|e| e.to_string())?
+}
+
+/// After Allow: when keyboard access was turned on but applies only to a new copy (macOS),
+/// Utter restarts into the same step by itself, so nobody has to open it again.
+#[tauri::command]
+pub fn setup_restart_if_granted(app: AppHandle) -> bool {
+    let granted = utter_platform::hotkey::granted_on_restart();
+    if granted {
+        tracing::info!("keyboard access turned on: restarting to use it");
+        crate::restart(&app);
+    }
+    granted
 }
 
 /// The microphone open for the level check while step 2 shows, and which feed of its level is
