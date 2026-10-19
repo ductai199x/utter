@@ -7,6 +7,67 @@ Raw outputs are under `%LOCALAPPDATA%\Utter_dev\eval\results\` (see
 
 ---
 
+## 2026-10-19: Long dictations: the cleanup window
+
+**Problem.** A dictation was cleaned whole, re-cleaned at every pause. In 0.1.8 that broke past a
+few minutes: a request of the whole dictation outgrew the 3 s cleanup limit on the processor
+(4-minute dictation: raw text), and past about 1,300 words (9 minutes) it outgrew the server's
+4096-token context on any backend (raw text). The reply is as long as the input, so the wait at
+key up grew with the dictation too.
+
+**Design** (`crates/utter-pipeline/src/window.rs`). Each cleanup gets a window: the last *live*
+words of what was said, plus what is new. What falls a window behind is settled: its cleanup is
+kept and the window's cleanup appended. At key up the cleanup the person waits for covers a
+*key-up* window from the newest cleanup that far back. No window starts just before words that
+act on what came before ("scratch that", "never mind", "I mean", "second,": `gate::refers_back`);
+it moves back instead. Requests stay the same size however long the dictation runs; memory too
+(audio is let go once transcribed past 10 minutes; the Bar gets the text's last 600 characters).
+
+**Method.** `utter-cli long-bench` chains cleanup eval items (`text-test`, each a dictation with
+its reference final text) into long dictations, feeds them a sentence at a time as segments
+arrive, and cleans exactly as the app does; `utter_tools.long_score` scores WER against the
+chained references and against the whole-dictation cleanup. Medium dictations: 12 items, 416-750
+words (whole cleanup still fits); long: 40 items, 1,876-2,068 words. Raw speech vs reference:
+24% (medium), 29% (long).
+
+**Finding: larger windows are worse, not only slower.** The model was trained on dictations of
+20-100 words; given more, it applies a correction to everything it sees. In one dictation
+"never mind, let's start over" at word 287 of 559 made the whole-dictation cleanup delete all 290
+words before it. The window is the reach of a correction; small windows bound it.
+
+WER, key-up window 45, 24 medium dictations (live request p50 in parentheses):
+
+| live window | Quality (CUDA) | Light (CUDA) |
+|---|---|---|
+| 25 | 9.81% (249 ms) | |
+| 35 | 8.34% (293 ms) | |
+| 50 | 9.76% (348 ms) | 10.47% (254 ms) |
+| 75 | 11.34% (433 ms) | 12.96% (316 ms) |
+| 100 | 12.97% (522 ms) | 14.80% (375 ms) |
+| 150 | 17.40% (683 ms) | 16.31% (481 ms) |
+| 200 | 18.68% (820 ms) | 21.47% (574 ms) |
+| whole | 15.70%* | |
+
+\* 8 dictations, key-up window = whole. Paired, per dictation: 50 beats 100 on 15 of 24 (Quality)
+and 14 of 23 (Light); 25, 35 and 50 are even (12-12, 13-10). Dictations that lost over 20% of their
+words: 1 of 24 at 50 and 100, 8 of 24 at 200. Long dictations (4, about 2,000 words), key-up 30:
+Quality 12.6% at 50, 17.3% at 100, 18.7% at 200; Light 13.7%, 16.4%, 17.1%. Extra light on the
+processor (12 medium dictations): 13.2% at 35, 14.9% at 50, 15.1% at 75, live request p50 581-805
+ms, 97% of requests done before the next sentence is said.
+
+Key-up window (live 50): Quality 9.78% / 9.80% / 10.00% at 30 / 45 / 60 words, waits p50 206 /
+275 / 338 ms; Light 9.82% / 10.47% / 10.51%, 140 / 193 / 244 ms; Extra light (CPU) 14.9% / 15.3%,
+380 / 600 ms.
+
+**Decision.** Live window 500 words (about 1,000 tokens; Tai's call: the model sees a long
+stretch at once, and prompt, window and reply still fit 4096 tokens), key-up window 30 (as
+accurate as larger ones, the shortest wait), for every model and backend. Live cleanups have no
+time limit and the worker cleans only the newest request, so a slower 500-word request lags the
+live text but never blocks; the wait at key up stays a 30-word request. A 20-minute hands-free dictation on the processor (2,887 words, Ubuntu
+VM) was cleaned throughout, text ready 282 ms after the key, memory flat after 10 minutes.
+
+---
+
 ## 2026-10-12: Cleanup v2, trained on the published dataset
 
 Quality (E4B) and Light (E2B) v2: one recipe for both tiers (LoRA rank 16, alpha 32, lr 2e-4,

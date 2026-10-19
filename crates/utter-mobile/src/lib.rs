@@ -191,7 +191,12 @@ impl Mobile {
         let events = Arc::new(Events::default());
         let worker = Worker {
             rec,
-            rule: CleanRule { always: true, dictionary: cfg.dictionary.clone() },
+            rule: CleanRule {
+                always: true,
+                dictionary: cfg.dictionary.clone(),
+                window_words: utter_pipeline::window::DEFAULT_WORDS,
+                final_words: utter_pipeline::window::DEFAULT_FINAL_WORDS,
+            },
             logs: LogConfig { enabled: cfg.logs, audio: cfg.logs },
             log_config: serde_json::json!({
                 "speech_model": { "id": "litert", "dir": cfg.speech_dir, "cpu": cfg.cpu_encoder },
@@ -335,7 +340,7 @@ impl Worker {
                     Ok(heard) => {
                         let total_ms = ended.elapsed().as_secs_f64() * 1e3;
                         self.events.push(Event::Final {
-                            audio_s: heard.audio.len() as f64 / utter_audio::SAMPLE_RATE as f64,
+                            audio_s: heard.samples as f64 / utter_audio::SAMPLE_RATE as f64,
                             insert: utter_pipeline::spaced(before.as_deref(), &heard.text),
                             text: heard.text.clone(),
                             raw: heard.raw.clone(),

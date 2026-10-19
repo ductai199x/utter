@@ -264,9 +264,77 @@ const NUMBER_WORDS: &[&str] = &[
     "forty-five",
 ];
 
+/// Words at the start of a text that act on what came before it: a correction that takes back
+/// or replaces it, or a list going on. A cleanup window (crate::window) never starts just
+/// before one, or the cleanup could not reach what it corrects or continues.
+const REFERS_BACK: &[&str] = &[
+    "scratch that",
+    "strike that",
+    "delete that",
+    "forget that",
+    "ignore that",
+    "never mind",
+    "nevermind",
+    "start over",
+    "let's start over",
+    "no wait",
+    "no, wait",
+    "wait, no",
+    "i mean",
+    "actually",
+    "sorry",
+    "correction",
+    "make that",
+    "or rather",
+    "rather,",
+    "no,",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "next,",
+    "and finally",
+    "finally,",
+    "lastly",
+    "number two",
+    "number three",
+    "number four",
+];
+
+/// Whether `text` opens (within its first words) with something that acts on what came before.
+pub fn refers_back(text: &str) -> bool {
+    let opening: String = text.split_whitespace().take(6).collect::<Vec<_>>().join(" ").to_lowercase();
+    let mut opening = opening.trim_start_matches(|c: char| !c.is_alphanumeric());
+    // A filler or an opener first ("um, never mind") does not hide it.
+    for lead in ["um", "uh", "oh", "okay", "ok", "so", "well"] {
+        if let Some(rest) = opening.strip_prefix(lead).filter(|r| r.starts_with([' ', ','])) {
+            opening = rest.trim_start_matches([',', ' ']);
+        }
+    }
+    // A cue is whole words: "second" is not "secondhand".
+    REFERS_BACK.iter().any(|cue| {
+        opening.strip_prefix(cue).is_some_and(|rest| cue.ends_with(',') || !rest.starts_with(char::is_alphanumeric))
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{reason, relevant_terms};
+    use super::{reason, refers_back, relevant_terms};
+
+    #[test]
+    fn an_opening_that_acts_on_what_came_before_is_seen() {
+        for t in [
+            "Scratch that. Some go up to 256.",
+            "um, never mind, let's start over",
+            "Second, the cache.",
+            "I mean Wednesday.",
+        ] {
+            assert!(refers_back(t), "{t}");
+        }
+        for t in ["The cache is cold.", "Mean time to recovery is low.", "Secondhand smoke.", "Rather than wait, go."] {
+            assert!(!refers_back(t), "{t}");
+        }
+    }
 
     #[test]
     fn cleanup_sees_only_the_terms_heard() {

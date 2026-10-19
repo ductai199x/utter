@@ -169,27 +169,10 @@ impl Worker {
 
     fn clean(&self, job: Job) -> Cleaned {
         let started = Instant::now();
-        let params = ChatParams { max_tokens: cleanup::max_tokens(&job.raw), ..ChatParams::default() };
-        let messages = {
+        let text = {
             let (dictionary, ctx) = &*self.prompt.lock().expect("cleanup prompt lock");
-            cleanup::messages_with(&self.system, &job.raw, &crate::gate::relevant_terms(&job.raw, dictionary), ctx)
+            clean_once(&self.server, &self.system, &job.raw, dictionary, ctx)
         };
-        let text = cleanup::chat(&self.server, &messages, &params)
-            .map(|out| {
-                if out.retried {
-                    tracing::warn!("the cleanup reply ran away; the guarded second try answered");
-                }
-                cleanup::tidy_output(&out.completion.text)
-            })
-            .map_err(|e| e.to_string())
-            // A reply instead of the dictation: the transcript is typed instead (logged as an error).
-            .and_then(|text| {
-                if cleanup::strayed(&job.raw, &text) {
-                    Err(format!("output strayed from the dictation: {text}"))
-                } else {
-                    Ok(text)
-                }
-            });
         Cleaned { generation: job.generation, raw: job.raw, text, ms: started.elapsed().as_secs_f64() * 1e3 }
     }
 
@@ -236,12 +219,58 @@ impl Worker {
     }
 }
 
+/// Cleans `raw` as every dictation is cleaned: the reply limit, the guarded second try, the
+/// output tidied, and a reply that strayed from the dictation refused (the caller types the
+/// raw words instead).
+pub fn clean_once(
+    server: &LlamaServer,
+    system: &str,
+    raw: &str,
+    dictionary: &[String],
+    ctx: &cleanup::Context,
+) -> Result<String, String> {
+    let params = ChatParams { max_tokens: cleanup::max_tokens(raw), ..ChatParams::default() };
+    let messages = cleanup::messages_with(system, raw, &crate::gate::relevant_terms(raw, dictionary), ctx);
+    cleanup::chat(server, &messages, &params)
+        .map(|out| {
+            if out.retried {
+                tracing::warn!("the cleanup reply ran away; the guarded second try answered");
+            }
+            cleanup::tidy_output(&out.completion.text)
+        })
+        .map_err(|e| e.to_string())
+        // A reply instead of the dictation: the transcript is typed instead (logged as an error).
+        .and_then(|text| {
+            if cleanup::strayed(raw, &text) {
+                Err(format!("output strayed from the dictation: {text}"))
+            } else {
+                Ok(text)
+            }
+        })
+}
+
 /// What a fresh server cleans first, so the first dictation does not pay for loading.
 pub(crate) const WARM_UP: &str = "Um, this is a warm-up, no, a second warm-up.";
 
 /// What the Bar shows: the cleaned text, then the words heard since that cleanup started
 /// (provisional). `latest` is the newest cleanup (its raw input and result); `committed_raw` is
 /// every finished segment's raw text; `preview` the segment being spoken.
+/// The live words keep at most this many characters: the Bar shows the end of the text, and a
+/// dictation can run for hours.
+pub const SHOWN_CHARS: usize = 600;
+
+/// The end of `text`, at most [`SHOWN_CHARS`] characters, starting at a word, with an ellipsis
+/// when something was left out.
+pub fn shown_tail(text: &str) -> String {
+    if text.chars().count() <= SHOWN_CHARS {
+        return text.to_owned();
+    }
+    let start = text.char_indices().rev().nth(SHOWN_CHARS - 1).map_or(0, |(i, _)| i);
+    let rest = &text[start..];
+    let rest = rest.find(' ').map_or(rest, |i| &rest[i + 1..]);
+    format!("\u{2026}{rest}")
+}
+
 pub(crate) fn bar_words(latest: Option<(&str, &str)>, committed_raw: &str, preview: &str) -> (String, String) {
     let (cleaned, pending) = match latest {
         // The newest cleanup covers a prefix of what is committed: the rest is still raw.
@@ -255,6 +284,16 @@ pub(crate) fn bar_words(latest: Option<(&str, &str)>, committed_raw: &str, previ
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_live_words_show_the_end_of_a_long_text() {
+        assert_eq!(shown_tail("short text"), "short text");
+        let long = "word ".repeat(1000);
+        let shown = shown_tail(long.trim());
+        assert!(shown.starts_with('\u{2026}') && shown.ends_with("word"));
+        assert!(shown.chars().count() <= SHOWN_CHARS + 1);
+        assert!(!shown["\u{2026}".len()..].starts_with(' '));
+    }
 
     #[test]
     fn before_any_cleanup_everything_is_provisional() {

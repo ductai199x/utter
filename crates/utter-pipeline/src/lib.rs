@@ -15,6 +15,9 @@ pub mod log;
 pub mod runtime_choice;
 pub mod session;
 pub mod settings;
+pub mod window;
+
+pub use clean::clean_once;
 
 pub use clean::Cleaner;
 pub use session::{CleanRule, Heard, Recognizer, Session};
@@ -73,6 +76,10 @@ pub struct PipelineConfig {
     pub no_cleanup: bool,
     /// Clean every dictation (true), or only those the gate flags (false).
     pub always_clean: bool,
+    /// The cleanup window over a long dictation's end, in words (crate::window).
+    pub clean_window_words: usize,
+    /// The window of the cleanup waited for at key up, in words.
+    pub clean_final_words: usize,
     /// The cleanup system prompt (None: the product's, prompts/cleanup.md).
     pub prompt: Option<String>,
     pub log: LogConfig,
@@ -95,6 +102,8 @@ impl Default for PipelineConfig {
             hotkey: HotkeyConfig::default(),
             no_cleanup: false,
             always_clean: true,
+            clean_window_words: window::DEFAULT_WORDS,
+            clean_final_words: window::DEFAULT_FINAL_WORDS,
             prompt: None,
             log: LogConfig::default(),
             paste: Vec::new(),
@@ -536,7 +545,8 @@ pub trait AudioSource {
     fn start(&mut self, at: Instant);
     /// Samples since the last call.
     fn take_new(&mut self) -> Vec<f32>;
-    /// Ends the utterance at `until`, when the key went up; returns all of it.
+    /// Ends the utterance at `until`, when the key went up; returns what [`take_new`] had not
+    /// delivered.
     fn stop(&mut self, until: Instant) -> Vec<f32>;
     /// For a replay: the recording has all been delivered (the key goes up).
     fn ended(&self) -> bool {
@@ -623,7 +633,7 @@ impl AudioSource for ReplaySource<'_> {
         new
     }
     fn stop(&mut self, _until: Instant) -> Vec<f32> {
-        self.audio[..self.given].to_vec()
+        self.take_new()
     }
     fn ended(&self) -> bool {
         self.given >= self.audio.len()
@@ -650,7 +660,7 @@ impl AudioSource for WholeSource<'_> {
         if std::mem::replace(&mut self.given, true) { Vec::new() } else { self.audio.to_vec() }
     }
     fn stop(&mut self, _until: Instant) -> Vec<f32> {
-        self.audio.to_vec()
+        self.take_new()
     }
     fn ended(&self) -> bool {
         self.given
@@ -726,6 +736,8 @@ struct Engine {
     last_text: Option<String>,
     /// The newest dictation's audio, for retry last (memory only, never written).
     last_audio: Option<std::sync::Arc<Vec<f32>>>,
+    /// The newest dictation was too long to keep its audio (session::KEEP_SAMPLES).
+    last_too_long: bool,
 }
 
 impl Pipeline {
@@ -789,6 +801,7 @@ impl Pipeline {
                 gpu: GpuWarmer::new(),
                 last_text: None,
                 last_audio: None,
+                last_too_long: false,
             },
             settings_tx,
             settings_rx,
@@ -1142,7 +1155,12 @@ impl Engine {
     /// rather than at speaking pace, and pasted where paste last would paste it.
     fn retry_last(&mut self, on_event: &mut impl FnMut(Event)) {
         let Some(audio) = self.last_audio.clone() else {
-            on_event(Event::Notice { text: "Nothing to retry yet".into(), ok: false });
+            let text = if self.last_too_long {
+                "That dictation is too long to retry (over 10 minutes)"
+            } else {
+                "Nothing to retry yet"
+            };
+            on_event(Event::Notice { text: text.into(), ok: false });
             return;
         };
         shortcut::wait_for_modifiers_released(MODIFIER_WAIT);
@@ -1207,7 +1225,12 @@ impl Engine {
         self.gpu.start();
         let target_handle = target.as_ref().map(|w| w.handle);
         on_event(Event::Listening { hands_free, target: target_handle });
-        let rule = CleanRule { always: self.cfg.always_clean, dictionary: self.cfg.dictionary.clone() };
+        let rule = CleanRule {
+            always: self.cfg.always_clean,
+            dictionary: self.cfg.dictionary.clone(),
+            window_words: self.cfg.clean_window_words,
+            final_words: self.cfg.clean_final_words,
+        };
         let mut session = Session::start(&mut self.rec, rule);
 
         let key_up = loop {
@@ -1244,16 +1267,15 @@ impl Engine {
         self.gpu.stop();
         log.push(Entry::KeyUp);
         on_event(Event::Finishing);
-        // `stop` returns the whole utterance; only what `take_new` had not delivered is new.
-        let rest = source.stop(key_up);
-        let tail = rest.get(session.audio().len()..).unwrap_or_default().to_vec();
+        let tail = source.stop(key_up);
         let heard = session.finish(&mut self.rec, &tail, key_up, &mut log)?;
-        let Heard { raw, text, gate, audio, segments: sent, asr_ms, cleanup_ms } = heard;
+        let Heard { raw, text, gate, audio, samples, peak, segments: sent, asr_ms, cleanup_ms } = heard;
 
-        // The Bar shows exactly what is pasted, as it is pasted.
-        log.push(Entry::Bar { committed: text.clone(), preview: String::new(), is_final: true });
+        // The Bar shows exactly what is pasted (its end, for a long dictation), as it is pasted.
+        let tail = clean::shown_tail(&text);
+        log.push(Entry::Bar { committed: tail.clone(), preview: String::new(), is_final: true });
         let shown = Instant::now();
-        on_event(Event::Final { text: text.clone() });
+        on_event(Event::Final { text: tail });
         tracing::debug!(ms = shown.elapsed().as_secs_f64() * 1e3, "the Bar told the final text");
         let insert_start = Instant::now();
         let inserted = match (&target, text.is_empty()) {
@@ -1288,7 +1310,7 @@ impl Engine {
             raw,
             text,
             target,
-            audio_s: audio.len() as f64 / utter_audio::SAMPLE_RATE as f64,
+            audio_s: samples as f64 / utter_audio::SAMPLE_RATE as f64,
             segments: sent,
             gate,
             inserted,
@@ -1297,7 +1319,7 @@ impl Engine {
             cleanup_ms,
             insert_ms,
             total_ms,
-            silent: audio.iter().all(|x| x.abs() < SILENT_PEAK),
+            silent: peak < SILENT_PEAK,
         };
         if do_insert && !dictation.text.trim().is_empty() {
             self.last_text = Some(dictation.text.clone());
@@ -1308,8 +1330,10 @@ impl Engine {
             }
         }
         on_event(Event::Done(Box::new(dictation.clone())));
-        if do_insert && !audio.is_empty() {
-            self.last_audio = Some(std::sync::Arc::new(audio.clone()));
+        if do_insert && samples > 0 {
+            // A recording too long to keep is not retried, nor is the one before it.
+            self.last_too_long = audio.is_empty();
+            self.last_audio = (!audio.is_empty()).then(|| std::sync::Arc::new(audio.clone()));
         }
         log.finish(Finished {
             target: log_target(&dictation.target),

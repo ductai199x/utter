@@ -7,6 +7,7 @@
 //!   fetch`), and write results in the format the tools score, so the Rust runtime is
 //!   measured by the same yardstick as the Python candidates.
 
+mod long_bench;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -243,6 +244,26 @@ enum Command {
         #[arg(long)]
         prompt: Option<PathBuf>,
     },
+    /// Long dictations (eval items chained) through the cleanup window at several sizes.
+    LongBench {
+        #[arg(long, value_enum, default_value_t = TierArg::Quality)]
+        tier: TierArg,
+        /// Eval items per dictation (about 40 words each).
+        #[arg(long, default_value_t = 30)]
+        items: usize,
+        /// Dictations per window size.
+        #[arg(long, default_value_t = 6)]
+        dictations: usize,
+        /// Window sizes in words, comma-separated.
+        #[arg(long, default_value = "100,200,400,800")]
+        windows: String,
+        /// Key-up window sizes in words, comma-separated.
+        #[arg(long, default_value = "30,60,100,100000")]
+        finals: String,
+        /// Results name (results/long/<name>/).
+        #[arg(long)]
+        name: String,
+    },
     /// Clean up dictated text with the installed cleanup model and its product settings.
     Clean {
         /// The text, as the speech model would write it.
@@ -382,6 +403,18 @@ fn run() -> Result<()> {
             return dictate((*tier).into(), dictionary, *no_cleanup, device.clone());
         }
         Command::Chat { gguf, system, message, server_args } => return chat(gguf, system, message, server_args),
+        Command::LongBench { tier, items, dictations, windows, finals, name } => {
+            let list = |s: &str| s.split(',').map(|w| w.trim().parse()).collect::<Result<Vec<usize>, _>>();
+            let (windows, finals) = (list(windows)?, list(finals)?);
+            return long_bench::run(&long_bench::Options {
+                tier: (*tier).into(),
+                items: *items,
+                dictations: *dictations,
+                windows,
+                finals,
+                name: name.clone(),
+            });
+        }
         Command::Clean { text, dictionary, tier } => return clean(&text.join(" "), dictionary, (*tier).into()),
         Command::LlmBench {
             gguf,
@@ -446,6 +479,7 @@ fn run() -> Result<()> {
         | Command::Chat { .. }
         | Command::LlmBench { .. }
         | Command::Clean { .. }
+        | Command::LongBench { .. }
         | Command::Record { .. }
         | Command::Vad { .. }
         | Command::Dictate { .. }
