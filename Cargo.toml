@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/utter-core", "crates/utter-platform", "crates/utter-runtime", "crates/utter-audio", "crates/utter-asr", "crates/utter-llm", "crates/utter-pipeline", "crates/utter-mobile", "crates/utter-cli", "app/src-tauri"]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 license = "AGPL-3.0-only"
 authors = ["Tai Duc Nguyen"]
