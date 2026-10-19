@@ -362,14 +362,6 @@ pub fn input_access() -> Result<(), String> {
 /// Input Monitoring then needs nothing more). Asking for both at once added Utter to neither
 /// list. Opens the pane to turn on; Ok means it is open, not that the switch is on.
 pub fn allow_input() -> Result<(), String> {
-    // A new build of an unsigned app is a new app to macOS: the switch from the last one still
-    // shows on but no longer applies (measured on macOS 26.7). Clear Utter's stale entry so the
-    // prompt adds a fresh one, off, that turning on fixes.
-    // SAFETY: a plain query.
-    if !unsafe { AXIsProcessTrusted() } {
-        let reset = std::process::Command::new("tccutil").args(["reset", "Accessibility", "app.utter"]).status();
-        tracing::info!("cleared Utter's Accessibility entry: {reset:?}");
-    }
     // SAFETY: CoreFoundation calls with valid arguments; the dictionary is released.
     let (listen, trusted) = unsafe {
         let trusted_now = AXIsProcessTrusted();
