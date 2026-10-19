@@ -128,6 +128,11 @@ mod imp {
             xml(&exe.display().to_string()),
             xml(arg)
         );
+        // macOS announces every change to a login item ("Utter can run in the background"):
+        // writing it at each start showed that notification at each start.
+        if std::fs::read_to_string(&path).is_ok_and(|old| old == text) {
+            return Ok(());
+        }
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
