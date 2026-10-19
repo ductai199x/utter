@@ -441,9 +441,16 @@ mod leftovers {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             let Some(pid) = name.strip_prefix("llama-server-").and_then(|p| p.parse::<i32>().ok()) else { continue };
-            // Only if that id is still a llama-server (ids are reused).
-            let comm = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output();
-            if comm.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim().ends_with("llama-server")) {
+            // Only if that id is still a llama-server (ids are reused), and not one of this
+            // Utter's: a model switch starts the new server beside the running one, and the sweep
+            // ended that, then the restarted one ended the new (macOS 26.7: the switch failed).
+            let ps = std::process::Command::new("ps").args(["-p", &pid.to_string(), "-o", "ppid=,comm="]).output();
+            let ps = ps.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
+            let (ppid, comm) = ps.split_once(char::is_whitespace).unwrap_or(("", ""));
+            if ppid.trim().parse::<u32>().ok() == Some(std::process::id()) {
+                continue;
+            }
+            if comm.trim().ends_with("llama-server") {
                 tracing::warn!(pid, "ending a llama-server left by an earlier Utter");
                 // SAFETY: a plain signal to a process id just checked to be a llama-server.
                 unsafe { libc::kill(pid, libc::SIGKILL) };

@@ -350,7 +350,8 @@
   );
 
   const CHECK_LABELS: Record<string, string> = {
-    gpu: 'Graphics card',
+    // A Mac's GPU is part of its chip: no card.
+    gpu: navigator.userAgent.includes('Macintosh') ? 'GPU' : 'Graphics card',
     processor: 'Runs on',
     memory: 'GPU memory',
     'shared-memory': 'Memory',
