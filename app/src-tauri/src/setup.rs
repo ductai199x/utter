@@ -159,9 +159,18 @@ fn older_version_installed(c: &Component) -> bool {
             let path = e.path();
             path != current
                 && e.file_name().to_string_lossy().starts_with(&prefix)
-                && path.join("utter-component.json").is_file()
+                && installed_id(&path).as_deref() == Some(c.id.as_str())
         })
     })
+}
+
+/// The id an installed component's folder records. Folder names alone are ambiguous:
+/// "onnxruntime-" begins "onnxruntime-gpu-1.31.0" too, which made switching to Vulkan with CUDA's
+/// files here look like a repair ("Some of Utter's files are missing or damaged").
+fn installed_id(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("utter-component.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("id")?.as_str().map(str::to_owned)
 }
 
 /// One tier as first run's "Choose your model" step shows it (docs/ux/first-run.md).
@@ -324,7 +333,7 @@ fn remove_or_restart(app: &AppHandle, components: &[&Component]) {
         tracing::error!("could not write {}: {e}", pending_repair_file().display());
         return;
     }
-    app.restart();
+    crate::restart(app);
 }
 
 /// At start, before anything loads: removes what a repair could not (the components were in

@@ -995,7 +995,7 @@ impl Pipeline {
                             // The dictionary may have changed while the new model loaded.
                             let cfg = &self.engine.cfg;
                             self.engine.rec.configure(&cfg.dictionary, cleanup_context(cfg));
-                            self.engine.cfg.tier = wanted.model.into();
+                            self.engine.cfg.tier = runtime_choice::effective_model(wanted.model).into();
                             self.engine.loaded = installed_dirs(self.engine.cfg.tier);
                             None
                         }
@@ -1042,8 +1042,11 @@ impl Pipeline {
                 Err(e) => on_event(Event::Applied { what: "microphone", error: Some(e.to_string()) }),
             }
         }
-        let tier: Tier = s.model.into();
-        let loading_tier = self.loading.as_ref().map(|(w, _)| Tier::from(w.model));
+        // The model that runs on this backend (Quality chosen, the processor running: Extra
+        // light), as at start (Settings::apply): the raw choice loaded Quality onto the processor
+        // whenever any setting was saved.
+        let tier: Tier = runtime_choice::effective_model(s.model).into();
+        let loading_tier = self.loading.as_ref().map(|(w, _)| Tier::from(runtime_choice::effective_model(w.model)));
         // An update downloaded while the earlier version ran: the new files load like a model
         // switch, beside the running ones.
         let updated = tier == cfg.tier && installed_dirs(tier) != self.engine.loaded;

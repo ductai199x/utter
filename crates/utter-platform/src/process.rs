@@ -17,6 +17,38 @@ pub fn tie_to_this_process(child: &Child) -> Result<(), ProcessError> {
     imp::tie(child)
 }
 
+/// Waits until process `pid` has ended, at most `timeout`; returns whether it did. A pid that
+/// is not running (already gone) returns at once.
+pub fn wait_for_exit(pid: u32, timeout: std::time::Duration) -> bool {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+        // SAFETY: OpenProcess returns a handle or null; the handle is closed after the wait.
+        unsafe {
+            let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+            if handle.is_null() {
+                return true;
+            }
+            let waited = WaitForSingleObject(handle, timeout.as_millis().min(u32::MAX as u128) as u32);
+            CloseHandle(handle);
+            waited != WAIT_TIMEOUT
+        }
+    }
+    #[cfg(unix)]
+    {
+        let deadline = std::time::Instant::now() + timeout;
+        // SAFETY: signal 0 only checks that the process exists.
+        while unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        true
+    }
+}
+
 /// Starts the child without a console window of its own (Windows); a no-op elsewhere.
 pub fn no_console_window(cmd: &mut std::process::Command) {
     #[cfg(windows)]
