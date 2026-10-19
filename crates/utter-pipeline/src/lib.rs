@@ -208,7 +208,9 @@ fn start_speech(model: SpeechModel, dictionary: &[String]) -> Result<Speech, Pip
 fn open_microphone(cfg: &MicConfig) -> Result<Microphone, PipelineError> {
     match Microphone::open(cfg) {
         Err(utter_audio::AudioError::NoDevice(_)) if cfg.device.is_some() => {
-            tracing::warn!(device = ?cfg.device, "saved microphone not connected; using the default");
+            // Debug, not a warning: with no microphone this runs every few seconds
+            // (check_microphone), and the log filled with it.
+            tracing::debug!(device = ?cfg.device, "saved microphone not connected; trying the default");
             Ok(Microphone::open(&MicConfig { device: None, ..cfg.clone() })?)
         }
         other => Ok(other?),
@@ -767,7 +769,12 @@ impl Pipeline {
         // No microphone connected is no reason not to start: the first one plugged in is
         // opened (check_microphone), and a key press says to connect one until then.
         let (mic, mic_lost) = match open_microphone(&cfg.mic) {
-            Ok(mic) => (mic, false),
+            Ok(mic) => {
+                if let Some(want) = cfg.mic.device.as_ref().filter(|w| !mic.device_name().contains(w.as_str())) {
+                    tracing::warn!(saved = %want, using = mic.device_name(), "saved microphone not connected");
+                }
+                (mic, false)
+            }
             Err(PipelineError::Audio(utter_audio::AudioError::NoDevice(_))) => {
                 tracing::warn!("no microphone connected; starting without one");
                 (Microphone::none(), true)
