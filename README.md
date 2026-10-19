@@ -12,12 +12,12 @@
 <p align="center">
   <a href="https://github.com/ductai199x/utter/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/ductai199x/utter?label=release&color=4a5cf0"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-4a5cf0"></a>
-  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-4a5cf0">
+  <img alt="Windows and Linux" src="https://img.shields.io/badge/Windows%20%7C%20Linux-4a5cf0">
   <a href="https://huggingface.co/ductai199x/utter"><img alt="Models on Hugging Face" src="https://img.shields.io/badge/models-Hugging%20Face-4a5cf0"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/ductai199x/utter/releases/latest"><b>Download for Windows</b></a> ·
+  <a href="https://github.com/ductai199x/utter/releases/latest"><b>Download for Windows or Linux</b></a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="docs/eval-results.md">Eval results</a> ·
   <a href="DESIGN.md">Design</a>
@@ -200,14 +200,22 @@ behind it.
 
 ## Install
 
-Download `Utter_<version>_x64-setup.exe` from the
-[latest release](https://github.com/ductai199x/utter/releases/latest) and run it. It installs for
-your user only, and an update installs over it with your models and settings kept.
+From the [latest release](https://github.com/ductai199x/utter/releases/latest):
 
-**Needs:** Windows 10 or 11 (64-bit), an NVIDIA graphics card with 4 GB of memory (6 GB for
-Quality) and driver 580 or newer, and about 10 GB of disk. AMD and Intel graphics cards run
-Utter through Vulkan, as a preview: 6 GB of memory (8 GB for Quality), measured so far only on
-an NVIDIA card made to run the Vulkan path.
+- **Windows 10 or 11 (64-bit):** run `Utter_<version>_x64-setup.exe`. It installs for your user
+  only, and an update installs over it with your models and settings kept.
+- **Ubuntu 24.04+, Debian 13, Mint 22:** `sudo apt install ./Utter_<version>_amd64.deb`.
+- **Other Linux (Fedora 40+ and others):** make `Utter_<version>_amd64.AppImage` executable and
+  open it. Utter asks once for keyboard access, so it can hear the dictation key.
+
+**Needs:** about 10 GB of disk, and one of:
+
+- an NVIDIA graphics card with 4 GB of memory (6 GB for Quality) and driver 580 or newer;
+- an AMD or Intel graphics card through Vulkan, as a preview: 6 GB of memory (8 GB for Quality),
+  measured so far only on an NVIDIA card made to run the Vulkan path;
+- no graphics card: the processor, with Light and Extra light (8 GB of memory).
+
+Settings > Runs on switches between them.
 
 ## Building from source
 
@@ -251,10 +259,11 @@ docs/               UX specs, eval results, research notes, local setup
 
 ## Status
 
-Windows, English, NVIDIA graphics, with AMD and Intel graphics through Vulkan in preview until
-they are measured on real AMD and Intel cards. Next: Android. After that: context from the text
-around the cursor, styles per app, Command Mode, Linux (GNOME) and macOS, and Vietnamese with
-switching between the two mid-sentence.
+Windows and Linux (GNOME and KDE), English; NVIDIA graphics, the processor, and AMD and Intel
+graphics through Vulkan in preview until they are measured on real AMD and Intel cards. macOS
+builds but has not run on a Mac yet. Next: macOS on a Mac, and Android. After that: context from
+the text around the cursor, styles per app, Command Mode, and Vietnamese with switching between
+the two mid-sentence.
 
 ## License
 
