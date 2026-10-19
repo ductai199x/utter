@@ -20,7 +20,6 @@ use crate::PipelineError;
 use crate::clean::{self, Cleaner};
 use crate::gate;
 use crate::log::{DictationLog, Entry};
-use crate::window::{Window, joined};
 
 /// While listening, a recognizer pass at least this often keeps the GPU's clocks up
 /// (docs/eval-results.md, "Idle GPU").
@@ -220,10 +219,6 @@ pub struct CleanRule {
     pub always: bool,
     /// The user's terms (the gate flags a dictation that uses one).
     pub dictionary: Vec<String>,
-    /// The cleanup window, in words (crate::window).
-    pub window_words: usize,
-    /// The window of the cleanup waited for at key up, in words (Window::split_final).
-    pub final_words: usize,
 }
 
 impl CleanRule {
@@ -237,21 +232,14 @@ pub struct Session {
     generation: u64,
     rule: CleanRule,
     segmenter: Segmenter,
-    /// The recording from sample `audio_from` on: all of it up to [`KEEP_SAMPLES`], then only
-    /// what is still to transcribe.
     audio: Vec<f32>,
-    audio_from: usize,
-    /// The recording's loudest sample so far.
-    peak: f32,
-    /// Where the segment being spoken starts, in samples from the start of the recording.
+    /// Where the segment being spoken starts, in samples.
     last_cut: usize,
     /// Segments sent to the speech worker, and how many came back.
     sent: usize,
     received: usize,
-    /// Each segment's transcript, in order, and all of them joined: redone when one lands, not
-    /// at every poll (a long dictation's text is megabytes).
+    /// Each segment's transcript, in order.
     parts: Vec<String>,
-    committed: String,
     /// The segment being spoken, transcribed so far.
     preview: String,
     last_job: Instant,
@@ -260,24 +248,7 @@ pub struct Session {
     /// text of the newest request (so the same text is never sent twice).
     latest: Option<(String, String)>,
     requested: Option<String>,
-    /// The cleanup window over the dictation's end (crate::window): a request never carries
-    /// more than its words and what is new, however long the dictation.
-    window: Window,
-    /// Requests in flight (the worker answers only the newest one queued).
-    pending: Vec<Pending>,
 }
-
-/// One cleanup request while speaking: `sent` is cleaned, `whole` is the dictation so far, and
-/// `start` the settled text `sent`'s cleanup follows.
-struct Pending {
-    sent: String,
-    whole: String,
-    start: String,
-}
-
-/// The longest recording kept whole (10 minutes), for retry last. A longer dictation keeps only
-/// what is still to transcribe: its memory does not grow with its length.
-const KEEP_SAMPLES: usize = 10 * 60 * utter_audio::SAMPLE_RATE as usize;
 
 /// What a dictation came to.
 #[derive(Debug, Clone)]
@@ -287,12 +258,7 @@ pub struct Heard {
     /// The text that goes in: cleaned, or `raw` when cleanup was skipped or failed.
     pub text: String,
     pub gate: Option<&'static str>,
-    /// The whole recording, for retry last; empty past [`KEEP_SAMPLES`], when only what was
-    /// still to transcribe was kept.
     pub audio: Vec<f32>,
-    /// The recording's length in samples, and its loudest sample.
-    pub samples: usize,
-    pub peak: f32,
     pub segments: usize,
     /// The end of speech -> every segment transcribed.
     pub asr_ms: f64,
@@ -308,65 +274,26 @@ impl Session {
             let _ = rec.jobs.send(Job::KeepAlive);
         }
         let now = Instant::now();
-        let window = Window::new(rule.window_words);
         Self {
             generation: rec.generation,
             rule,
             segmenter: Segmenter::new(SegmenterConfig::default()),
             audio: Vec::new(),
-            audio_from: 0,
-            peak: 0.0,
             last_cut: 0,
             sent: 0,
             received: 0,
             parts: Vec::new(),
-            committed: String::new(),
             preview: String::new(),
             last_job: now,
             last_preview: now,
             latest: None,
             requested: None,
-            window,
-            pending: Vec::new(),
         }
     }
 
-    /// Asks for the cleanup of `whole` (of its window, when long).
-    fn request(&mut self, cleaner: &clean::Cleaner, whole: String) {
-        let (sent, start) = self.window.split(&whole);
-        cleaner.request(self.generation, sent.clone());
-        self.pending.push(Pending { sent, whole: whole.clone(), start });
-        self.requested = Some(whole);
-    }
-
-    /// Takes in a cleanup that came back, as the whole dictation's text so far.
-    fn take(&mut self, c: clean::Cleaned) {
-        let Some(i) = self.pending.iter().rposition(|p| p.sent == c.raw) else { return };
-        let p = self.pending.remove(i);
-        // Requests sent before this one were passed over by the worker.
-        self.pending.drain(..i);
-        let ok = c.text.is_ok();
-        // A failed cleanup shows the raw text: the words are never lost.
-        let piece = c.text.unwrap_or(c.raw);
-        let text = joined(&p.start, &piece);
-        self.window.accept(&p.whole, &text, ok);
-        self.latest = Some((p.whole, text));
-    }
-
-    /// The audio kept so far (all of it, unless the dictation is past [`KEEP_SAMPLES`]).
+    /// The audio so far.
     pub fn audio(&self) -> &[f32] {
         &self.audio
-    }
-
-    /// Samples recorded so far.
-    fn recorded(&self) -> usize {
-        self.audio_from + self.audio.len()
-    }
-
-    /// Adds `new` to the recording.
-    fn record(&mut self, new: &[f32]) {
-        self.peak = new.iter().fold(self.peak, |m, x| m.max(x.abs()));
-        self.audio.extend_from_slice(new);
     }
 
     /// Takes in what came back while the user speaks; returns the live words when they changed:
@@ -393,24 +320,25 @@ impl Session {
             }
             words_changed = true;
         }
-        if segment_done {
-            self.committed = join_parts(&self.parts);
-        }
+        let committed_raw = join_parts(&self.parts);
         if let Some(cleaner) = &rec.cleaner {
             // A segment finished: clean the dictation so far, while the user goes on.
             if segment_done
-                && !self.committed.is_empty()
-                && self.requested.as_deref() != Some(self.committed.as_str())
-                && self.rule.applies(&self.committed)
+                && !committed_raw.is_empty()
+                && self.requested.as_deref() != Some(committed_raw.as_str())
+                && self.rule.applies(&committed_raw)
             {
-                self.request(cleaner, self.committed.clone());
+                cleaner.request(self.generation, committed_raw.clone());
+                self.requested = Some(committed_raw.clone());
             }
             while let Some(c) = cleaner.try_recv() {
                 if c.generation != self.generation {
                     continue;
                 }
                 log.push(c.entry("live"));
-                self.take(c);
+                // A failed cleanup shows the raw text: the words are never lost.
+                let text = c.text.unwrap_or_else(|_| c.raw.clone());
+                self.latest = Some((c.raw, text));
                 words_changed = true;
             }
         }
@@ -419,13 +347,10 @@ impl Session {
         }
         let (committed, provisional) = if rec.cleaner.is_some() {
             let latest = self.latest.as_ref().map(|(r, t)| (r.as_str(), t.as_str()));
-            clean::bar_words(latest, &self.committed, &self.preview)
+            clean::bar_words(latest, &committed_raw, &self.preview)
         } else {
-            (self.committed.clone(), self.preview.clone())
+            (committed_raw, self.preview.clone())
         };
-        // Only the end is shown: a long dictation's text would otherwise be copied to the Bar
-        // (and the log) whole at every change.
-        let (committed, provisional) = (clean::shown_tail(&committed), clean::shown_tail(&provisional));
         log.push(Entry::Bar { committed: committed.clone(), preview: provisional.clone(), is_final: false });
         Some((committed, provisional))
     }
@@ -436,20 +361,21 @@ impl Session {
         if new.is_empty() {
             return Ok(());
         }
-        self.record(new);
+        self.audio.extend_from_slice(new);
         let probs = rec.vad.push(new)?;
         for cut in self.segmenter.push(&probs) {
-            let cut_sample = (cut * FRAME).min(self.recorded());
+            let cut_sample = (cut * FRAME).min(self.audio.len());
             if cut_sample > self.last_cut {
                 self.send_segment(rec, cut_sample, log)?;
             }
         }
         if self.last_preview.elapsed() >= PREVIEW_EVERY
             && self.segmenter.has_speech()
-            && self.recorded() - self.last_cut >= PREVIEW_MIN_SAMPLES
+            && self.audio.len() - self.last_cut >= PREVIEW_MIN_SAMPLES
         {
-            let audio = self.audio[self.last_cut - self.audio_from..].to_vec();
-            let _ = rec.jobs.send(Job::Preview { generation: self.generation, audio });
+            let _ = rec
+                .jobs
+                .send(Job::Preview { generation: self.generation, audio: self.audio[self.last_cut..].to_vec() });
             self.last_preview = Instant::now();
             self.last_job = self.last_preview;
         } else if keeps_gpu_busy() && self.last_job.elapsed() >= KEEPALIVE {
@@ -462,18 +388,13 @@ impl Session {
     fn send_segment(&mut self, rec: &Recognizer, end: usize, log: &mut DictationLog) -> Result<(), PipelineError> {
         let rate = utter_audio::SAMPLE_RATE as f64;
         log.push(Entry::Segment { index: self.sent, start_s: self.last_cut as f64 / rate, end_s: end as f64 / rate });
-        let audio = self.audio[self.last_cut - self.audio_from..end - self.audio_from].to_vec();
+        let audio = self.audio[self.last_cut..end].to_vec();
         rec.jobs
             .send(Job::Segment { generation: self.generation, index: self.sent, audio })
             .map_err(|_| PipelineError::WorkerGone)?;
         self.parts.push(String::new());
         self.sent += 1;
         self.last_cut = end;
-        // Past KEEP_SAMPLES, what was transcribed is let go.
-        if self.recorded() > KEEP_SAMPLES {
-            self.audio.drain(..self.last_cut - self.audio_from);
-            self.audio_from = self.last_cut;
-        }
         self.last_job = Instant::now();
         Ok(())
     }
@@ -488,9 +409,9 @@ impl Session {
         ended: Instant,
         log: &mut DictationLog,
     ) -> Result<Heard, PipelineError> {
-        self.record(tail);
-        if self.recorded() > self.last_cut {
-            self.send_segment(rec, self.recorded(), log)?;
+        self.audio.extend_from_slice(tail);
+        if self.audio.len() > self.last_cut {
+            self.send_segment(rec, self.audio.len(), log)?;
         }
         while self.received < self.sent {
             let d = rec.done.recv().map_err(|_| PipelineError::WorkerGone)?;
@@ -511,7 +432,7 @@ impl Session {
         log.push(Entry::Gate { reason: gate });
         let started = Instant::now();
         let text = match &rec.cleaner {
-            Some(cleaner) if !raw.is_empty() && self.rule.applies(&raw) => match self.latest.take() {
+            Some(cleaner) if !raw.is_empty() && self.rule.applies(&raw) => match self.latest {
                 // Nothing was heard since the last pause's cleanup: it is the final text.
                 Some((done_raw, done_text)) if done_raw == raw => {
                     log.push(Entry::Cleanup {
@@ -524,31 +445,28 @@ impl Session {
                     done_text
                 }
                 _ => {
-                    // A long dictation: only the key-up window is cleaned now.
-                    let (sent, start) = self.window.split_final(&raw, self.rule.final_words);
-                    if !self.pending.iter().any(|p| p.whole == raw && p.sent == sent) {
-                        self.request(cleaner, raw.clone());
+                    if self.requested.as_deref() != Some(raw.as_str()) {
+                        cleaner.request(self.generation, raw.clone());
                     }
-                    match cleaner.wait_for(self.generation, &sent, CLEANUP_TIMEOUT) {
+                    match cleaner.wait_for(self.generation, &raw, CLEANUP_TIMEOUT) {
                         Some(c) => {
                             log.push(c.entry("final"));
                             // The words are never lost to a cleanup failure: the raw text goes in.
-                            let piece = c.text.unwrap_or_else(|e| {
+                            c.text.unwrap_or_else(|e| {
                                 tracing::warn!("cleanup failed, inserting the raw text: {e}");
-                                sent.clone()
-                            });
-                            joined(&start, &piece)
+                                raw.clone()
+                            })
                         }
                         None => {
                             tracing::warn!("cleanup took over {CLEANUP_TIMEOUT:?}; inserting the raw text");
                             log.push(Entry::Cleanup {
                                 when: "final",
-                                input: sent.clone(),
-                                output: sent.clone(),
+                                input: raw.clone(),
+                                output: raw.clone(),
                                 ms: started.elapsed().as_secs_f64() * 1e3,
                                 error: Some("timed out".into()),
                             });
-                            joined(&start, &sent)
+                            raw.clone()
                         }
                     }
                 }
@@ -556,10 +474,7 @@ impl Session {
             _ => raw.clone(),
         };
         let cleanup_ms = started.elapsed().as_secs_f64() * 1e3;
-        let samples = self.recorded();
-        // Kept whole, or let go of: never a part posing as the whole.
-        let audio = if self.audio_from == 0 { self.audio } else { Vec::new() };
-        Ok(Heard { raw, text, gate, audio, samples, peak: self.peak, segments: self.sent, asr_ms, cleanup_ms })
+        Ok(Heard { raw, text, gate, audio: self.audio, segments: self.sent, asr_ms, cleanup_ms })
     }
 }
 
@@ -577,50 +492,6 @@ mod tests {
 
     fn preview(generation: u64) -> Job {
         Job::Preview { generation, audio: vec![] }
-    }
-
-    fn bare_session() -> Session {
-        let now = Instant::now();
-        Session {
-            generation: 1,
-            rule: CleanRule { always: true, dictionary: Vec::new(), window_words: 100, final_words: 30 },
-            segmenter: Segmenter::new(SegmenterConfig::default()),
-            audio: Vec::new(),
-            audio_from: 0,
-            peak: 0.0,
-            last_cut: 0,
-            sent: 0,
-            received: 0,
-            parts: Vec::new(),
-            committed: String::new(),
-            preview: String::new(),
-            last_job: now,
-            last_preview: now,
-            latest: None,
-            requested: None,
-            window: Window::new(100),
-            pending: Vec::new(),
-        }
-    }
-
-    fn cleaned(raw: &str, text: Result<&str, &str>) -> clean::Cleaned {
-        clean::Cleaned { generation: 1, raw: raw.into(), text: text.map(str::to_owned).map_err(str::to_owned), ms: 0.0 }
-    }
-
-    #[test]
-    fn a_cleanup_that_comes_back_is_the_whole_text_so_far() {
-        let mut s = bare_session();
-        s.pending.push(Pending { sent: "um hi there".into(), whole: "um hi there".into(), start: String::new() });
-        s.take(cleaned("um hi there", Ok("Hi there.")));
-        assert_eq!(s.latest, Some(("um hi there".to_owned(), "Hi there.".to_owned())));
-        // A failed piece shows its raw words after the cleaned start.
-        s.pending.push(Pending {
-            sent: "uh more".into(),
-            whole: "um hi there uh more".into(),
-            start: "Hi there.".into(),
-        });
-        s.take(cleaned("uh more", Err("timed out")));
-        assert_eq!(s.latest.as_ref().map(|(_, t)| t.as_str()), Some("Hi there. uh more"));
     }
 
     #[test]
