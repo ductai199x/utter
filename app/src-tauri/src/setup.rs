@@ -125,10 +125,27 @@ fn tried_marker() -> std::path::PathBuf {
 }
 
 /// Whether the person has been through Try it: finished or skipped it, or dictated already
-/// (an install from before the marker).
+/// (an install from before the marker, whose History has entries; recorded then, since
+/// turning History off empties it and Try it came back at every start, 2026-10-19).
 pub fn tried() -> bool {
-    tried_marker().exists()
-        || std::fs::metadata(utter_core::data_dir().join("history.jsonl")).is_ok_and(|m| m.len() > 0)
+    if tried_marker().exists() {
+        return true;
+    }
+    let dictated = std::fs::metadata(utter_core::data_dir().join("history.jsonl")).is_ok_and(|m| m.len() > 0);
+    if dictated {
+        mark_tried();
+    }
+    dictated
+}
+
+/// Records that the person has dictated or been through Try it: it never opens again.
+pub fn mark_tried() {
+    let path = tried_marker();
+    if !path.exists()
+        && let Err(e) = std::fs::write(&path, "")
+    {
+        tracing::warn!("could not write {}: {e}", path.display());
+    }
 }
 
 /// Which of the setup paths the missing components call for (`None`: none missing).
@@ -665,10 +682,8 @@ pub fn setup_dictation_ready(app: AppHandle) -> bool {
 /// or Skip), which then never opens again.
 #[tauri::command]
 pub fn setup_finish(app: AppHandle, tried: Option<bool>) {
-    if tried == Some(true)
-        && let Err(e) = std::fs::write(tried_marker(), "")
-    {
-        tracing::warn!("could not write {}: {e}", tried_marker().display());
+    if tried == Some(true) {
+        mark_tried();
     }
     if let Some(w) = app.get_webview_window("setup") {
         let _ = w.destroy();

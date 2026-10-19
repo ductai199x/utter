@@ -190,6 +190,8 @@ impl Bar {
                         self.leave_with_error(&e.message(d.copied));
                     }
                     (Ok(()), false) => {
+                        // A dictation went in: Try it has nothing left to teach.
+                        setup::mark_tried();
                         self.emit_state(BarState::new("done"));
                         self.leave_after(DONE_HOLD);
                     }
@@ -628,7 +630,7 @@ fn main() {
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
-                    "open" => home::show(app),
+                    "open" => home::show_launched(app),
                     "paste-last" => send_command(app, utter_pipeline::Command::PasteLast),
                     "copy-last" => send_command(app, utter_pipeline::Command::CopyLast),
                     "retry-last" => send_command(app, utter_pipeline::Command::RetryLast),

@@ -203,7 +203,7 @@
         <button onclick={() => openPath('settings')}>Open file</button>
       </div>
     {/if}
-    {#if saveError}<div class="banner" role="alert"><span>{saveError}</span></div>{/if}
+    {#if saveError && !(home?.error && saveError.includes(home.error))}<div class="banner" role="alert"><span>{saveError}</span></div>{/if}
 
     {#if settings && home}
       <h2>General</h2>

@@ -227,8 +227,13 @@ impl Component {
     /// Bytes still to download: what an interrupted download left (whole files and `.part`
     /// files, which resume) counts as fetched. Setup's "1.4 GB to download" after a pause.
     pub fn remaining_download(&self) -> u64 {
-        if self.is_installed() {
+        // Installed but damaged (a file deleted or cut short) is downloaded again in full: a
+        // repair said "0.0 GB to download" for a missing 688 MB model (2026-10-19).
+        if self.is_intact() {
             return 0;
+        }
+        if self.is_installed() {
+            return self.download_size();
         }
         let have = |path: &Path, size: u64| -> u64 {
             match fs::metadata(path) {

@@ -87,8 +87,11 @@ mod imp {
             .replace('"', "\\\"")
             .replace('`', "\\`")
             .replace('$', "\\$");
+        // TryExec: once Utter is uninstalled (a package cannot remove this file from the home
+        // folder) the desktop skips the entry instead of failing to start a missing program.
+        let try_exec = exe.display().to_string().replace('\\', "\\\\");
         let text = format!(
-            "[Desktop Entry]\nType=Application\nName=Utter\nComment=Voice dictation\nExec=\"{quoted}\" {arg}\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n"
+            "[Desktop Entry]\nType=Application\nName=Utter\nComment=Voice dictation\nTryExec={try_exec}\nExec=\"{quoted}\" {arg}\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n"
         );
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
     }
