@@ -19,6 +19,7 @@
     withRule,
     withoutRule,
     type Applied,
+    type CpuThreads,
     type HomeState,
     type KeepHistory,
     type Model,
@@ -108,6 +109,8 @@
     home && chosenRuntime !== home.running ? home.runtimes.find((r) => r.id === chosenRuntime) : undefined,
   );
   const runtimeDesc = $derived(home?.runtimes.find((r) => r.id === chosenRuntime)?.detail ?? '');
+  // Processor threads apply at start, like the runtime.
+  const pendingThreads = $derived(!!settings && !!home && settings.cpu_threads !== home.runningThreads);
   const loginLabel = $derived(home?.os === 'windows' ? 'Start with Windows' : 'Start at login');
   // GNOME shows no tray icons without an extension, so elsewhere it is "in the background".
   const loginDesc = $derived(
@@ -291,6 +294,35 @@
                 ? ' On the processor it runs Extra light.'
                 : ''}</span
               >
+            </div>
+            <button class="primary" onclick={() => void restart()}>Restart now</button>
+          </div>
+        {/if}
+      {/if}
+      {#if home.running === 'cpu' && !pendingRuntime}
+        <div class="row">
+          <div class="label">
+            <label for="cpu-threads">Processor threads</label>
+            <span class="desc"
+              >{settings.cpu_threads === 'high'
+                ? 'Three quarters of the processor, for the models. Can leave other apps slower while you dictate.'
+                : "Half of the processor, for the models. Leaves room for your other apps."}</span
+            >
+          </div>
+          <select
+            id="cpu-threads"
+            value={settings.cpu_threads}
+            onchange={(e) => settings && save({ ...settings, cpu_threads: e.currentTarget.value as CpuThreads })}
+          >
+            <option value="default">Default ({home.threadCounts.default} threads)</option>
+            <option value="high">High ({home.threadCounts.high} threads)</option>
+          </select>
+        </div>
+        {#if pendingThreads}
+          <div class="row">
+            <div class="label">
+              <span class="label-text">Utter restarts to use {home.threadCounts[settings.cpu_threads]} threads</span>
+              <span class="desc">It takes a few seconds.</span>
             </div>
             <button class="primary" onclick={() => void restart()}>Restart now</button>
           </div>

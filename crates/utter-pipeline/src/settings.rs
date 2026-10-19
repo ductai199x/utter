@@ -46,6 +46,10 @@ model = \"quality\"
 # Utter restarts to switch.
 runtime = \"auto\"
 
+# On the processor, how many of its threads the models use: \"default\" (half) or \"high\"
+# (three quarters). Utter restarts to switch.
+cpu_threads = \"default\"
+
 # How long History keeps your dictations, on this computer only: \"forever\", \"30-days\",
 # \"24-hours\" or \"off\".
 keep_history = \"forever\"
@@ -83,6 +87,8 @@ pub struct Settings {
     pub model: Model,
     /// What runs the models (crate::runtime_choice).
     pub runtime: Runtime,
+    /// How many of the processor's threads the models use there (utter_platform::cpu).
+    pub cpu_threads: CpuThreads,
     pub keep_history: KeepHistory,
     /// Keep the detailed dictation log with audio (development builds always do).
     pub debug_log: bool,
@@ -304,6 +310,27 @@ pub enum Runtime {
     Cpu,
 }
 
+/// How many of the processor's threads the models use when they run on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CpuThreads {
+    /// Half of them.
+    #[default]
+    Default,
+    /// Three quarters.
+    High,
+}
+
+impl CpuThreads {
+    /// The share of the logical processors, in percent (utter_platform::cpu::set_share).
+    pub fn percent(self) -> u8 {
+        match self {
+            CpuThreads::Default => 50,
+            CpuThreads::High => 75,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Model {
@@ -349,6 +376,7 @@ impl Default for Settings {
             microphone: String::new(),
             model: Model::Quality,
             runtime: Runtime::Auto,
+            cpu_threads: CpuThreads::Default,
             keep_history: KeepHistory::Forever,
             debug_log: false,
             keep_logs: true,
@@ -419,6 +447,7 @@ impl Settings {
         };
         set(&mut doc, "model", model.into());
         set(&mut doc, "runtime", word(&self.runtime).into());
+        set(&mut doc, "cpu_threads", word(&self.cpu_threads).into());
         set(&mut doc, "keep_history", word(&self.keep_history).into());
         set(&mut doc, "debug_log", self.debug_log.into());
         set(&mut doc, "keep_logs", self.keep_logs.into());
@@ -537,6 +566,7 @@ mod tests {
             microphone: "USB".into(),
             model: Model::Light,
             runtime: Runtime::Vulkan,
+            cpu_threads: CpuThreads::High,
             keep_history: KeepHistory::Days30,
             debug_log: true,
             keep_logs: false,

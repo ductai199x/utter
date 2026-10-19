@@ -517,9 +517,12 @@ fn main() {
     }
     LAUNCHED.get_or_init(std::time::Instant::now);
     tracing_subscriber_init();
-    // What runs the models, before anything asks (utter_pipeline::runtime_choice).
-    let runtime = Settings::load_or_create(&Settings::path()).map(|s| s.runtime).unwrap_or_default();
-    utter_pipeline::runtime_choice::select(runtime);
+    // What runs the models, and how many of the processor's threads they use there, before
+    // anything asks (utter_pipeline::runtime_choice, utter_platform::cpu).
+    let settings = Settings::load_or_create(&Settings::path()).unwrap_or_default();
+    utter_pipeline::runtime_choice::select(settings.runtime);
+    utter_platform::cpu::set_share(settings.cpu_threads.percent());
+    home::set_started_threads(settings.cpu_threads);
     if let Some(old) = utter_core::move_legacy_data() {
         tracing::info!("moved {} to {}", old.display(), utter_core::data_dir().display());
     }

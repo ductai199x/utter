@@ -80,6 +80,12 @@ impl From<ConvSearchArg> for ConvSearch {
 }
 
 #[derive(Clone, Copy, ValueEnum)]
+enum ThreadsArg {
+    Default,
+    High,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
 enum TierArg {
     /// The bigger fine-tuned model (E4B), the default.
     Quality,
@@ -181,6 +187,10 @@ enum Command {
         /// Clean only the dictations the gate flags (the old behavior), not every one.
         #[arg(long)]
         gated: bool,
+        /// On the processor, the threads the models use, as the app's setting: half (default)
+        /// or three quarters (high) of the logical processors.
+        #[arg(long, value_enum, default_value_t = ThreadsArg::Default)]
+        threads: ThreadsArg,
     },
     /// Show where voice activity detection cuts a 16 kHz mono WAV file into segments.
     Vad { file: PathBuf },
@@ -353,7 +363,12 @@ fn run() -> Result<()> {
         Command::Doctor => return doctor(),
         Command::Record { out, seconds, device } => return record(out, *seconds, device.clone()),
         Command::Vad { file } => return vad(file),
-        Command::E2eBench { sets, limit, name, tier, gap, prompt, gated } => {
+        Command::E2eBench { sets, limit, name, tier, gap, prompt, gated, threads } => {
+            let threads = match threads {
+                ThreadsArg::Default => utter_pipeline::settings::CpuThreads::Default,
+                ThreadsArg::High => utter_pipeline::settings::CpuThreads::High,
+            };
+            utter_platform::cpu::set_share(threads.percent());
             let prompt = prompt.as_ref().map(std::fs::read_to_string).transpose().context("reading --prompt")?;
             let cfg = utter_pipeline::PipelineConfig {
                 tier: (*tier).into(),

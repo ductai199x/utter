@@ -92,12 +92,12 @@ impl SpeechModel {
     }
 }
 
-/// Threads for the speech model when it runs on the processor: the physical cores, at most 6
-/// and at least 2. The int8 encoder (SpeechModel::I8) takes a 9 s clip in 123 ms with 4-6 threads
-/// on a Ryzen 9 9900X (12 cores), 141 ms with 12 and 146 ms with 24: its matrices are small
-/// enough that more threads cost more than they add, and fewer leave cores to the cleanup server.
+/// Threads for the speech model when it runs on the processor: the share of the logical
+/// processors the person chose (Settings, `cpu_threads`: half, or 75% for High). The int8
+/// encoder (SpeechModel::I8) took a 9 s clip in 123 ms with 4-6 threads on a Ryzen 9 9900X (12
+/// cores, 24 threads), 141 ms with 12 and 146 ms with 24 (2026-10-18).
 pub fn cpu_session_threads() -> usize {
-    utter_platform::cpu::physical_cores().clamp(2, 6)
+    utter_platform::cpu::model_threads()
 }
 
 /// The installed GPU speech model's folder, or an error naming how to install it.
