@@ -17,6 +17,27 @@ pub fn tie_to_this_process(child: &Child) -> Result<(), ProcessError> {
     imp::tie(child)
 }
 
+/// Marks every open file of this process close-on-exec, so a program started next inherits
+/// none; for a process about to end that starts its replacement (Utter restarting). Libraries
+/// open files without the flag: a restarted AppImage inherited one inside the old copy's mount,
+/// which then stayed mounted for as long as the new copy ran (Ubuntu 24.04, 2026-10-19).
+pub fn close_files_on_exec() {
+    #[cfg(target_os = "linux")]
+    if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
+        let fds: Vec<i32> = entries.flatten().filter_map(|e| e.file_name().to_str()?.parse().ok()).collect();
+        for fd in fds.into_iter().filter(|&fd| fd > 2) {
+            // SAFETY: F_GETFD/F_SETFD only read and set this descriptor's flags; one that closed
+            // since the listing makes the call fail, which is harmless.
+            unsafe {
+                let flags = libc::fcntl(fd, libc::F_GETFD);
+                if flags >= 0 {
+                    libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+                }
+            }
+        }
+    }
+}
+
 /// Waits until process `pid` has ended, at most `timeout`; returns whether it did. A pid that
 /// is not running (already gone) returns at once.
 pub fn wait_for_exit(pid: u32, timeout: std::time::Duration) -> bool {
@@ -145,6 +166,16 @@ pub fn outside_appimage(cmd: &mut std::process::Command) {
     {
         let Some(appdir) = std::env::var_os("APPDIR").filter(|d| !d.is_empty()) else { return };
         let appdir = std::path::PathBuf::from(appdir);
+        // The image's launcher changes into the mount: a child started there keeps the mount
+        // busy after Utter ends (a restarted AppImage left one mount behind per restart). It
+        // starts where Utter was started from instead (OWD, set by the AppImage runtime).
+        if cmd.get_current_dir().is_none() && std::env::current_dir().is_ok_and(|d| d.starts_with(&appdir)) {
+            let outside = std::env::var_os("OWD")
+                .map(std::path::PathBuf::from)
+                .filter(|d| !d.starts_with(&appdir) && d.is_dir())
+                .unwrap_or_else(|| std::path::PathBuf::from("/"));
+            cmd.current_dir(outside);
+        }
         let own: Vec<std::ffi::OsString> = cmd.get_envs().map(|(k, _)| k.to_owned()).collect();
         for (key, value) in std::env::vars_os() {
             if own.contains(&key) {
