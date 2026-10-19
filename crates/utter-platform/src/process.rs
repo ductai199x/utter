@@ -203,7 +203,8 @@ pub fn outside_appimage(cmd: &mut std::process::Command) {
 
 /// Starts `cmd` so that it ends when this process ends, even by a crash: Windows puts it in a
 /// job object; Linux has the kernel kill it when its parent goes (`PR_SET_PDEATHSIG`); macOS has
-/// no such tie (Utter sweeps a leftover server when it next starts, utter-llm).
+/// no such tie, so a watcher process ends it when Utter is gone (quitting Utter left
+/// llama-server and its 4 GB running until the next start, macOS 26.7).
 pub fn spawn_tied(mut cmd: std::process::Command) -> std::io::Result<std::process::Child> {
     outside_appimage(&mut cmd);
     #[cfg(windows)]
@@ -222,7 +223,32 @@ pub fn spawn_tied(mut cmd: std::process::Command) -> std::io::Result<std::proces
     #[cfg(all(unix, not(target_os = "linux")))]
     {
         let mut cmd = cmd;
-        cmd.spawn()
+        let child = cmd.spawn()?;
+        watch_for_exit(child.id());
+        Ok(child)
+    }
+}
+
+/// A small shell that checks every second that Utter and `child` both run; when Utter is gone
+/// (quit, crash, kill -9) it ends the child, politely, then for good. When the child ends first
+/// the shell ends too, so it never signals a process id the system has given to another.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn watch_for_exit(child: u32) {
+    let utter = std::process::id();
+    let script = format!(
+        "while kill -0 {utter} 2>/dev/null && kill -0 {child} 2>/dev/null; do sleep 1; done; \
+         if kill -0 {child} 2>/dev/null; then kill -TERM {child}; sleep 3; kill -KILL {child} 2>/dev/null; fi"
+    );
+    let watcher = std::process::Command::new("/bin/sh")
+        .args(["-c", &script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    match watcher {
+        // Waited for, so an ended watcher leaves no zombie behind.
+        Ok(mut w) => drop(std::thread::Builder::new().name("utter-child-watch".into()).spawn(move || w.wait())),
+        Err(e) => tracing::warn!("no watcher for process {child}: it may outlive Utter ({e})"),
     }
 }
 
