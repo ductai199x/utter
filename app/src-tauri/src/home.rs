@@ -145,7 +145,7 @@ fn runtimes() -> Vec<RuntimeOption> {
                 .into_iter()
                 .filter_map(|id| utter_runtime::component(id).ok())
                 .filter(|c| !c.is_intact())
-                .map(|c| c.download_size())
+                .map(|c| c.remaining_download())
                 .sum();
             RuntimeOption { id: utter_pipeline::runtime_choice::setting_for(backend), name, detail, download_bytes }
         })
@@ -178,7 +178,7 @@ fn to_download(tier: utter_llm::cleanup::Tier) -> u64 {
         .into_iter()
         .filter_map(|id| utter_runtime::component(id).ok())
         .filter(|c| !c.is_intact())
-        .map(|c| c.download_size())
+        .map(|c| c.remaining_download())
         .sum()
 }
 
@@ -306,7 +306,12 @@ pub fn apply_logs(settings: &Settings) {
 
 /// Shows the Home window, focused.
 pub fn show(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("home") {
+    show_window(app, "home");
+}
+
+/// Shows the window `label`, focused.
+fn show_window(app: &AppHandle, label: &str) {
+    if let Some(w) = app.get_webview_window(label) {
         let _ = w.unminimize();
         fit_on_screen(&w);
         let _ = w.show();
@@ -369,20 +374,24 @@ fn fit_on_screen(w: &tauri::WebviewWindow) {
 /// behind the focused window and shows "Utter is ready" instead. The second start's token
 /// reaches here through a file (keep_launch_token): the single-instance plugin passes only
 /// arguments, and GTK takes the variable out of the environment as it starts.
+///
+/// While setup is open (first run, a download, the problem screen) it is the window to come back
+/// to: Home over it offered Settings with nothing installed yet (Windows, 2026-10-19).
 pub fn show_launched(app: &AppHandle) {
+    let label = if app.get_webview_window("setup").is_some() { "setup" } else { "home" };
     #[cfg(target_os = "linux")]
-    if let (Some(token), Some(w)) = (take_launch_token(), app.get_webview_window("home")) {
+    if let (Some(token), Some(w)) = (take_launch_token(), app.get_webview_window(label)) {
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
             if let Ok(gtk_window) = w.gtk_window() {
                 use gtk::prelude::GtkWindowExt;
                 gtk_window.set_startup_id(&token);
             }
-            show(&handle);
+            show_window(&handle, label);
         });
         return;
     }
-    show(app);
+    show_window(app, label);
 }
 
 /// Where a start of Utter leaves its launch token for the running one.
