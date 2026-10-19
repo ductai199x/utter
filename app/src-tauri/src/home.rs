@@ -146,6 +146,9 @@ fn runtimes() -> Vec<RuntimeOption> {
                 Backend::Cuda => ("NVIDIA CUDA", "Fastest on NVIDIA graphics cards."),
                 Backend::Vulkan => ("Vulkan", "Any graphics card: AMD, Intel or NVIDIA."),
                 Backend::Metal => ("Apple GPU", "The Mac's own graphics."),
+                Backend::Cpu if cfg!(target_os = "macos") => {
+                    ("Processor", "Slower than the GPU; Light and Extra light only.")
+                }
                 Backend::Cpu => ("Processor", "No graphics card needed. Slower; Light and Extra light only."),
             };
             let runs = utter_pipeline::runtime_choice::model_on(model, backend);
