@@ -459,6 +459,7 @@ pub fn restart(app: &AppHandle) {
             // name this copy's mount, which then never closed (the cleanup server kept loading a
             // library from it; Ubuntu 24.04, 2026-10-19).
             utter_platform::process::outside_appimage(&mut cmd);
+            utter_platform::process::close_files_on_exec();
             if let Err(e) = cmd.spawn() {
                 tracing::error!("restart: could not start Utter again: {e}");
                 return;
