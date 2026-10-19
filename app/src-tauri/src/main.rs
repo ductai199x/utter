@@ -619,8 +619,20 @@ fn main() {
             watch_ui_thread(app.handle().clone());
             let open = MenuItem::with_id(app, "open", "Open Utter", true, None::<&str>)?;
             // Their shortcuts are shown beside them (docs/ux/insertion.md).
-            let paste = MenuItem::with_id(app, "paste-last", "Paste last dictation", true, Some("Alt+Shift+Z"))?;
-            let copy = MenuItem::with_id(app, "copy-last", "Copy last dictation", true, Some("Alt+Shift+X"))?;
+            let paste = MenuItem::with_id(
+                app,
+                "paste-last",
+                "Paste last dictation",
+                true,
+                Some(utter_platform::shortcut::Shortcut::PasteLast.keys()),
+            )?;
+            let copy = MenuItem::with_id(
+                app,
+                "copy-last",
+                "Copy last dictation",
+                true,
+                Some(utter_platform::shortcut::Shortcut::CopyLast.keys()),
+            )?;
             let retry = MenuItem::with_id(app, "retry-last", "Retry last dictation", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Utter", true, None::<&str>)?;
             let line = || PredefinedMenuItem::separator(app);

@@ -78,6 +78,10 @@ export interface HomeState {
   dataDir: string;
   settingsPath: string;
   os: 'windows' | 'linux' | 'macos';
+  /** The keys that paste ("Cmd+V" on macOS) and the paste-last and copy-last shortcuts. */
+  pasteKeys: string;
+  pasteLastKeys: string;
+  copyLastKeys: string;
   /** The desktop shows tray icons (GNOME without an AppIndicator extension does not). */
   tray: boolean;
 }
@@ -127,6 +131,9 @@ const mock: HomeState = {
   dataDir: 'C:\\Users\\you\\AppData\\Local\\Utter',
   settingsPath: 'C:\\Users\\you\\AppData\\Local\\Utter\\settings.toml',
   os: 'windows',
+  pasteKeys: 'Ctrl+V',
+  pasteLastKeys: 'Alt+Shift+Z',
+  copyLastKeys: 'Alt+Shift+X',
   // ?run=cpu: the page as on a computer without a graphics card.
   running: new URLSearchParams(location.search).get('run') === 'cpu' ? 'cpu' : 'cuda',
   runningThreads: 'default',
@@ -289,7 +296,8 @@ export const openPasteRules = () =>
   inTauri ? invoke<void>('open_paste_rules') : Promise.resolve(void window.open('rules.html', 'rules'));
 
 export const WITH_LABELS: Record<PasteWith, string> = {
-  'ctrl-v': 'Ctrl+V',
+  // The primary paste keys: Cmd+V on a Mac.
+  'ctrl-v': navigator.userAgent.includes('Macintosh') ? 'Cmd+V' : 'Ctrl+V',
   'ctrl-shift-v': 'Ctrl+Shift+V',
   'shift-insert': 'Shift+Insert',
   type: 'Type it out',

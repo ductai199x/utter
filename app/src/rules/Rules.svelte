@@ -192,7 +192,7 @@
   <header class="head">
     <div>
       <h1>Paste rules</h1>
-      <p class="lede">How each app pastes a dictation. Every other app: Ctrl+V, and the clipboard back after 0.5 s.</p>
+      <p class="lede">How each app pastes a dictation. Every other app: {WITH_LABELS['ctrl-v']}, and the clipboard back after 0.5 s.</p>
     </div>
     <div class="add-wrap">
       <button
