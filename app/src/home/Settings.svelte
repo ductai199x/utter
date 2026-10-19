@@ -250,7 +250,11 @@
       <div class="row">
         <div class="label">
           <label for="mic">Microphone</label>
-          <span class="desc">Utter listens to this one.</span>
+          <span class="desc"
+            >{settings.microphone && !home.microphones.includes(settings.microphone)
+              ? 'Not connected: Utter uses the system default until it is back.'
+              : 'Utter listens to this one.'}</span
+          >
           {#if applied.microphone?.status === 'error'}<span class="row-error">{applied.microphone.error}</span>
           {:else if home.microphones.length === 0}<span class="row-error"
               >No microphone connected. Plug one in; Utter uses it right away.</span
