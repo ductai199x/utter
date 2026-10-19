@@ -1,5 +1,27 @@
-//! The processor: how many physical cores it has. Threads for compute-bound work go by physical
-//! cores; a second hardware thread on a core (SMT) shares its arithmetic units and adds little.
+//! The processor: how many cores it has, and how many threads the models may use on it.
+
+use std::sync::atomic::{AtomicU8, Ordering};
+
+/// The share of the logical processors the models use when they run on the processor, in
+/// percent: half by default, 75 when the person chose High (Settings, `cpu_threads`).
+static SHARE: AtomicU8 = AtomicU8::new(50);
+
+/// At startup, before any model loads: the share of the logical processors the models use.
+pub fn set_share(percent: u8) {
+    SHARE.store(percent.clamp(1, 100), Ordering::Relaxed);
+}
+
+/// Threads for one model on the processor (the speech model's session, the cleanup server):
+/// the chosen share of the logical processors, at least 1.
+pub fn model_threads() -> usize {
+    threads_at(SHARE.load(Ordering::Relaxed))
+}
+
+/// `percent` of the logical processors, at least 1.
+pub fn threads_at(percent: u8) -> usize {
+    let logical = std::thread::available_parallelism().map_or(1, |n| n.get());
+    (logical * usize::from(percent) / 100).max(1)
+}
 
 /// Physical cores on this computer (at least 1). Falls back to the logical processors when the
 /// OS will not say.
@@ -97,5 +119,14 @@ mod tests {
         let physical = super::physical_cores();
         let logical = std::thread::available_parallelism().map_or(1, |n| n.get());
         assert!(physical >= 1 && physical <= logical, "{physical} physical, {logical} logical");
+    }
+
+    #[test]
+    fn model_threads_take_the_share_of_the_logical_processors() {
+        let logical = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(super::model_threads(), (logical / 2).max(1));
+        super::set_share(75);
+        assert_eq!(super::model_threads(), (logical * 3 / 4).max(1));
+        super::set_share(50);
     }
 }

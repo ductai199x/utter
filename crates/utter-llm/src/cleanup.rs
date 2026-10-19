@@ -127,6 +127,11 @@ pub fn installed_model(tier: Tier) -> Result<PathBuf, LlmError> {
 pub fn server_options(tier: Tier) -> Result<ServerOptions, LlmError> {
     let mut opts = ServerOptions::new(installed_model(tier)?);
     opts.extra_args = SERVER_ARGS.iter().map(|s| (*s).to_owned()).collect();
+    // On the processor, the share of its threads the person chose (Settings, cpu_threads).
+    if utter_runtime::backend() == utter_runtime::Backend::Cpu {
+        let threads = utter_platform::cpu::model_threads().to_string();
+        opts.extra_args.extend(["--threads".to_owned(), threads.clone(), "--threads-batch".to_owned(), threads]);
+    }
     Ok(opts)
 }
 

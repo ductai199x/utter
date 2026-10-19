@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use utter_pipeline::Settings;
-use utter_pipeline::settings::{DictationKey, Model, clean_terms};
+use utter_pipeline::settings::{CpuThreads, DictationKey, Model, clean_terms};
 
 /// How often the watcher looks at the file's modification time.
 const WATCH_EVERY: Duration = Duration::from_millis(500);
@@ -95,6 +95,10 @@ pub struct State {
     running: utter_pipeline::settings::Runtime,
     /// The runtimes this computer can run, best first, for Settings.
     runtimes: Vec<RuntimeOption>,
+    /// The processor threads setting Utter started with (it applies at start).
+    running_threads: CpuThreads,
+    /// The threads each processor threads setting gives the models on this computer.
+    thread_counts: std::collections::HashMap<&'static str, usize>,
     /// What choosing each model would download now, in bytes (0: installed).
     download_bytes: std::collections::HashMap<&'static str, u64>,
     /// The GPU memory each model needs, speech included (utter_pipeline::gpu_need), and the
@@ -197,6 +201,13 @@ fn state() -> State {
             && gpu_memory().is_some_and(|m| m >= utter_pipeline::card_need(utter_llm::cleanup::Tier::Quality)),
         running: utter_pipeline::runtime_choice::setting_for(utter_runtime::backend()),
         runtimes: runtimes(),
+        running_threads: *STARTED_THREADS.get().unwrap_or(&CpuThreads::Default),
+        thread_counts: [CpuThreads::Default, CpuThreads::High]
+            .into_iter()
+            .map(|t| {
+                (if t == CpuThreads::High { "high" } else { "default" }, utter_platform::cpu::threads_at(t.percent()))
+            })
+            .collect(),
         download_bytes: TIERS.into_iter().map(|(name, tier)| (name, to_download(tier))).collect(),
         gpu_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::gpu_need(tier))).collect(),
         card_need: TIERS.into_iter().map(|(name, tier)| (name, utter_pipeline::card_need(tier))).collect(),
@@ -212,10 +223,17 @@ fn state() -> State {
     }
 }
 
-/// Restart, to switch the runtime Settings saved (it is chosen once, at start).
+/// The processor threads setting Utter started with (set once, in main).
+static STARTED_THREADS: std::sync::OnceLock<CpuThreads> = std::sync::OnceLock::new();
+
+pub fn set_started_threads(threads: CpuThreads) {
+    let _ = STARTED_THREADS.set(threads);
+}
+
+/// Restart, to switch the runtime or the processor threads Settings saved (both apply at start).
 #[tauri::command]
 pub fn home_restart(app: tauri::AppHandle) {
-    tracing::info!("restarting to switch the runtime");
+    tracing::info!("restarting to apply the runtime or processor threads");
     app.restart();
 }
 

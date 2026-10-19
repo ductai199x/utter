@@ -27,6 +27,8 @@ export interface Settings {
   model: Model;
   /** What runs the models; Utter restarts to switch. */
   runtime: Runtime;
+  /** On the processor, how many of its threads the models use; Utter restarts to switch. */
+  cpu_threads: CpuThreads;
   keep_history: KeepHistory;
   debug_log: boolean;
   keep_logs: boolean;
@@ -34,6 +36,9 @@ export interface Settings {
 }
 
 export type Runtime = 'auto' | 'cuda' | 'vulkan' | 'metal' | 'cpu';
+
+/** Half the processor's threads, or three quarters. */
+export type CpuThreads = 'default' | 'high';
 
 /** A runtime this computer can run, as Settings lists it. */
 export interface RuntimeOption {
@@ -53,6 +58,10 @@ export interface HomeState {
   running: Runtime;
   /** The runtimes this computer can run, best first. */
   runtimes: RuntimeOption[];
+  /** The processor threads setting Utter started with. */
+  runningThreads: CpuThreads;
+  /** The threads each processor threads setting gives the models on this computer. */
+  threadCounts: Record<CpuThreads, number>;
   lightAvailable: boolean;
   /** The models that run on this runtime, best first (Extra light only on the processor). */
   models: Model[];
@@ -90,6 +99,7 @@ const mock: HomeState = {
     microphone: '',
     model: 'quality',
     runtime: 'auto',
+    cpu_threads: 'default',
     keep_history: 'forever',
     debug_log: false,
     keep_logs: true,
@@ -114,12 +124,15 @@ const mock: HomeState = {
   dataDir: 'C:\\Users\\you\\AppData\\Local\\Utter',
   settingsPath: 'C:\\Users\\you\\AppData\\Local\\Utter\\settings.toml',
   os: 'windows',
-  running: 'cuda',
+  // ?run=cpu: the page as on a computer without a graphics card.
+  running: new URLSearchParams(location.search).get('run') === 'cpu' ? 'cpu' : 'cuda',
+  runningThreads: 'default',
+  threadCounts: { default: 12, high: 18 },
   runtimes: [
     { id: 'cuda', name: 'NVIDIA CUDA', detail: 'Fastest on NVIDIA graphics cards.', downloadBytes: 0 },
     { id: 'vulkan', name: 'Vulkan', detail: 'Any graphics card: AMD, Intel or NVIDIA.', downloadBytes: 1.6e9 },
     { id: 'cpu', name: 'Processor', detail: 'No graphics card needed. Slower; Light and Extra light only.', downloadBytes: 3.6e9 },
-  ],
+  ].filter((r) => new URLSearchParams(location.search).get('run') !== 'cpu' || r.id === 'cpu') as RuntimeOption[],
   tray: new URLSearchParams(location.search).get('tray') !== '0',
 };
 const appliedHandlers: ((a: Applied) => void)[] = [];
