@@ -251,7 +251,10 @@
         <div class="label">
           <label for="mic">Microphone</label>
           <span class="desc">Utter listens to this one.</span>
-          {#if applied.microphone?.status === 'error'}<span class="row-error">{applied.microphone.error}</span>{/if}
+          {#if applied.microphone?.status === 'error'}<span class="row-error">{applied.microphone.error}</span>
+          {:else if home.microphones.length === 0}<span class="row-error"
+              >No microphone connected. Plug one in; Utter uses it right away.</span
+            >{/if}
         </div>
         <select
           id="mic"
