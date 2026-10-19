@@ -173,7 +173,8 @@ fn trim(newest: Option<Instant>, until: Instant) -> usize {
 }
 
 pub struct Microphone {
-    _stream: cpal::Stream,
+    /// None for [`Microphone::none`].
+    _stream: Option<cpal::Stream>,
     shared: Arc<Shared>,
     worker: Option<JoinHandle<()>>,
     device_name: String,
@@ -256,7 +257,15 @@ impl Microphone {
             .map_err(|e| AudioError::Device(e.to_string()))?;
         tracing::info!(device = %device_name, native_rate, channels, ?format, "microphone open");
         let preroll = (SAMPLE_RATE * config.preroll_ms / 1000) as usize;
-        Ok(Self { _stream: stream, shared, worker: Some(worker), device_name, native_rate, preroll })
+        Ok(Self { _stream: Some(stream), shared, worker: Some(worker), device_name, native_rate, preroll })
+    }
+
+    /// No microphone: a stand-in that is never alive, for starting without one (none
+    /// connected); the pipeline opens a real one when it appears.
+    pub fn none() -> Self {
+        let shared = Arc::new(Shared::new());
+        shared.failed.store(true, Ordering::Relaxed);
+        Self { _stream: None, shared, worker: None, device_name: String::new(), native_rate: 0, preroll: 0 }
     }
 
     pub fn device_name(&self) -> &str {

@@ -38,14 +38,16 @@ export interface Problem {
   actions: ('retry' | 'repair' | 'allow' | 'logs' | 'quit' | 'close')[];
 }
 
-export type Mode = 'first' | 'update' | 'model' | 'runtime' | 'repair' | 'problem';
+export type Mode = 'first' | 'update' | 'model' | 'runtime' | 'repair' | 'problem' | 'try';
 
 const params = new URLSearchParams(location.search);
 /** Opened to carry on what the person already started (a repair that restarted Utter). */
 export const carryOn = params.get('go') === '1';
 export const mode = (): Mode => {
   const m = params.get('mode');
-  return m === 'update' || m === 'model' || m === 'runtime' || m === 'repair' || m === 'problem' ? m : 'first';
+  return m === 'update' || m === 'model' || m === 'runtime' || m === 'repair' || m === 'problem' || m === 'try'
+    ? m
+    : 'first';
 };
 
 const inTauri = '__TAURI_INTERNALS__' in window;
@@ -291,7 +293,13 @@ export function repair(): Promise<void> {
 export const openLogs = (): Promise<void> =>
   inTauri ? invoke('open_path', { which: 'logs' }) : Promise.resolve();
 
-export const finish = (): Promise<void> => (inTauri ? invoke('setup_finish') : Promise.resolve());
+/** Closes setup; `tried`: from Try it (Finish or Skip), which then never opens again. */
+export const finish = (tried = false): Promise<void> =>
+  inTauri ? invoke('setup_finish', { tried }) : Promise.resolve();
+
+/** Whether dictation runs (Try it alone opens while it may still be loading). */
+export const dictationReady = (): Promise<boolean> =>
+  inTauri ? invoke<boolean>('setup_dictation_ready') : Promise.resolve(true);
 /** The name of the key held to dictate ("Right Ctrl"). */
 export const dictationKey = (): Promise<string> =>
   inTauri ? invoke<string>('dictation_key') : Promise.resolve('Right Ctrl');

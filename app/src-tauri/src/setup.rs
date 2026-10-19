@@ -83,6 +83,9 @@ pub enum Mode {
     Repair,
     /// Dictation could not start.
     Problem,
+    /// Everything is installed but the person never finished or skipped first run's Try it
+    /// (first run was interrupted after the download): Try it alone, so they learn the key.
+    Try,
 }
 
 impl Mode {
@@ -94,6 +97,7 @@ impl Mode {
             Mode::Runtime => "runtime",
             Mode::Repair => "repair",
             Mode::Problem => "problem",
+            Mode::Try => "try",
         }
     }
 }
@@ -113,6 +117,18 @@ pub fn mark_setup_complete() {
     {
         tracing::warn!("could not write {}: {e}", path.display());
     }
+}
+
+/// Written when the person finishes or skips first run's Try it.
+fn tried_marker() -> std::path::PathBuf {
+    utter_core::data_dir().join("tried")
+}
+
+/// Whether the person has been through Try it: finished or skipped it, or dictated already
+/// (an install from before the marker).
+pub fn tried() -> bool {
+    tried_marker().exists()
+        || std::fs::metadata(utter_core::data_dir().join("history.jsonl")).is_ok_and(|m| m.len() > 0)
 }
 
 /// Which of the setup paths the missing components call for (`None`: none missing).
@@ -333,8 +349,9 @@ pub fn finish_pending_repair() -> bool {
 /// What a person calls a component.
 fn label(id: &str) -> &'static str {
     match id {
-        "parakeet-ultra-onnx-fp16" | "parakeet-ultra-onnx-w8" | "silero-vad" => "Speech model",
-        "utter-quality" | "utter-light" | "gemma4-e4b-qat" | "gemma4-26b-a4b-qat" => "Cleanup model",
+        id if id.starts_with("parakeet-") || id == "silero-vad" => "Speech model",
+        id if id.starts_with("utter-") || id.starts_with("gemma") => "Cleanup model",
+        _ if utter_runtime::backend() == utter_runtime::Backend::Cpu => "Processor runtime",
         _ => "GPU runtime",
     }
 }
@@ -629,9 +646,21 @@ fn download(app: &AppHandle) {
     }
 }
 
-/// Ends first run: the window closes, Utter stays in the tray.
+/// Whether dictation runs (Try it alone waits for it: it may still be loading).
 #[tauri::command]
-pub fn setup_finish(app: AppHandle) {
+pub fn setup_dictation_ready(app: AppHandle) -> bool {
+    app.state::<crate::home::Models>().running().is_some()
+}
+
+/// Ends first run: the window closes, Utter stays in the tray. `tried`: from Try it (Finish
+/// or Skip), which then never opens again.
+#[tauri::command]
+pub fn setup_finish(app: AppHandle, tried: Option<bool>) {
+    if tried == Some(true)
+        && let Err(e) = std::fs::write(tried_marker(), "")
+    {
+        tracing::warn!("could not write {}: {e}", tried_marker().display());
+    }
     if let Some(w) = app.get_webview_window("setup") {
         let _ = w.destroy();
     }
