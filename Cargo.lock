@@ -5075,6 +5075,7 @@ dependencies = [
  "utter-core",
  "utter-llm",
  "utter-pipeline",
+ "utter-platform",
  "utter-runtime",
 ]
 
