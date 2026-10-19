@@ -569,11 +569,22 @@ pub fn setup_microphones() -> Vec<String> {
 }
 
 /// Opens the microphone (empty: the default), saves the choice, and streams its level to the
-/// page as "setup-level" until [`setup_mic_stop`].
+/// page as "setup-level" until [`setup_mic_stop`]. Off the UI thread: the first open on macOS
+/// waits for the person to answer the system's microphone prompt (the window froze 27 s).
 #[tauri::command]
-pub fn setup_mic_start(app: AppHandle, state: tauri::State<'_, MicCheck>, device: String) -> Result<(), String> {
+pub async fn setup_mic_start(app: AppHandle, device: String) -> Result<(), String> {
+    let state = app.state::<MicCheck>();
+    let current = state.1.clone();
+    let mine = current.fetch_add(1, Ordering::Relaxed) + 1;
     let cfg = utter_audio::MicConfig { device: (!device.is_empty()).then(|| device.clone()), ..Default::default() };
-    let mic = utter_audio::Microphone::open(&cfg).map_err(|e| e.to_string())?;
+    let mic = tauri::async_runtime::spawn_blocking(move || utter_audio::Microphone::open(&cfg))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    // Stopped, or another microphone chosen, while this one opened: it is not wanted.
+    if current.load(Ordering::Relaxed) != mine {
+        return Ok(());
+    }
     let meter = mic.level_meter();
     *state.0.lock().expect("mic check lock") = Some(mic);
     let path = Settings::path();
@@ -581,8 +592,6 @@ pub fn setup_mic_start(app: AppHandle, state: tauri::State<'_, MicCheck>, device
         s.microphone = device;
         let _ = s.save(&path);
     }
-    let current = state.1.clone();
-    let mine = current.fetch_add(1, Ordering::Relaxed) + 1;
     std::thread::spawn(move || {
         while current.load(Ordering::Relaxed) == mine {
             let _ = app.emit_to("setup", "setup-level", meter.level());
