@@ -179,6 +179,16 @@ pub fn allow_input() -> Result<(), String> {
     Ok(())
 }
 
+/// Whether keyboard access was granted while Utter runs but applies only once it restarts:
+/// macOS reports the Accessibility switch at once, reading keys only to a new process (macOS
+/// 26.7). Elsewhere a grant applies at once.
+pub fn granted_on_restart() -> bool {
+    #[cfg(target_os = "macos")]
+    return crate::macos::accessibility_on() && input_access().is_err();
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
 /// Starts listening for the hotkey system-wide.
 pub fn listen(cfg: HotkeyConfig) -> Result<Listener, HotkeyError> {
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<KeyEvent>();

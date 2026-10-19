@@ -52,21 +52,31 @@
   const qualityBlocked = $derived(
     home && !home.qualityFits
       ? home.running === 'cpu'
-        ? 'needs a graphics card.'
-        : `needs a graphics card with ${cardGb(home.cardNeed.quality)} GB of memory.`
+        ? home.sharedMemory
+          ? 'needs the GPU.'
+          : 'needs a graphics card.'
+        : home.sharedMemory
+          ? `needs ${cardGb(home.cardNeed.quality)} GB of memory.`
+          : `needs a graphics card with ${cardGb(home.cardNeed.quality)} GB of memory.`
       : '',
   );
   // The two models: Quality, the bigger one, and Light, once its model is published.
   const MODELS = $derived(
     (
       [
-        ['quality', 'Quality', `The bigger model, most accurate: about ${needGb('quality')} GB of GPU memory.`],
+        [
+          'quality',
+          'Quality',
+          `The bigger model, most accurate: about ${needGb('quality')} GB of ${home?.sharedMemory ? '' : 'GPU '}memory.`,
+        ],
         [
           'light',
           'Light',
           home?.running === 'cpu'
             ? `The smaller model, on the processor: about ${needGb('light')} GB of memory.`
-            : `The smaller model, for ${cardGb(home?.cardNeed.light ?? 0)} GB graphics cards: about ${needGb('light')} GB.`,
+            : home?.sharedMemory
+              ? `The smaller model: about ${needGb('light')} GB of memory.`
+              : `The smaller model, for ${cardGb(home?.cardNeed.light ?? 0)} GB graphics cards: about ${needGb('light')} GB.`,
         ],
         ['mini', 'Extra light', `The smallest model, fastest on the processor: about ${needGb('mini')} GB of memory.`],
       ] as const

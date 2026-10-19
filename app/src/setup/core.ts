@@ -93,6 +93,10 @@ export function allowInput(): Promise<void> {
   return new Promise((r) => setTimeout(() => ((fail = null), r()), 800));
 }
 
+/** After Allow: true when keyboard access is on and Utter is restarting to use it (macOS). */
+export const restartIfGranted = (): Promise<boolean> =>
+  inTauri ? invoke<boolean>('setup_restart_if_granted') : Promise.resolve(false);
+
 export const microphones = (): Promise<string[]> =>
   inTauri
     ? invoke<string[]>('setup_microphones')
@@ -251,6 +255,8 @@ export interface ModelCard {
   why: string | null;
   /** Everything runs on the processor (no usable graphics card, or chosen). */
   onProcessor: boolean;
+  /** The GPU uses the system's memory (Apple Silicon): memory, not a graphics card. */
+  sharedMemory: boolean;
   recommended: boolean;
   selected: boolean;
 }
@@ -264,10 +270,10 @@ export function models(): Promise<ModelCard[]> {
   if (inTauri) return invoke<ModelCard[]>('setup_models');
   const quality = !cpu && mockGpuGb >= 5.4;
   return Promise.resolve([
-    { id: 'quality', gpuBytes: 4.8e9, cardBytes: 5.8e9, downloadBytes: 5.95e9, fits: quality, why: quality ? null : (cpu ? 'Needs a graphics card' : 'Needs a 6 GB graphics card'), onProcessor: cpu, recommended: quality, selected: true },
-    { id: 'light', gpuBytes: 3.25e9, cardBytes: 4.25e9, downloadBytes: 4.14e9, fits: cpu || mockGpuGb >= 3.96, why: cpu || mockGpuGb >= 3.96 ? null : 'Needs a 4 GB graphics card', onProcessor: cpu, recommended: !quality && !cpu, selected: false },
+    { id: 'quality', gpuBytes: 4.8e9, cardBytes: 5.8e9, downloadBytes: 5.95e9, fits: quality, why: quality ? null : (cpu ? 'Needs a graphics card' : 'Needs a 6 GB graphics card'), onProcessor: cpu, sharedMemory: false, recommended: quality, selected: true },
+    { id: 'light', gpuBytes: 3.25e9, cardBytes: 4.25e9, downloadBytes: 4.14e9, fits: cpu || mockGpuGb >= 3.96, why: cpu || mockGpuGb >= 3.96 ? null : 'Needs a 4 GB graphics card', onProcessor: cpu, sharedMemory: false, recommended: !quality && !cpu, selected: false },
     ...(cpu
-      ? [{ id: 'mini' as const, gpuBytes: 3e9, cardBytes: 4e9, downloadBytes: 2.1e9, fits: true, why: null, onProcessor: true, recommended: true, selected: false }]
+      ? [{ id: 'mini' as const, gpuBytes: 3e9, cardBytes: 4e9, downloadBytes: 2.1e9, fits: true, why: null, onProcessor: true, sharedMemory: false, recommended: true, selected: false }]
       : []),
   ]);
 }

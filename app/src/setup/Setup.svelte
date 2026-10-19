@@ -101,6 +101,8 @@
   }
   const next = () => go(step + 1);
 
+  // While Allow waits: Linux's password dialog, or on a Mac the switch in System Settings.
+  const WAITING = navigator.userAgent.includes('Macintosh') ? 'Waiting for System Settings...' : 'Waiting for your password...';
   // Allow on the keyboard check (Linux): the desktop's password dialog, then the checks again.
   let allowing = $state(false);
   let allowError = $state('');
@@ -111,8 +113,10 @@
       await core.allowInput();
       await runChecks();
       // macOS: Allow opened System Settings; the check passes once the switch is turned on.
-      for (let i = 0; i < 120 && checks?.checks.some((c) => c.id === 'keyboard' && !c.ok); i++) {
-        await new Promise((r) => setTimeout(r, 1500));
+      // macOS applies it only to a new copy: Utter restarts into this step by itself.
+      for (let i = 0; i < 240 && checks?.checks.some((c) => c.id === 'keyboard' && !c.ok); i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        if (await core.restartIfGranted()) return;
         const now = await core.check(mode === 'first');
         if (now.checks.find((c) => c.id === 'keyboard')?.ok) checks = now;
       }
@@ -141,6 +145,12 @@
     quality: { name: 'Quality', line: 'The bigger model. Most accurate; best for most cards.' },
     light: { name: 'Light', line: 'The smaller model. Runs on 4 GB graphics cards.' },
     mini: { name: 'Extra light', line: 'The smallest model. Fastest on the processor.' },
+  };
+  // A Mac's GPU uses the system's memory: no graphics cards to speak of.
+  const MAC_MODEL_LINE: Record<ModelId, string> = {
+    quality: 'The bigger model. Most accurate.',
+    light: 'The smaller model. Uses less memory.',
+    mini: MODEL_TEXT.mini.line,
   };
 
   async function loadModels() {
@@ -461,10 +471,16 @@
                   {/if}
                 </span>
                 {#if c.recommended}<span class="pill">Recommended</span>{/if}
-                <span class="card-line">{c.onProcessor && c.id === 'light' ? 'The smaller model. Runs on the processor.' : MODEL_TEXT[c.id].line}</span>
+                <span class="card-line"
+                  >{c.onProcessor && c.id === 'light'
+                    ? 'The smaller model. Runs on the processor.'
+                    : c.sharedMemory
+                      ? MAC_MODEL_LINE[c.id]
+                      : MODEL_TEXT[c.id].line}</span
+                >
                 <span class="card-facts">
                   {#if c.fits}
-                    <span>{gpuGb(c.gpuBytes)} GB {c.onProcessor ? 'memory' : 'GPU memory'}</span>
+                    <span>{gpuGb(c.gpuBytes)} GB {c.onProcessor || c.sharedMemory ? 'memory' : 'GPU memory'}</span>
                     <span>{c.downloadBytes > 0 ? `${gb(c.downloadBytes)} GB download` : 'Installed'}</span>
                   {:else}
                     <span class="card-why">{c.why}</span>
@@ -566,7 +582,7 @@
       {:else if checks && onlyKeyboard}
         <!-- The one thing left is the person's to grant: Allow does it, then checks again. -->
         <button class="primary" bind:this={primary} disabled={allowing} onclick={allowInput}>
-          {allowing ? 'Waiting for your password...' : 'Allow'}
+          {allowing ? WAITING : 'Allow'}
         </button>
       {:else if checks && !allOk}
         <button class="primary" bind:this={primary} onclick={runChecks}>Check again</button>
@@ -610,7 +626,7 @@
         <button class="primary" bind:this={primary} onclick={repair}>Repair</button>
       {:else if problem?.actions.includes('allow')}
         <button class="primary" bind:this={primary} disabled={allowing || starting} onclick={allowThenRetry}>
-          {#if allowing}Waiting for your password...{:else if starting}<span class="spinner on-accent" aria-hidden="true"
+          {#if allowing}{WAITING}{:else if starting}<span class="spinner on-accent" aria-hidden="true"
             ></span>Starting...{:else}Allow{/if}
         </button>
       {:else}

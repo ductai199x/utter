@@ -357,6 +357,13 @@ pub fn input_access() -> Result<(), String> {
     }
 }
 
+/// Whether Utter's Accessibility switch is on, as of now (input_access's view of reading keys
+/// is the process's, fixed until it restarts).
+pub fn accessibility_on() -> bool {
+    // SAFETY: a plain query.
+    unsafe { AXIsProcessTrusted() }
+}
+
 /// Asks macOS for what input_access found missing, Accessibility first: its prompt adds Utter to
 /// the list in Privacy & Security, and once it is on, reading keys is allowed too (macOS 26.7:
 /// Input Monitoring then needs nothing more). Asking for both at once added Utter to neither

@@ -70,6 +70,8 @@ export interface HomeState {
   /** GPU memory each model needs, speech included, and the smallest card it runs on (bytes). */
   gpuNeed: Record<Model, number>;
   cardNeed: Record<Model, number>;
+  /** The GPU uses the system's memory (Apple Silicon): no graphics card to speak of. */
+  sharedMemory: boolean;
   /** The keys one can dictate with: the id settings.toml uses, the name people read. */
   dictationKeys: { id: string; name: string }[];
   version: string;
@@ -113,6 +115,7 @@ const mock: HomeState = {
   downloadBytes: { quality: 0, light: 4.14e9, mini: 2.1e9 },
   gpuNeed: { quality: 4.8e9, light: 3.25e9, mini: 3e9 },
   cardNeed: { quality: 5.8e9, light: 4.25e9, mini: 4e9 },
+  sharedMemory: false,
   dictationKeys: [
     { id: 'right-ctrl', name: 'Right Ctrl' },
     { id: 'left-ctrl', name: 'Left Ctrl' },

@@ -582,6 +582,7 @@ fn main() {
             history::open_paste_rules,
             setup::setup_check,
             setup::setup_allow_input,
+            setup::setup_restart_if_granted,
             setup::setup_microphones,
             setup::setup_mic_start,
             setup::setup_mic_stop,
