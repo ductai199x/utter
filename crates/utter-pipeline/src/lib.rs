@@ -324,7 +324,14 @@ pub struct Dictation {
     pub insert_ms: f64,
     /// Key up -> paste sent.
     pub total_ms: f64,
+    /// The recording is silence throughout: no microphone behind the device (Linux offers a
+    /// default one with none connected), or a muted one.
+    pub silent: bool,
 }
+
+/// Loudest sample of a recording below which it is silence: speech peaks well above it, a
+/// quiet room on a working microphone too (its noise floor), a muted or absent one at 0.
+const SILENT_PEAK: f32 = 0.002;
 
 /// What the pipeline tells the UI as a dictation goes.
 #[derive(Debug, Clone)]
@@ -1287,6 +1294,7 @@ impl Engine {
             cleanup_ms,
             insert_ms,
             total_ms,
+            silent: audio.iter().all(|x| x.abs() < SILENT_PEAK),
         };
         if do_insert && !dictation.text.trim().is_empty() {
             self.last_text = Some(dictation.text.clone());
