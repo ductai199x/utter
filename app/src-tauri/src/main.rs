@@ -714,11 +714,16 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("build Utter")
-        .run(|_, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|_app, event| match event {
+            tauri::RunEvent::Exit => {
                 utter_platform::focus::shutdown();
                 tracing::info!("Utter quits");
             }
+            // Opening Utter while it runs (Applications, Spotlight, the Dock) reaches the running
+            // copy as a reopen, not a second process: it showed nothing (macOS 26.7).
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => home::show_launched(_app),
+            _ => {}
         });
 }
 
