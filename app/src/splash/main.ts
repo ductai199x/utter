@@ -1,4 +1,5 @@
 import '../lib/tokens.css';
+import '../lib/contextmenu';
 import { mount } from 'svelte';
 import Splash from './Splash.svelte';
 
