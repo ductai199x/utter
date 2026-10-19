@@ -15,7 +15,10 @@
   const SENTENCE = "Hi team, the meeting moved to three, no, four o'clock. Bring the slides.";
 
   const mode = core.mode();
-  const flow: View[] = mode === 'first' ? ['check', 'model', 'mic', 'download', 'try'] : ['check', 'download'];
+  const flow: View[] =
+    mode === 'first' ? ['check', 'model', 'mic', 'download', 'try'] : mode === 'try' ? ['try'] : ['check', 'download'];
+  // Try it alone (first run stopped after its download) opens while dictation may still load.
+  let dictationReady = $state(mode !== 'try');
   let step = $state(0);
   // The problem and done screens stand outside the steps.
   let special = $state<'problem' | 'done' | null>(mode === 'problem' ? 'problem' : null);
@@ -241,6 +244,8 @@
     if (p.stage === 'error') started = false;
     if (p.stage === 'ready') {
       starting = false;
+      dictationReady = true;
+      if (mode === 'try') return;
       if (mode === 'first' && !repairing) {
         // From the problem screen, after a Retry that worked: straight on to Try it.
         if (special === 'problem') {
@@ -335,6 +340,7 @@
 
   onMount(() => {
     if (mode === 'problem') void core.lastProblem().then((p) => (problem = p));
+    else if (mode === 'try') void core.dictationReady().then((r) => (dictationReady ||= r));
     else void runChecks();
     if (mode === 'first') {
       void core.microphones().then((m) => (mics = m));
@@ -354,7 +360,7 @@
 <svelte:window onkeydown={onKey} />
 
 <div class="frame">
-  <div class="dots" class:hidden={special !== null} aria-label="Step {step + 1} of {flow.length}" role="img">
+  <div class="dots" class:hidden={special !== null || flow.length < 2} aria-label="Step {step + 1} of {flow.length}" role="img">
     {#each flow as _, i (i)}
       <span class:done={i < step} class:current={i === step}></span>
     {/each}
@@ -487,6 +493,7 @@
         {:else if view === 'try'}
           <h1>Try it</h1>
           <p class="lede">Hold <kbd>{keyName}</kbd>, say this, then let go:</p>
+          {#if !dictationReady}<p class="muted">Getting ready...</p>{/if}
           <blockquote>{SENTENCE}</blockquote>
           <textarea bind:this={box} bind:value={typed} rows="3" aria-label="Your first dictation"></textarea>
           <div class="success" class:shown={arrived} aria-live="polite">
@@ -560,15 +567,15 @@
         </p>
       {/if}
     {:else if view === 'try'}
-      <button class="text" onclick={core.finish}>Skip</button>
-      <button class="primary" bind:this={primary} disabled={!arrived} onclick={core.finish}>Finish</button>
+      <button class="text" onclick={() => core.finish(true)}>Skip</button>
+      <button class="primary" bind:this={primary} disabled={!arrived} onclick={() => core.finish(true)}>Finish</button>
     {:else if view === 'problem'}
       {#if problem?.actions.includes('logs')}
         <button class="text" onclick={() => core.openLogs()}>Open logs</button>
       {/if}
       {#if problem?.actions.includes('close')}
         <!-- Dictation keeps running on the previous model: closing is enough. -->
-        <button class="text" onclick={core.finish}>Close</button>
+        <button class="text" onclick={() => core.finish()}>Close</button>
       {:else}
         <button class="text" onclick={core.quit}>Quit Utter</button>
       {/if}

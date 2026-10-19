@@ -756,7 +756,16 @@ impl Pipeline {
         let t = Instant::now();
         let vad = SileroVad::load_installed()?;
         let vad_ms = t.elapsed().as_secs_f64() * 1e3;
-        let mic = open_microphone(&cfg.mic)?;
+        // No microphone connected is no reason not to start: the first one plugged in is
+        // opened (check_microphone), and a key press says to connect one until then.
+        let (mic, mic_lost) = match open_microphone(&cfg.mic) {
+            Ok(mic) => (mic, false),
+            Err(PipelineError::Audio(utter_audio::AudioError::NoDevice(_))) => {
+                tracing::warn!("no microphone connected; starting without one");
+                (Microphone::none(), true)
+            }
+            Err(e) => return Err(e),
+        };
         let mic_ms = t.elapsed().as_secs_f64() * 1e3 - vad_ms;
         let t = Instant::now();
         let cleaner = cleaner.join().map_err(|_| PipelineError::WorkerGone)??;
@@ -781,7 +790,7 @@ impl Pipeline {
             input_rx,
             pruned: None,
             mic_checked: Instant::now(),
-            mic_lost: false,
+            mic_lost,
         })
     }
 
@@ -877,7 +886,7 @@ impl Pipeline {
         // Back only once audio flows again: a device that opens but delivers nothing is not.
         if alive && self.mic_lost && self.mic.delivered() {
             self.mic_lost = false;
-            on_event(Event::Notice { text: "Microphone reconnected".into(), ok: true });
+            on_event(Event::Notice { text: "Microphone connected".into(), ok: true });
         }
         let due = self.mic_checked.elapsed() >= MIC_CHECK;
         if alive && (now || !due) {

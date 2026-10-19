@@ -308,9 +308,43 @@ pub fn apply_logs(settings: &Settings) {
 pub fn show(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("home") {
         let _ = w.unminimize();
+        fit_on_screen(&w);
         let _ = w.show();
         let _ = w.set_focus();
     }
+}
+
+/// Room left around a window shrunk to fit the screen, in logical pixels.
+const SCREEN_MARGIN: f64 = 16.0;
+
+/// Shrinks the window to the screen's work area (the taskbar or dock left out) when it is
+/// larger, and centers it there: Home's 1040x680 put Settings under the taskbar of a 1024x768
+/// screen (Windows 11, 2026-10-19), as it would on the many 1366x768 laptops. A maximized
+/// window is left as it is.
+fn fit_on_screen(w: &tauri::WebviewWindow) {
+    if w.is_maximized().unwrap_or(false) {
+        return;
+    }
+    let Some(monitor) = w.current_monitor().ok().flatten().or_else(|| w.primary_monitor().ok().flatten()) else {
+        return;
+    };
+    let (Ok(outer), Ok(inner)) = (w.outer_size(), w.inner_size()) else { return };
+    let area = monitor.work_area();
+    let margin = (SCREEN_MARGIN * monitor.scale_factor()) as u32;
+    let max_w = area.size.width.saturating_sub(2 * margin);
+    let max_h = area.size.height.saturating_sub(2 * margin);
+    if outer.width <= max_w && outer.height <= max_h {
+        return;
+    }
+    // The frame (title bar, borders) stays; the content shrinks.
+    let frame_w = outer.width.saturating_sub(inner.width);
+    let frame_h = outer.height.saturating_sub(inner.height);
+    let width = outer.width.min(max_w);
+    let height = outer.height.min(max_h);
+    let _ = w.set_size(tauri::PhysicalSize::new(width - frame_w, height - frame_h));
+    let x = area.position.x + (area.size.width.saturating_sub(width) / 2) as i32;
+    let y = area.position.y + (area.size.height.saturating_sub(height) / 2) as i32;
+    let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
 /// Opens the Home window for a second start of Utter. On Linux the window manager raises a

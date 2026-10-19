@@ -556,6 +556,7 @@ fn main() {
             setup::setup_mic_stop,
             setup::setup_download,
             setup::setup_finish,
+            setup::setup_dictation_ready,
             setup::setup_problem,
             setup::setup_retry,
             setup::setup_repair,
@@ -639,8 +640,11 @@ fn main() {
                     setup::mark_setup_complete();
                     // Loading first: building the card's window takes a moment it need not wait.
                     start_pipeline(app.handle());
-                    // The person started Utter: the card shows while it loads. Not at sign-in.
-                    if !splash::started_at_sign_in() {
+                    if !setup::tried() {
+                        // First run stopped after its download: Try it, so the key is learned.
+                        setup::open(app.handle(), setup::Mode::Try)?;
+                    } else if !splash::started_at_sign_in() {
+                        // The person started Utter: the card shows while it loads. Not at sign-in.
                         splash::open(app.handle());
                     }
                 }

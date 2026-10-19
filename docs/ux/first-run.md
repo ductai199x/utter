@@ -76,7 +76,7 @@ Utter will let you know when it is ready."
 - One progress bar for everything, with "3.1 of 6.0 GB" on the left and "about 4 min left" on
   the right (from the speed over the last 10 s; nothing until there are 3 s of data).
 - Under it, what is being fetched now in muted text: "Speech model", "Cleanup model",
-  "GPU runtime". After all downloads: "Checking files..." then "Getting ready..." while the
+  "GPU runtime" ("Processor runtime" without a graphics card). After all downloads: "Checking files..." then "Getting ready..." while the
   models load.
 - An error shows in amber under the bar with **Retry**: "Download interrupted. Retry picks up
   where it stopped." Retry resumes; nothing is downloaded twice.
