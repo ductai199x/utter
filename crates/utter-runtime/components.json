@@ -368,6 +368,7 @@
         "**/libggml-cpu*.dylib",
         "**/libggml-metal*.dylib",
         "**/libggml-blas*.dylib",
+        "**/libggml-rpc*.dylib",
         "**/LICENSE"
       ],
       "license": "MIT (ggml-org)",

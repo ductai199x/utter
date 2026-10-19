@@ -2,7 +2,9 @@
 //! runtime components (`utter-runtime`), each pinned and checksummed:
 //! - CUDA: onnxruntime's GPU build, the CUDA runtime with cuBLAS, and cuDNN;
 //! - Vulkan and Metal (docs/plan-vulkan.md, docs/plan-cross-platform.md): onnxruntime's CPU
-//!   build and its WebGPU plugin provider (Dawn over D3D12, Vulkan or Metal), registered here;
+//!   build and its WebGPU plugin provider (Dawn over D3D12 or Vulkan), registered here; on macOS
+//!   the build has WebGPU (Dawn over Metal) built in, and registering the plugin as well failed
+//!   ("EP library is already registered", macOS 26.7);
 //! - CPU: onnxruntime's CPU build alone.
 //!
 //! Nothing is taken from other applications or from the system beyond the GPU driver: verified
@@ -80,7 +82,7 @@ fn init_inner() -> Result<PathBuf, AsrError> {
     }
     // On Windows the plugin's folder also holds the shader compiler it loads (dxcompiler.dll,
     // dxil.dll). A custom onnxruntime build brings its own providers.
-    let webgpu = match (backend.uses_webgpu(), &custom) {
+    let webgpu = match (backend.uses_webgpu() && !cfg!(target_os = "macos"), &custom) {
         (true, None) => Some(component_dir(WEBGPU_COMPONENT)?),
         _ => None,
     };
