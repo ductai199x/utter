@@ -138,7 +138,19 @@ impl DictationKey {
     pub fn offered() -> Vec<DictationKey> {
         let mac = cfg!(target_os = "macos");
         let first = mac.then_some([DictationKey::RightOption, DictationKey::RightCommand]).into_iter().flatten();
-        first.chain(Self::ALL).collect()
+        // A Mac keyboard has no Scroll Lock, and its function keys stop at F19.
+        let here = |k: &DictationKey| {
+            !mac || !matches!(
+                k,
+                DictationKey::ScrollLock
+                    | DictationKey::F20
+                    | DictationKey::F21
+                    | DictationKey::F22
+                    | DictationKey::F23
+                    | DictationKey::F24
+            )
+        };
+        first.chain(Self::ALL.into_iter().filter(here)).collect()
     }
 
     pub const ALL: [DictationKey; 16] = [
