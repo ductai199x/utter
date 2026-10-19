@@ -263,7 +263,22 @@ mod imp {
         let stem = exe.rsplit_once('.').map_or(exe.as_str(), |(s, _)| s).to_owned();
         // A description that is only the file name (some Store apps) says nothing more.
         let name = description(&path).filter(|d| !d.trim().is_empty() && !d.trim().eq_ignore_ascii_case(&exe));
-        App { exe, name: name.unwrap_or(stem).trim().to_owned() }
+        App { exe, name: name.unwrap_or_else(|| spaced(&stem)).trim().to_owned() }
+    }
+
+    /// A file name as words, for a program whose version information cannot be read (Store
+    /// apps such as Windows Terminal): "WindowsTerminal" -> "Windows Terminal".
+    pub(super) fn spaced(stem: &str) -> String {
+        let mut out = String::with_capacity(stem.len() + 4);
+        let mut prev: Option<char> = None;
+        for c in stem.chars() {
+            if c.is_uppercase() && prev.is_some_and(|p| p.is_lowercase()) {
+                out.push(' ');
+            }
+            out.push(c);
+            prev = Some(c);
+        }
+        out
     }
 
     /// The program's FileDescription (else ProductName) from its version information.
@@ -509,5 +524,14 @@ mod tests {
         for app in super::open_apps() {
             println!("{:<28} {}", app.exe, app.name);
         }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_file_name_reads_as_words() {
+        assert_eq!(super::imp::spaced("WindowsTerminal"), "Windows Terminal");
+        assert_eq!(super::imp::spaced("Notepad"), "Notepad");
+        assert_eq!(super::imp::spaced("msedge"), "msedge");
+        assert_eq!(super::imp::spaced("OUTLOOK"), "OUTLOOK");
     }
 }

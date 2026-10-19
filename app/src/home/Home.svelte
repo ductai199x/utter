@@ -91,6 +91,10 @@
 
   onMount(() => {
     void homeState().then(take);
+    // The window lives hidden between visits: what changed meanwhile (a microphone plugged in,
+    // a download done) shows when it comes back.
+    const refresh = () => void homeState().then(take);
+    window.addEventListener('focus', refresh);
     const offs = [
       onState(take),
       onApplied((a) => {
@@ -102,7 +106,10 @@
         }
       }),
     ];
-    return () => offs.forEach((p) => void p.then((off) => off()));
+    return () => {
+      window.removeEventListener('focus', refresh);
+      offs.forEach((p) => void p.then((off) => off()));
+    };
   });
 </script>
 
