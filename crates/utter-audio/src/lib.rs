@@ -214,7 +214,16 @@ impl Microphone {
                 .ok_or_else(|| AudioError::NoDevice(format!(" matching {want:?}")))?,
         };
         let device_name = device.description().map(|d| d.name().to_owned()).unwrap_or_else(|_| "unknown".into());
-        let supported = device.default_input_config().map_err(|e| AudioError::Device(e.to_string()))?;
+        // With no input left, macOS still names a default that no longer exists, and asking it
+        // anything fails ("bad object", OSStatus 560947818, a Mac mini with its microphone
+        // removed): that is no microphone, not a broken one.
+        let supported = device.default_input_config().map_err(|e| {
+            if host.input_devices().map_or(true, |mut d| d.next().is_none()) {
+                AudioError::NoDevice(String::new())
+            } else {
+                AudioError::Device(e.to_string())
+            }
+        })?;
         let native_rate = supported.sample_rate();
         let channels = supported.channels() as usize;
         let format = supported.sample_format();
