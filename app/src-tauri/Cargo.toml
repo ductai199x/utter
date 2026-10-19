@@ -34,3 +34,4 @@ tauri-plugin-single-instance = "2.5.2"
 # The Bar's window type on Linux (main.rs, Bar::new).
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
+gdkx11 = "0.18.2"

@@ -311,7 +311,24 @@ pub fn show(app: &AppHandle) {
         fit_on_screen(&w);
         let _ = w.show();
         let _ = w.set_focus();
+        #[cfg(target_os = "linux")]
+        present_now(app, w);
     }
+}
+
+/// Raises the window with the X server's current time. tao presents it with no time, which
+/// GNOME treats as focus stealing: Home stayed behind the focused window with an "Utter is
+/// ready" notice (Ubuntu 24.04, where apps started from the overview get no startup token).
+/// A time newer than the person's last input in the focused app is a request they made.
+#[cfg(target_os = "linux")]
+fn present_now(app: &AppHandle, w: tauri::WebviewWindow) {
+    let _ = app.run_on_main_thread(move || {
+        use gdkx11::glib::Cast;
+        use gtk::prelude::{GtkWindowExt, WidgetExt};
+        let Ok(gtk_window) = w.gtk_window() else { return };
+        let Some(x11) = gtk_window.window().and_then(|g| g.downcast::<gdkx11::X11Window>().ok()) else { return };
+        gtk_window.present_with_time(gdkx11::functions::x11_get_server_time(&x11));
+    });
 }
 
 /// Room left around a window shrunk to fit the screen, in logical pixels.
