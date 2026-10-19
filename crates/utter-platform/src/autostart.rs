@@ -97,7 +97,8 @@ mod imp {
     }
 }
 
-/// macOS: a LaunchAgent, run at sign-in (a login item through SMAppService needs a signed app
+/// macOS: a LaunchAgent, run at sign-in, tied to the app bundle so Login Items shows "Utter" and
+/// its icon rather than the executable's name (a login item through SMAppService needs a signed app
 /// bundle; Utter ships through Homebrew, unsigned).
 #[cfg(target_os = "macos")]
 mod imp {
@@ -123,7 +124,7 @@ mod imp {
         let dir = path.parent().ok_or("LaunchAgents folder")?;
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let text = format!(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>app.utter</string>\n<key>ProgramArguments</key><array><string>{}</string><string>{}</string></array>\n<key>RunAtLoad</key><true/>\n<key>ProcessType</key><string>Interactive</string>\n</dict></plist>\n",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>app.utter</string>\n<key>ProgramArguments</key><array><string>{}</string><string>{}</string></array>\n<key>RunAtLoad</key><true/>\n<key>ProcessType</key><string>Interactive</string>\n<key>AssociatedBundleIdentifiers</key><string>app.utter</string>\n</dict></plist>\n",
             xml(&exe.display().to_string()),
             xml(arg)
         );

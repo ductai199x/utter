@@ -357,13 +357,23 @@ pub fn input_access() -> Result<(), String> {
     }
 }
 
-/// Asks macOS for what input_access found missing: its own prompts, which add Utter to the
-/// lists in Privacy & Security; then opens the first pane still off. macOS applies a grant
-/// only when Utter restarts.
+/// Asks macOS for what input_access found missing, Accessibility first: its prompt adds Utter to
+/// the list in Privacy & Security, and once it is on, reading keys is allowed too (macOS 26.7:
+/// Input Monitoring then needs nothing more). Asking for both at once added Utter to neither
+/// list. Opens the pane to turn on; Ok means it is open, not that the switch is on.
 pub fn allow_input() -> Result<(), String> {
+    // A new build of an unsigned app is a new app to macOS: the switch from the last one still
+    // shows on but no longer applies (measured on macOS 26.7). Clear Utter's stale entry so the
+    // prompt adds a fresh one, off, that turning on fixes.
+    // SAFETY: a plain query.
+    if !unsafe { AXIsProcessTrusted() } {
+        let reset = std::process::Command::new("tccutil").args(["reset", "Accessibility", "app.utter"]).status();
+        tracing::info!("cleared Utter's Accessibility entry: {reset:?}");
+    }
     // SAFETY: CoreFoundation calls with valid arguments; the dictionary is released.
     let (listen, trusted) = unsafe {
-        let listen = CGPreflightListenEventAccess() || CGRequestListenEventAccess();
+        let trusted_now = AXIsProcessTrusted();
+        let listen = CGPreflightListenEventAccess() || (trusted_now && CGRequestListenEventAccess());
         let keys = [kAXTrustedCheckOptionPrompt];
         let values = [kCFBooleanTrue];
         let options = CFDictionaryCreate(
@@ -384,8 +394,8 @@ pub fn allow_input() -> Result<(), String> {
         (false, true) => "Privacy_ListenEvent",
     };
     let url = format!("x-apple.systempreferences:com.apple.preference.security?{pane}");
-    let _ = std::process::Command::new("open").arg(url).spawn();
-    Err("turn Utter on in Privacy & Security, then open Utter again".into())
+    std::process::Command::new("open").arg(url).spawn().map_err(|e| format!("could not open System Settings: {e}"))?;
+    Ok(())
 }
 
 /// Posts key `code` down and up with `flags`, marked as Utter's.
