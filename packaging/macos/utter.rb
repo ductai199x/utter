@@ -1,5 +1,6 @@
-# Homebrew cask for Utter: brew install --cask ductai199x/utter/utter
-# Generated from this template by packaging/macos/cask.sh (VERSION, SHA256, URL filled in).
+# Homebrew cask for Utter. This repository is its own tap:
+#   brew tap ductai199x/utter https://github.com/ductai199x/utter && brew install --cask utter
+# The template: packaging/macos/cask.sh fills in VERSION, SHA256 and URL into Casks/utter.rb.
 cask "utter" do
   version "VERSION"
   sha256 "SHA256"

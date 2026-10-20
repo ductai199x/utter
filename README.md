@@ -207,13 +207,22 @@ From the [latest release](https://github.com/ductai199x/utter/releases/latest):
 - **Ubuntu 24.04+, Debian 13, Mint 22:** `sudo apt install ./Utter_<version>_amd64.deb`.
 - **Other Linux (Fedora 40+ and others):** make `Utter_<version>_amd64.AppImage` executable and
   open it. Utter asks once for keyboard access, so it can hear the dictation key.
+- **macOS 14+ on Apple Silicon (M1 and later):** through Homebrew, then open Utter from
+  Applications. It asks for Accessibility and the microphone once; updates keep both.
+
+  ```bash
+  brew tap ductai199x/utter https://github.com/ductai199x/utter
+  brew install --cask utter
+  ```
 
 **Needs:** about 10 GB of disk, and one of:
 
 - an NVIDIA graphics card with 4 GB of memory (6 GB for Quality) and driver 580 or newer;
 - an AMD or Intel graphics card through Vulkan, as a preview: 6 GB of memory (8 GB for Quality),
   measured so far only on an NVIDIA card made to run the Vulkan path;
-- no graphics card: the processor, with Light and Extra light (8 GB of memory).
+- no graphics card: the processor, with Light and Extra light (8 GB of memory);
+- a Mac with Apple Silicon: its GPU runs both models (measured on an M2 with 16 GB; 8 GB Macs
+  not yet).
 
 Settings > Runs on switches between them.
 
@@ -260,8 +269,8 @@ docs/               UX specs, eval results, research notes, local setup
 ## Status
 
 Windows and Linux (GNOME and KDE), English; NVIDIA graphics, the processor, and AMD and Intel
-graphics through Vulkan in preview until they are measured on real AMD and Intel cards. macOS
-builds but has not run on a Mac yet. Next: macOS on a Mac, and Android. After that: context from
+graphics through Vulkan in preview until they are measured on real AMD and Intel cards; macOS on
+Apple Silicon, tested on a Mac mini M2 with macOS 26. Next: Android. After that: context from
 the text around the cursor, styles per app, Command Mode, and Vietnamese with switching between
 the two mid-sentence.
 
