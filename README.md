@@ -258,7 +258,9 @@ connection), then **try it**: hold **Right Option**, say the sentence shown, let
 The first time Utter starts at login, macOS shows a notice that "Utter can run in the
 background". That's Utter's Start at login setting; you can turn it off in Utter's Settings.
 
-**Update:** `brew upgrade --cask utter`. Your settings, history and both permissions stay.
+**Update:** when a new version is out, Utter offers it in its menu bar menu and in Settings >
+About; click **Update** and it installs and restarts (from 0.1.10 on). `brew upgrade --cask
+utter` works too. Your settings, history and both permissions stay.
 
 **Uninstall:** `brew uninstall --cask utter` removes the app. To also delete the downloaded models
 and your settings and history: `brew uninstall --cask --zap utter`.
@@ -274,9 +276,11 @@ and your settings and history: `brew uninstall --cask --zap utter`.
    your microphone (say something: the bars should move), wait for the download, and try it: hold
    **Right Ctrl**, say the sentence shown, let go.
 
-**Update:** run the new installer. It says an older version is installed: keep **Uninstall before
-installing** and click **Next**, then **Uninstall** (leave *"Also delete the downloaded models"*
-unticked), then carry on as above. Your models, settings and history stay.
+**Update:** when a new version is out, Utter offers it in its tray menu and in Settings > About;
+click **Update** and it installs and reopens by itself (from 0.1.10 on). Or run the new
+installer by hand: it says an older version is installed; keep **Uninstall before installing**
+and click **Next**, then **Uninstall** (leave *"Also delete the downloaded models"* unticked),
+then carry on as above. Either way your models, settings and history stay.
 
 **Uninstall:** Settings > Apps > Installed apps, find Utter, click **⋯** > **Uninstall**. Tick *"Also delete the
 downloaded models and your settings"* to free the space they take (several GB).
@@ -310,8 +314,10 @@ icon in the top bar needs the *AppIndicator* extension (Ubuntu has it; on Fedora
 "AppIndicator and KStatusNotifierItem Support"); without it, open Utter again to bring back its
 window, and quit it from Settings.
 
-**Update:** install the new `.deb` the same way, or replace the AppImage file. Your models,
-settings and history stay.
+**Update:** when a new version is out, Utter offers it in its top-bar menu and in Settings >
+About; click **Update** (from 0.1.10 on). The AppImage replaces itself and restarts; the `.deb`
+asks for your password once, as installing it by hand does. Or install the new `.deb` the same
+way as the first time, or replace the AppImage file. Your models, settings and history stay.
 
 **Uninstall:** `sudo apt remove utter`, or delete the AppImage. The downloaded models and your
 settings stay in `~/.local/share/utter`; delete that folder to free the space.
@@ -331,6 +337,11 @@ corrections applied ("at two, no, three" becomes "at 3"), punctuation added. Utt
 menu bar on a Mac, the tray on Windows and Linux) opens its window: **History** of what you
 dictated (only on your computer, and you can turn it off), your **Dictionary** of names and terms
 to spell your way, and **Settings**, where you can change the key, the microphone and the model.
+
+**Updates:** Utter checks GitHub once a day for a new version and only offers it: nothing downloads
+or installs until you click **Update**, and every update is checked against Utter's signing key
+before it runs. Turn the check off in Settings > About ("Check for updates"), or click **Check
+now** there anytime.
 
 ## Building from source
 
