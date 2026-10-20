@@ -5,6 +5,7 @@
   import { cubicOut } from 'svelte/easing';
   import { fade } from 'svelte/transition';
   import AnimatedMark from '../lib/AnimatedMark.svelte';
+  import { commandKey, commandName } from '../lib/keys';
   import Dictionary from './Dictionary.svelte';
   import History from './History.svelte';
   import Settings from './Settings.svelte';
@@ -71,10 +72,10 @@
 
   function onKey(e: KeyboardEvent) {
     const s = SECTIONS.find((x) => x.key === e.key);
-    if (e.ctrlKey && s) {
+    if (commandKey(e) && s) {
       e.preventDefault();
       go(s.id);
-    } else if (e.ctrlKey && e.key.toLowerCase() === 'f' && section === 'dictionary') {
+    } else if (commandKey(e) && e.key.toLowerCase() === 'f' && section === 'dictionary') {
       e.preventDefault();
       dictionary?.focusAdd();
     }
@@ -126,7 +127,7 @@
         class:selected={section === s.id}
         aria-current={section === s.id ? 'page' : undefined}
         aria-label={s.label}
-        title="{s.label} (Ctrl+{s.key})"
+        title="{s.label} ({commandName}+{s.key})"
         onclick={() => go(s.id)}
         onkeydown={railKey}
       >
