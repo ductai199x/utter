@@ -3,10 +3,10 @@
 #   brew trust --cask ductai199x/utter/utter && brew install --cask utter
 # The template: packaging/macos/cask.sh fills in VERSION, SHA256 and URL into Casks/utter.rb.
 cask "utter" do
-  version "0.1.10"
-  sha256 "3e5a311887184d97dde4d898bad80ecc4847045895e54231c71120bf1b42f3e5"
+  version "0.1.11"
+  sha256 "e62447a08afc5534ae6c2bcc2e6d9601e1b7997f858fb4771621b8e2a7eef099"
 
-  url "https://github.com/ductai199x/utter/releases/download/v0.1.10/Utter-0.1.10-macos-arm64.zip"
+  url "https://github.com/ductai199x/utter/releases/download/v0.1.11/Utter-0.1.11-macos-arm64.zip"
   name "Utter"
   desc "Local voice dictation: hold a key, speak, and clean text appears where you type"
   homepage "https://github.com/ductai199x/utter"
