@@ -660,6 +660,8 @@ fn main() {
         .setup(|app| {
             tracing::info!("setup at {:.2} s", since_launch());
             watch_ui_thread(app.handle().clone());
+            let _ = home::APP_VERSION.set(app.package_info().version.to_string());
+            tracing::info!(version = %app.package_info().version, "app version");
             let open = MenuItem::with_id(app, "open", "Open Utter", true, None::<&str>)?;
             // Their shortcuts are shown beside them (docs/ux/insertion.md).
             let paste = MenuItem::with_id(

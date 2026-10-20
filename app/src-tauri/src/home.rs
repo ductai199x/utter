@@ -110,7 +110,7 @@ pub struct State {
     shared_memory: bool,
     /// The keys the person can dictate with.
     dictation_keys: Vec<KeyOption>,
-    version: &'static str,
+    version: String,
     data_dir: String,
     settings_path: String,
     /// "windows", "linux" or "macos": for the words that differ (Start with Windows, Cmd+V).
@@ -193,6 +193,9 @@ fn to_download(tier: utter_llm::cleanup::Tier) -> u64 {
         .sum()
 }
 
+/// The app's version, set once at start (main.rs) from its package info.
+pub static APP_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 fn state() -> State {
     let path = Settings::path();
     let (settings, error) = match Settings::load_or_create(&path) {
@@ -227,7 +230,8 @@ fn state() -> State {
             .iter()
             .map(|k| KeyOption { id: utter_pipeline::settings::word(k), name: k.name() })
             .collect(),
-        version: env!("CARGO_PKG_VERSION"),
+        // The app's version (tauri.conf.json, which a build may override), not the crate's.
+        version: APP_VERSION.get().cloned().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned()),
         data_dir: utter_core::data_dir().display().to_string(),
         settings_path: path.display().to_string(),
         os: std::env::consts::OS,
