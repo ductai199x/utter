@@ -3,6 +3,7 @@
   // "Settings → History"). Every change saves at once through `save`; the core applies it on
   // the next dictation and reports back (`applied`).
   import Confirm from './Confirm.svelte';
+  import Privacy from '../lib/Privacy.svelte';
   import {
     KEEP_LABELS,
     WITH_CHOICES,
@@ -481,6 +482,7 @@
 
     {#if home}
       <h2>About</h2>
+      <Privacy />
       <div class="row">
         <div class="label"><span class="label-text">Version</span></div>
         <span class="value">{home.version}</span>
