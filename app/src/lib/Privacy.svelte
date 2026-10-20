@@ -17,17 +17,11 @@
     Private by design
   </p>
   <ul>
-    <li>Your voice becomes text right here on this {here}. Nothing you say or type is ever sent anywhere.</li>
-    <li>
-      Utter goes online only to download its models, during setup (and again only if you choose another model).
-      After that it works with Wi-Fi off.
-    </li>
-    <li>
-      It never looks at your screen, files or messages. To space your words, it peeks at the two letters before your
-      cursor, and keeps nothing.
-    </li>
-    <li>Your history stays on this {here}, and you can turn it off.</li>
-    <li>Utter is open source: anyone can read every line at github.com/ductai199x/utter.</li>
+    <li>Everything happens on your {here}. Nothing you say is ever sent anywhere.</li>
+    <li>Utter only uses the internet to download its models. After that, it works offline.</li>
+    <li>It never reads your files or records your screen.</li>
+    <li>Your history stays on your {here}. You can turn it off anytime.</li>
+    <li>It's open source: anyone can check the code at github.com/ductai199x/utter.</li>
   </ul>
 </section>
 
