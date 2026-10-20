@@ -56,7 +56,11 @@
   // New versions of Utter (update.rs): checked once a day while on, installed only on Update.
   let update = $state<UpdateStatus>({ phase: 'idle' });
   let updateRow = $state<HTMLElement>();
-  const showUpdateRow = () => void tick().then(() => updateRow?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  // After the window shows: on macOS a scroll asked for while Home was still hidden did nothing.
+  const showUpdateRow = () =>
+    void tick().then(() =>
+      setTimeout(() => updateRow?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 250),
+    );
   onMount(() => {
     void updateStatus().then((s) => (update = s));
     // Opened by the tray's "Update to Utter X..." item (Home switched here for it).
