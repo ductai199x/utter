@@ -417,7 +417,7 @@ fn gb(bytes: u64) -> String {
 pub const KEYBOARD_FIX: &str = if cfg!(target_os = "macos") {
     // macOS 27 renamed Accessibility in Privacy & Security to "Device Control and Data Access";
     // the words name neither, so they hold on both: macOS's own prompt names its pane.
-    "Utter needs permission to hear the dictation key and paste for you. Allow asks macOS: open System Settings and turn Utter on."
+    "Utter needs permission to hear the dictation key and paste for you. macOS asks it as \"control this Mac and access your data\": that is how Utter presses Cmd+V for you, and nothing ever leaves this Mac. Allow, then turn Utter on in System Settings."
 } else {
     "Utter needs this to hear the dictation key and paste for you. Allow asks for your password once."
 };
