@@ -7,7 +7,8 @@
 # admin. Running it again only fills in what is missing.
 set -euo pipefail
 
-sudo -v
+# Asks for the password once, unless sudo needs none (sudo -v asks even then on macOS).
+sudo -n true 2>/dev/null || sudo -v
 
 if ! xcode-select -p >/dev/null 2>&1; then
     echo "== Xcode command line tools"
