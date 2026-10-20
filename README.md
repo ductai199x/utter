@@ -200,31 +200,135 @@ behind it.
 
 ## Install
 
-From the [latest release](https://github.com/ductai199x/utter/releases/latest):
+**What you need:** about 10 GB of free disk, an internet connection for the first setup (Utter
+downloads its models once, then works offline), a microphone, and one of:
 
-- **Windows 10 or 11 (64-bit):** run `Utter_<version>_x64-setup.exe`. It installs for your user
-  only, and an update installs over it with your models and settings kept.
-- **Ubuntu 24.04+, Debian 13, Mint 22:** `sudo apt install ./Utter_<version>_amd64.deb`.
-- **Other Linux (Fedora 40+ and others):** make `Utter_<version>_amd64.AppImage` executable and
-  open it. Utter asks once for keyboard access, so it can hear the dictation key.
-- **macOS 14+ on Apple Silicon (M1 and later):** through Homebrew, then open Utter from
-  Applications. It asks for Accessibility and the microphone once; updates keep both.
-
-  ```bash
-  brew tap ductai199x/utter https://github.com/ductai199x/utter
-  brew install --cask utter
-  ```
-
-**Needs:** about 10 GB of disk, and one of:
-
+- a Mac with Apple Silicon (M1 or newer) on macOS 14 or newer;
 - an NVIDIA graphics card with 4 GB of memory (6 GB for Quality) and driver 580 or newer;
-- an AMD or Intel graphics card through Vulkan, as a preview: 6 GB of memory (8 GB for Quality),
-  measured so far only on an NVIDIA card made to run the Vulkan path;
-- no graphics card: the processor, with Light and Extra light (8 GB of memory);
-- a Mac with Apple Silicon: its GPU runs both models (measured on an M2 with 16 GB; 8 GB Macs
-  not yet).
+- an AMD or Intel graphics card through Vulkan, as a preview: 6 GB of memory (8 GB for Quality);
+- no graphics card: Utter runs on the processor, with its Light and Extra light models (8 GB of
+  memory).
 
-Settings > Runs on switches between them.
+### macOS
+
+Checked step by step on macOS 26 (Tahoe) and macOS 27 (Golden Gate).
+
+**1. Install Homebrew**, if you don't have it yet (type `brew --version` in Terminal: if it
+prints a version, skip to step 2). Open **Terminal** (Applications > Utilities > Terminal) and
+paste:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+It asks for your Mac password (nothing shows as you type; that's normal) and to press Return. It
+may also install Apple's Command Line Tools, which takes a few minutes. When it finishes, it
+prints **Next steps** with three commands. Run them; for most people they are:
+
+```bash
+echo >> ~/.zprofile
+echo 'eval "$(/opt/homebrew/bin/brew shellenv zsh)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv zsh)"
+```
+
+**2. Install Utter:**
+
+```bash
+brew tap ductai199x/utter https://github.com/ductai199x/utter
+brew install --cask utter
+```
+
+**3. Open Utter** from Applications (or Spotlight: Cmd+Space, type Utter).
+
+**4. Allow keyboard access.** Utter needs it to hear your dictation key and type the text for
+you. Click **Allow**. macOS then shows its own message, *"Utter would like to control this Mac
+and access your data"*. macOS words it strongly for every app of this kind; Utter never sends
+anything anywhere. Click **Open System Settings** and turn on the switch next to **Utter** (your
+password or Touch ID confirms it). The list is called **Accessibility** on macOS 26 and **Device
+Control and Data Access** on macOS 27. Utter restarts by itself and carries on.
+
+**5. Choose a model**, then **allow the microphone** when macOS asks, and say something: the bars
+should move.
+
+**6. Wait for the download** (about 7 GB for Quality, 5 GB for Light; a few minutes on a fast
+connection), then **try it**: hold **Right Option**, say the sentence shown, let go.
+
+The first time Utter starts at login, macOS shows a notice that "Utter can run in the
+background". That's Utter's Start at login setting; you can turn it off in Utter's Settings.
+
+**Update:** `brew upgrade --cask utter`. Your settings, history and both permissions stay.
+
+**Uninstall:** `brew uninstall --cask utter` removes the app. To also delete the downloaded models
+and your settings and history: `brew uninstall --cask --zap utter`.
+
+### Windows 10 or 11 (64-bit)
+
+1. Download `Utter_<version>_x64-setup.exe` from the
+   [latest release](https://github.com/ductai199x/utter/releases/latest) and run it. Windows may
+   say *"Windows protected your PC"*, because the installer is not signed by a company: click
+   **More info**, then **Run anyway**. It installs for your account only; no administrator
+   password needed.
+2. Click **Next**, then **Install**, then **Finish**: Utter opens by itself. Choose a model, check
+   your microphone (say something: the bars should move), wait for the download, and try it: hold
+   **Right Ctrl**, say the sentence shown, let go.
+
+**Update:** run the new installer. It says an older version is installed: keep **Uninstall before
+installing** and click **Next**, then **Uninstall** (leave *"Also delete the downloaded models"*
+unticked), then carry on as above. Your models, settings and history stay.
+
+**Uninstall:** Settings > Apps > Installed apps, find Utter, click **⋯** > **Uninstall**. Tick *"Also delete the
+downloaded models and your settings"* to free the space they take (several GB).
+
+### Linux
+
+**Ubuntu 24.04 or newer, Debian 13, Linux Mint 22:** download `Utter_<version>_amd64.deb` from the
+[latest release](https://github.com/ductai199x/utter/releases/latest), then in a terminal:
+
+```bash
+cd ~/Downloads
+sudo apt install ./Utter_<version>_amd64.deb
+```
+
+Open Utter from your apps. The package already lets Utter hear the dictation key; nothing more to
+allow.
+
+**Other distributions (Fedora 40 or newer and others):** download `Utter_<version>_amd64.AppImage`,
+then:
+
+```bash
+chmod +x ~/Downloads/Utter_<version>_amd64.AppImage
+~/Downloads/Utter_<version>_amd64.AppImage
+```
+
+The first time, Utter asks for your password once, so it can hear the dictation key.
+
+Then, as on the other systems: choose a model, check your microphone, wait for the download, and
+try it with **Right Ctrl**. Utter works on GNOME and KDE, on Wayland and X11. On GNOME, Utter's
+icon in the top bar needs the *AppIndicator* extension (Ubuntu has it; on Fedora install
+"AppIndicator and KStatusNotifierItem Support"); without it, open Utter again to bring back its
+window, and quit it from Settings.
+
+**Update:** install the new `.deb` the same way, or replace the AppImage file. Your models,
+settings and history stay.
+
+**Uninstall:** `sudo apt remove utter`, or delete the AppImage. The downloaded models and your
+settings stay in `~/.local/share/utter`; delete that folder to free the space.
+
+## Use
+
+| | macOS | Windows and Linux |
+|---|---|---|
+| Dictate | hold **Right Option**, speak, let go | hold **Right Ctrl**, speak, let go |
+| Hands-free | double-tap it, speak, tap it again to finish | same |
+| Cancel | **Esc** | **Esc** |
+| Paste the last dictation again | **Ctrl+Cmd+V** | **Alt+Shift+Z** |
+| Copy the last dictation | **Ctrl+Cmd+C** | **Alt+Shift+X** |
+
+The text goes where your cursor is, in any app, cleaned up: fillers and false starts removed,
+corrections applied ("at two, no, three" becomes "at 3"), punctuation added. Utter's icon (in the
+menu bar on a Mac, the tray on Windows and Linux) opens its window: **History** of what you
+dictated (only on your computer, and you can turn it off), your **Dictionary** of names and terms
+to spell your way, and **Settings**, where you can change the key, the microphone and the model.
 
 ## Building from source
 
