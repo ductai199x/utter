@@ -12,7 +12,7 @@
 
 use std::ffi::c_void;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicPtr, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
@@ -43,6 +43,7 @@ struct CFRange {
 unsafe extern "C" {
     static kCFRunLoopCommonModes: CFStringRef;
     static kCFBooleanTrue: CFTypeRef;
+    static kCFBooleanFalse: CFTypeRef;
     static kCFTypeDictionaryKeyCallBacks: c_void;
     static kCFTypeDictionaryValueCallBacks: c_void;
     fn CFRelease(cf: CFTypeRef);
@@ -301,7 +302,7 @@ fn forward(
     name: &str,
     mut f: impl FnMut(Key) -> bool + Send + 'static,
 ) -> Result<Box<dyn FnMut() + Send>, String> {
-    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
     let stopping = stop.clone();
     std::thread::Builder::new()
         .name(name.into())
@@ -367,14 +368,18 @@ pub fn accessibility_on() -> bool {
 /// Asks macOS for what input_access found missing, Accessibility first: its prompt adds Utter to
 /// the list in Privacy & Security, and once it is on, reading keys is allowed too (macOS 26.7:
 /// Input Monitoring then needs nothing more). Asking for both at once added Utter to neither
-/// list. Opens the pane to turn on; Ok means it is open, not that the switch is on.
+/// list. The first Allow shows macOS's own prompt, whose Open System Settings goes to the switch;
+/// opening the pane as well put it over that prompt, which then lingered after the switch was on
+/// (macOS 26.7). Later ones open the pane, macOS prompting only once. Ok means asked, not on.
 pub fn allow_input() -> Result<(), String> {
+    static PROMPTED: AtomicBool = AtomicBool::new(false);
+    let prompt = !PROMPTED.swap(true, Ordering::Relaxed);
     // SAFETY: CoreFoundation calls with valid arguments; the dictionary is released.
     let (listen, trusted) = unsafe {
         let trusted_now = AXIsProcessTrusted();
         let listen = CGPreflightListenEventAccess() || (trusted_now && CGRequestListenEventAccess());
         let keys = [kAXTrustedCheckOptionPrompt];
-        let values = [kCFBooleanTrue];
+        let values = [if prompt { kCFBooleanTrue } else { kCFBooleanFalse }];
         let options = CFDictionaryCreate(
             std::ptr::null(),
             keys.as_ptr(),
@@ -389,6 +394,7 @@ pub fn allow_input() -> Result<(), String> {
     };
     let pane = match (listen, trusted) {
         (true, true) => return Ok(()),
+        (_, false) if prompt => return Ok(()),
         (_, false) => "Privacy_Accessibility",
         (false, true) => "Privacy_ListenEvent",
     };

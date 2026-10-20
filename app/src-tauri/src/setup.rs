@@ -415,7 +415,7 @@ fn gb(bytes: u64) -> String {
 
 /// What the keyboard check and problem ask for (problem.rs too).
 pub const KEYBOARD_FIX: &str = if cfg!(target_os = "macos") {
-    "Utter needs Accessibility, to hear the dictation key and paste for you. Allow opens System Settings: turn Utter on there."
+    "Utter needs Accessibility, to hear the dictation key and paste for you. Allow asks macOS: open System Settings and turn Utter on."
 } else {
     "Utter needs this to hear the dictation key and paste for you. Allow asks for your password once."
 };
