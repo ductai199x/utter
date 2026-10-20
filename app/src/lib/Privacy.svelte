@@ -17,11 +17,11 @@
     Private by design
   </p>
   <ul>
-    <li>Everything happens on your {here}. Nothing you say is ever sent anywhere.</li>
-    <li>Utter only uses the internet to download its models. After that, it works offline.</li>
-    <li>It never reads your files or records your screen.</li>
-    <li>Your history stays on your {here}. You can turn it off anytime.</li>
-    <li>It's open source: anyone can check the code at github.com/ductai199x/utter.</li>
+    <li>Everything happens <b>on your {here}</b>. Nothing you say is <b>ever sent anywhere</b>.</li>
+    <li>Utter only uses the internet <b>to download its models</b>. After that, it <b>works offline</b>.</li>
+    <li>It <b>never</b> reads your files or records your screen.</li>
+    <li>Your history <b>stays on your {here}</b>. You can turn it off anytime.</li>
+    <li>It's <b>open source</b>: anyone can check the code at github.com/ductai199x/utter.</li>
   </ul>
 </section>
 
@@ -58,6 +58,10 @@
   }
   li + li {
     margin-top: 3px;
+  }
+  b {
+    font-weight: 600;
+    color: var(--home-text);
   }
   .compact {
     margin-top: 14px;
