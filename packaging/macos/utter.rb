@@ -1,5 +1,6 @@
 # Homebrew cask for Utter. This repository is its own tap:
-#   brew tap ductai199x/utter https://github.com/ductai199x/utter && brew install --cask utter
+#   brew tap ductai199x/utter https://github.com/ductai199x/utter
+#   brew trust --cask ductai199x/utter/utter && brew install --cask utter
 # The template: packaging/macos/cask.sh fills in VERSION, SHA256 and URL into Casks/utter.rb.
 cask "utter" do
   version "VERSION"
@@ -37,7 +38,7 @@ cask "utter" do
   ]
 
   caveats <<~EOS
-    Open Utter from Applications. It asks for Accessibility (to hear the dictation key and paste)
-    and the microphone, then downloads its models (about 7 GB).
+    Open Utter from Applications. It asks for permission to hear the dictation key and paste,
+    and for the microphone, then downloads its models (about 7 GB).
   EOS
 end
