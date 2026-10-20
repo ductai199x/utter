@@ -194,9 +194,11 @@
     heard = false;
     quiet = false;
     clearTimeout(quietTimer);
-    quietTimer = setTimeout(() => (quiet = !heard && view === 'mic'), QUIET_MS);
     try {
       await core.micStart(device);
+      // From when it is open: the first open waits for macOS's microphone question, and "Nothing
+      // heard yet" showed while the person was still reading it.
+      quietTimer = setTimeout(() => (quiet = !heard && view === 'mic'), QUIET_MS);
     } catch {
       // With none connected there is nothing else to choose: say what to do instead.
       const none = (await core.microphones().catch(() => [] as string[])).length === 0;
