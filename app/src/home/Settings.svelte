@@ -162,7 +162,8 @@
       keep === 'off'
         ? {
             title: 'Turn History off?',
-            message: n ? `This deletes all ${plural} and keeps no new ones.` : 'New dictations will not be kept.',
+            // Every dictation, not a count: one made while this asks would make a count wrong.
+            message: n ? 'This deletes every dictation in History and keeps no new ones.' : 'New dictations will not be kept.',
             action: n ? 'Delete and turn off' : 'Turn off',
             run: apply,
           }
