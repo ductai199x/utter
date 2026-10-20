@@ -787,7 +787,8 @@ pub fn open(app: &AppHandle, mode: Mode) -> tauri::Result<()> {
 /// the download starts once the system check passes.
 /// The setup window's height: Linux and macOS check keyboard access too, and its row (with why,
 /// when it is missing) did not fit in Windows' 520 px; it scrolled out of sight.
-const SETUP_HEIGHT: f64 = if cfg!(windows) { 520.0 } else { 600.0 };
+// The welcome step also says, in five lines, what Utter does with your data.
+const SETUP_HEIGHT: f64 = if cfg!(windows) { 640.0 } else { 720.0 };
 
 pub fn open_with(app: &AppHandle, mode: Mode, carry_on: bool) -> tauri::Result<()> {
     let url = format!("setup.html?mode={}{}", mode.query(), if carry_on { "&go=1" } else { "" });

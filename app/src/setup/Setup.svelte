@@ -9,6 +9,7 @@
   import * as core from './core';
   import type { Checks, ModelCard, ModelId, Problem, Progress } from './core';
   import Logo from '../lib/Logo.svelte';
+  import Privacy from '../lib/Privacy.svelte';
   import { Waveform } from '../lib/waveform';
 
   type View = 'check' | 'model' | 'mic' | 'download' | 'try' | 'problem' | 'done';
@@ -447,6 +448,7 @@
               Utter needs a graphics card: NVIDIA, AMD or Intel.
             </p>
           {/if}
+          {#if mode === 'first'}<Privacy compact />{/if}
         {:else if view === 'model'}
           <h1>Choose your model</h1>
           <p class="lede">Bigger models write more carefully. You can change this later in Settings.</p>
