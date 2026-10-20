@@ -559,7 +559,20 @@ fn main() {
     }
     tauri::Builder::default()
         // Launching Utter again while it runs opens the Home window.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| home::show_launched(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // macOS reopens at sign-in the apps that ran at sign-out, alongside the sign-in entry:
+            // that copy is not the person opening Utter, and showed its window at every sign-in
+            // (macOS 26.7). A plain start within seconds of a sign-in start is that.
+            let restored = cfg!(target_os = "macos")
+                && splash::started_at_sign_in()
+                && !args.iter().skip(1).any(|a| a.starts_with("--"))
+                && since_launch() < 30.0;
+            if restored {
+                tracing::info!("a second start right after sign-in: macOS reopening Utter; nothing to show");
+            } else {
+                home::show_launched(app);
+            }
+        }))
         .manage(setup::MicCheck::default())
         .manage(setup::Downloading::default())
         .manage(setup::LastProblem::default())
