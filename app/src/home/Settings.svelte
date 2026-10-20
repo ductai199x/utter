@@ -5,6 +5,7 @@
   import Confirm from './Confirm.svelte';
   import {
     KEEP_LABELS,
+    WITH_CHOICES,
     WITH_LABELS,
     groupRules,
     historyClear,
@@ -90,7 +91,7 @@
 
   // Paste rules: here the person's own and changed ones; every rule in the Paste rules window.
 
-  const WITH = Object.entries(WITH_LABELS) as [PasteWith, string][];
+  const WITH = WITH_CHOICES;
   const KEEP = Object.entries(KEEP_LABELS) as [PasteKeep, string][];
   let rules = $state<PasteRules | null>(null);
   $effect(() => {
