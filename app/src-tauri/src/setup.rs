@@ -648,14 +648,19 @@ pub fn setup_download(app: AppHandle, state: tauri::State<'_, Downloading>) {
 /// The download itself, on its own thread, with [`Downloading`] set; clears it when done.
 fn download(app: &AppHandle) {
     let todo = missing();
-    let total: u64 = todo.iter().map(|c| c.download_size()).sum();
+    // The bar measures the whole install, what an earlier try finished counted as done: it
+    // measured only what was left, so a retry after 2.4 of 6.6 GB showed "1.4 of 5.2 GB"
+    // (macOS, 2026-10-20). A file cut short resumes, and the install reports its bytes too.
+    let total: u64 = required().iter().map(|c| c.download_size()).sum();
+    let finished: u64 =
+        required().iter().filter(|c| !todo.iter().any(|t| t.id == c.id)).map(|c| c.download_size()).sum();
     let emit = |p: DownloadProgress| {
         let _ = app.emit_to("setup", "setup-progress", p);
     };
     // Installed but not intact: removed first, so they are fetched again.
     let damaged: Vec<&Component> = todo.iter().copied().filter(|c| c.is_installed()).collect();
     remove_or_restart(app, &damaged);
-    let mut before = 0u64;
+    let mut before = finished;
     for c in todo {
         let label = label(&c.id);
         // Bytes of this component downloaded so far. Verifying follows each file, so it
@@ -676,7 +681,15 @@ fn download(app: &AppHandle) {
         if let Err(e) = result {
             tracing::error!("installing {}: {e}", c.id);
             let message = crate::problem::download_message(&e);
-            emit(DownloadProgress { done: before, total, stage: "error", label, error: Some(message), problem: None });
+            // Where the bar stood: what this component got is kept, and resumes on retry.
+            emit(DownloadProgress {
+                done: before + got,
+                total,
+                stage: "error",
+                label,
+                error: Some(message),
+                problem: None,
+            });
             app.state::<Downloading>().0.store(false, Ordering::Relaxed);
             return;
         }
