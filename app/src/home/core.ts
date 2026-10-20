@@ -268,7 +268,7 @@ export type UpdateStatus =
   | { phase: 'idle' }
   | { phase: 'checking' }
   | { phase: 'current'; version: string }
-  | { phase: 'available'; version: string; notes: string | null; manual: boolean }
+  | { phase: 'available'; version: string; notes: string | null; password: boolean }
   | { phase: 'downloading'; done: number; total: number | null }
   | { phase: 'installing' }
   | { phase: 'failed'; error: string };
