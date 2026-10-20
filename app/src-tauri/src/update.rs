@@ -155,9 +155,9 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     let mut done = 0u64;
     let mut shown = Instant::now() - Duration::from_secs(1);
     let progress_app = app.clone();
-    let installing_app = app.clone();
-    let result = update
-        .download_and_install(
+    // The download is checked against the updater key before it is returned.
+    let downloaded = update
+        .download(
             |chunk, total| {
                 done += chunk as u64;
                 // A few times a second is enough for a progress line.
@@ -166,20 +166,60 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
                     set(&progress_app, Status::Downloading { done, total });
                 }
             },
-            || set(&installing_app, Status::Installing),
+            || {},
         )
         .await;
-    match result {
+    let bytes = match downloaded {
+        Ok(bytes) => bytes,
+        Err(e) => return fail(app, &e.to_string()),
+    };
+    set(app, Status::Installing);
+    let installed = if from_deb() {
+        install_deb(&update.version, &bytes)
+    } else {
+        update.install(&bytes).map_err(|e| e.to_string())
+    };
+    match installed {
         Ok(()) => {
             tracing::info!(version = %update.version, "update installed: starting the new version");
             crate::restart(app);
             Ok(())
         }
-        Err(e) => {
-            tracing::error!("update: {e}");
-            set(app, Status::Failed { error: format!("The update did not install: {e}") });
-            Err(e.to_string())
+        Err(e) if e == DECLINED => {
+            // The person said no to the password prompt: offered again, nothing changed.
+            tracing::info!("update: the password prompt was declined");
+            set(app, Status::Available { version: update.version.clone(), notes: update.body.clone(), password: true });
+            Ok(())
         }
+        Err(e) => fail(app, &e),
+    }
+}
+
+fn fail(app: &AppHandle, error: &str) -> Result<(), String> {
+    tracing::error!("update: {error}");
+    set(app, Status::Failed { error: format!("The update did not install: {error}") });
+    Err(error.to_owned())
+}
+
+/// What install_deb returns when the person cancels the password prompt.
+const DECLINED: &str = "declined";
+
+/// Installs a downloaded .deb through the desktop's own password prompt (pkexec). The plugin's
+/// own install went on to a second prompt (zenity, then kdialog, then sudo) when the first was
+/// cancelled (Ubuntu 24.04, 2026-10-20): one "no" is the answer.
+fn install_deb(version: &str, bytes: &[u8]) -> Result<(), String> {
+    let dir = std::env::temp_dir().join(format!("utter-update-{version}"));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let deb = dir.join(format!("Utter_{version}_amd64.deb"));
+    std::fs::write(&deb, bytes).map_err(|e| e.to_string())?;
+    let status = std::process::Command::new("pkexec").arg("dpkg").arg("-i").arg(&deb).status();
+    let _ = std::fs::remove_dir_all(&dir);
+    match status.map(|s| s.code()) {
+        Ok(Some(0)) => Ok(()),
+        // pkexec: 126, the prompt dismissed or the password refused; 127, not authorized.
+        Ok(Some(126 | 127)) => Err(DECLINED.to_owned()),
+        Ok(code) => Err(format!("dpkg ended with {code:?}")),
+        Err(e) => Err(format!("could not run pkexec: {e}")),
     }
 }
 
