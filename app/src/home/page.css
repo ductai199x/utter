@@ -52,6 +52,9 @@
   font-size: 13px;
   line-height: 18px;
 }
+.page .desc.error {
+  color: var(--home-error);
+}
 .page .path {
   font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: 12px;

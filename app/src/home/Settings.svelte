@@ -2,6 +2,7 @@
   // The Settings section (docs/ux/home.md, docs/ux/insertion.md "Paste rules", docs/ux/history.md
   // "Settings → History"). Every change saves at once through `save`; the core applies it on
   // the next dictation and reports back (`applied`).
+  import { onMount, tick } from 'svelte';
   import Confirm from './Confirm.svelte';
   import Privacy from '../lib/Privacy.svelte';
   import {
@@ -17,6 +18,11 @@
     pasteRules,
     quit,
     restart,
+    onShowUpdate,
+    onUpdateStatus,
+    updateCheck,
+    updateInstall,
+    updateStatus,
     ruleSource,
     withRule,
     withoutRule,
@@ -30,6 +36,7 @@
     type PasteRules,
     type PasteWith,
     type Settings,
+    type UpdateStatus,
   } from './core';
 
   let {
@@ -45,6 +52,53 @@
     saveError: string;
     save: (next: Settings) => Promise<void>;
   } = $props();
+
+  // New versions of Utter (update.rs): checked once a day while on, installed only on Update.
+  let update = $state<UpdateStatus>({ phase: 'idle' });
+  let updateRow = $state<HTMLElement>();
+  const showUpdateRow = () => void tick().then(() => updateRow?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  onMount(() => {
+    void updateStatus().then((s) => (update = s));
+    // Opened by the tray's "Update to Utter X..." item (Home switched here for it).
+    try {
+      if (sessionStorage.getItem('utter-show-update')) {
+        sessionStorage.removeItem('utter-show-update');
+        showUpdateRow();
+      }
+    } catch {
+      // No session storage: the row is still there to scroll to.
+    }
+    const off = [
+      onUpdateStatus((s) => (update = s)),
+      // The same item while Settings already shows.
+      onShowUpdate(showUpdateRow),
+    ];
+    return () => off.forEach((p) => void p.then((f) => f()));
+  });
+  const updateText = $derived.by(() => {
+    switch (update.phase) {
+      case 'checking':
+        return 'Checking...';
+      case 'current':
+        return `You have the latest version (${update.version}).`;
+      case 'available':
+        return update.manual
+          ? `Utter ${update.version} is out. Download it from GitHub and install it like this one.`
+          : `Utter ${update.version} is ready to install. Your models and settings stay.`;
+      case 'downloading':
+        return update.total
+          ? `Downloading... ${Math.floor((update.done / update.total) * 100)}%`
+          : `Downloading... ${(update.done / 1e6).toFixed(0)} MB`;
+      case 'installing':
+        return 'Installing. Utter restarts in a moment.';
+      case 'failed':
+        return update.error;
+      default:
+        return settings?.check_updates
+          ? 'Utter checks GitHub once a day and asks before updating.'
+          : 'Off: Utter never checks.';
+    }
+  });
 
   /** A card size people know: bytes in whole GB, rounded up. */
   const cardGb = (bytes: number) => Math.ceil(bytes / 2 ** 30);
@@ -486,6 +540,28 @@
       <div class="row">
         <div class="label"><span class="label-text">Version</span></div>
         <span class="value">{home.version}</span>
+      </div>
+      <div class="row" bind:this={updateRow}>
+        <div class="label">
+          <label for="check-updates">Updates</label>
+          <span class="desc" class:error={update.phase === 'failed'}>{updateText}</span>
+        </div>
+        <span class="row-actions">
+          {#if update.phase === 'available'}
+            <button class="primary" onclick={() => void updateInstall()}>{update.manual ? 'Download' : 'Update'}</button>
+          {:else if update.phase !== 'downloading' && update.phase !== 'installing'}
+            <button class="link" disabled={update.phase === 'checking'} onclick={() => void updateCheck()}>Check now</button>
+          {/if}
+          <button
+            id="check-updates"
+            class="switch"
+            role="switch"
+            aria-checked={settings?.check_updates ?? true}
+            aria-label="Check for updates"
+            onclick={() => settings && save({ ...settings, check_updates: !settings.check_updates })}
+            ><span></span></button
+          >
+        </span>
       </div>
       <div class="row">
         <div class="label">
