@@ -46,4 +46,5 @@ fi
 echo
 echo "Done. macOS $(sw_vers -productVersion), $(sysctl -n machdep.cpu.brand_string)."
 echo "Next, in System Settings > Privacy & Security, add /usr/libexec/sshd-keygen-wrapper to"
-echo "Accessibility and Screen & System Audio Recording, so tests over SSH can see and click."
+echo "Accessibility (macOS 27: Device Control and Data Access) and Screen & System Audio"
+echo "Recording, so tests over SSH can see and click."
