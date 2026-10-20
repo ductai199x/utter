@@ -781,6 +781,9 @@ pub fn open_with(app: &AppHandle, mode: Mode, carry_on: bool) -> tauri::Result<(
         .inner_size(640.0, SETUP_HEIGHT)
         .resizable(false)
         .center()
+        .focused(true)
         .build()
-        .map(drop)
+        // In front and focused: on macOS a new window of an app that is not active opened behind
+        // the app in front (System Settings, after the restart that applies keyboard access).
+        .map(|w| drop(w.set_focus()))
 }
