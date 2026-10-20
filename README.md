@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://github.com/ductai199x/utter/releases/latest"><b>Download for Windows or Linux</b></a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="docs/eval-results.md">Eval results</a> ·
+  <a href="docs/evals.md">Eval results</a> ·
   <a href="DESIGN.md">Design</a>
 </p>
 
@@ -107,7 +107,7 @@ go, and nothing you say ever leaves your machine.
 <img src="media/latency.svg" width="880" alt="After the key goes up: the last words are recognized in 48-71 ms, the dictation is cleaned in 131-158 ms and pasted in 47-61 ms, 231-260 ms in all.">
 
 On the development machine (RTX 3090 Ti), in the app itself. Every figure comes from
-[docs/eval-results.md](https://github.com/ductai199x/utter/blob/dev/docs/eval-results.md), where the method and the raw numbers live.
+[docs/evals.md](https://github.com/ductai199x/utter/blob/dev/docs/evals.md), where the method and the raw numbers live.
 
 | | |
 |---|---|
@@ -180,7 +180,7 @@ chat logs), spoken in seven ways (plain, with fillers, self-corrected, as comman
 far-back edits, with spoken punctuation, in broken grammar), voiced by text-to-speech and
 recognized by the same Parakeet the app runs. The answer key is known by construction. Every
 change to a model, prompt or setting is run against it and logged in
-[docs/eval-results.md](https://github.com/ductai199x/utter/blob/dev/docs/eval-results.md), regressions included.
+[docs/evals.md](https://github.com/ductai199x/utter/blob/dev/docs/evals.md), regressions included.
 
 **Reproducible from public data.** The models Utter ships are trained by one recipe on the
 published dataset, so anyone can rebuild them:
@@ -203,7 +203,7 @@ behind it.
 **What you need:** about 10 GB of free disk, an internet connection for the first setup (Utter
 downloads its models once, then works offline), a microphone, and one of:
 
-- a Mac with Apple Silicon (M1 or newer) on macOS 14 or newer;
+- a Mac with Apple Silicon (M1 or newer) on macOS 26 (older versions may work);
 - an NVIDIA graphics card with 4 GB of memory (6 GB for Quality) and driver 580 or newer;
 - an AMD or Intel graphics card through Vulkan, as a preview: 6 GB of memory (8 GB for Quality);
 - no graphics card: Utter runs on the processor, with its Light and Extra light models (8 GB of
@@ -359,7 +359,7 @@ That installs the runtime components and models into the development data folder
 npx tauri dev
 ```
 
-[docs/local-setup.md](https://github.com/ductai199x/utter/blob/dev/docs/local-setup.md) has the details: where data lives, the Python tools
+[docs/development.md](https://github.com/ductai199x/utter/blob/dev/docs/development.md) has the details: where data lives, the Python tools
 (`utter-eval`, `utter-train`, `utter-data`, `utter-bench`, `utter-speech`) and every bench
 command.
 

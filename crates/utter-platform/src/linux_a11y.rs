@@ -1,6 +1,6 @@
 //! The focused app and the text before the caret on Linux, under X11 and Wayland alike, from
 //! the accessibility bus (AT-SPI): Wayland tells a normal app nothing about other windows, and
-//! AT-SPI is what screen readers use (docs/plan-cross-platform.md, spike 3: on GNOME 46 Wayland
+//! AT-SPI is what screen readers use (docs/platforms.md, spike 3: on GNOME 46 Wayland
 //! it named the active app and its pid, and read the text before the caret exactly).
 //!
 //! A thread listens for focus changes and remembers the focused object; at start one walk of the

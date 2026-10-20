@@ -244,7 +244,7 @@ mod imp {
         PasteRule { keys, keep }
     }
 
-    /// docs/ux/insertion.md, "Utter's defaults (Windows)".
+    /// docs/ux/insertion.md, "Utter's defaults".
     pub const DEFAULT_RULES: &[DefaultRule] = &[
         ("mintty.exe", "Git Bash (mintty)", rule(PasteKeys::ShiftInsert, Keep::Normal)),
         ("putty.exe", "PuTTY", rule(PasteKeys::ShiftInsert, Keep::Normal)),
@@ -588,7 +588,7 @@ mod imp {
     }
 }
 
-/// Linux, X11 and Wayland alike (docs/plan-cross-platform.md, spike 1): the CLIPBOARD selection
+/// Linux, X11 and Wayland alike (docs/platforms.md, spike 1): the CLIPBOARD selection
 /// owned through X11, which XWayland bridges to Wayland apps (GNOME offers Wayland clients no
 /// way to set the clipboard without the keyboard focus, which Utter never takes), and the paste
 /// keys from Utter's virtual keyboard (uinput), which reaches every app.

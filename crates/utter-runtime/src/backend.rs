@@ -1,4 +1,4 @@
-//! Which GPU backend Utter runs on (docs/plan-vulkan.md, docs/plan-cross-platform.md): CUDA on
+//! Which GPU backend Utter runs on (docs/platforms.md, docs/platforms.md): CUDA on
 //! an NVIDIA card, where it is fastest (the Vulkan build processes prompts twice as slowly there,
 //! 2026-10-13); Vulkan on other cards (AMD, Intel) on Windows and Linux; Metal on Apple Silicon.
 //! On Vulkan and Metal the speech model runs on onnxruntime's WebGPU provider (Dawn over D3D12,

@@ -1,5 +1,5 @@
 //! Phrase boosting: the user's dictionary steers greedy decoding toward its words, without
-//! changing the model (docs/plan-final-text.md, "Vocabulary"; NVIDIA's GPU phrase boosting,
+//! changing the model (docs/cleanup.md, "Dictionary terms"; NVIDIA's GPU phrase boosting,
 //! arXiv 2508.07014, is the same idea for NeMo).
 //!
 //! The phrases become a tree over token sequences. At every decoding step, a token that
@@ -7,7 +7,7 @@
 //! depth of the match so a phrase half-spoken is pulled through to its end; starting a phrase
 //! gets a smaller one (`start_score`). Whether a token is emitted at all stays the model's
 //! decision (the decoder compares blank with the unboosted scores): a bonus that beat blank
-//! would write words nobody said. Measured in docs/eval-results.md, "Phrase boosting".
+//! would write words nobody said. Measured in docs/evals.md, "Phrase boosting".
 //!
 //! The model's vocabulary ships without piece scores, so the exact split SentencePiece would
 //! make is unknown. Every split of a phrase into vocabulary pieces goes into the tree instead
@@ -35,7 +35,7 @@ pub struct BoostConfig {
 
 impl Default for BoostConfig {
     fn default() -> Self {
-        // Measured (docs/eval-results.md, "Phrase boosting"): more pulls a little harder on
+        // Measured (docs/evals.md, "Phrase boosting"): more pulls a little harder on
         // unrelated speech; a start bonus adds nothing.
         Self { start_score: 0.0, score: 3.0, depth_bonus: 1.0, max_splits: 64 }
     }

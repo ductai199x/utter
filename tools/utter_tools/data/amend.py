@@ -1,4 +1,4 @@
-"""Far-back edits for the "amend" rendition kind (docs/plan-use-cases.md, recipe R4): the
+"""Far-back edits for the "amend" rendition kind (docs/cleanup.md, recipe R4): the
 speaker says a detail wrong and fixes it later by reference, a sentence or more on, in the ways
 people do: "actually, change the eggs to three boxes", "take the umbrella off the list", "oh,
 and add bread after milk", "make the second one oat milk". The gold is the passage as meant.

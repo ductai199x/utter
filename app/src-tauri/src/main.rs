@@ -29,6 +29,9 @@ mod update;
 const BAR_SIZE: (u32, u32) = (576, 168);
 /// The pill sits 12 px above the window's bottom edge, and 48 px above the work area's.
 const BAR_BOTTOM_MARGIN: u32 = 48 - 12;
+/// How long after key down the Bar waits before it appears, so a chord (Right Ctrl + C) or a stray
+/// tap that cancels sooner never shows it (docs/ux/bar.md, "Where"). Recording starts at key down.
+const BAR_GRACE: Duration = Duration::from_millis(120);
 /// How long the Done check shows before the Bar leaves.
 const DONE_HOLD: Duration = Duration::from_millis(400);
 /// How long an error line stays.
@@ -96,7 +99,7 @@ impl Bar {
     fn new(window: WebviewWindow) -> Self {
         // Windows places the Bar through utter_platform::overlay, by its HWND. Elsewhere Tauri
         // does (bar_bottom_center): on Linux the window runs under XWayland, where an X11 client
-        // may keep itself above others and place itself (docs/plan-cross-platform.md).
+        // may keep itself above others and place itself (docs/platforms.md).
         #[cfg(windows)]
         let hwnd = window.hwnd().ok().map(|h| h.0 as isize);
         #[cfg(not(windows))]
@@ -161,8 +164,20 @@ impl Bar {
                 }
                 // State first, so the page has reset before the window becomes visible.
                 self.emit_state(BarState { hands_free: Some(hands_free), ..BarState::new("listening") });
-                if first {
+                if first && hands_free {
                     self.show(target);
+                } else if first {
+                    // Held, not yet known to be a dictation: a chord or a tap cancels within
+                    // BAR_GRACE and the Bar never appears.
+                    let bar = self.clone();
+                    let generation = self.generation.load(Ordering::Relaxed);
+                    std::thread::spawn(move || {
+                        std::thread::sleep(BAR_GRACE);
+                        if bar.listening.load(Ordering::Relaxed) && bar.generation.load(Ordering::Relaxed) == generation
+                        {
+                            bar.show(target);
+                        }
+                    });
                 }
             }
             Event::Words { committed, preview } => {

@@ -1,7 +1,7 @@
 //! Loading ONNX Runtime, which `ort` loads at run time (`load-dynamic`), from Utter's own
 //! runtime components (`utter-runtime`), each pinned and checksummed:
 //! - CUDA: onnxruntime's GPU build, the CUDA runtime with cuBLAS, and cuDNN;
-//! - Vulkan and Metal (docs/plan-vulkan.md, docs/plan-cross-platform.md): onnxruntime's CPU
+//! - Vulkan and Metal (docs/platforms.md, docs/platforms.md): onnxruntime's CPU
 //!   build and its WebGPU plugin provider (Dawn over D3D12 or Vulkan), registered here; on macOS
 //!   the build has WebGPU (Dawn over Metal) built in, and registering the plugin as well failed
 //!   ("EP library is already registered", macOS 26.7);

@@ -1,7 +1,7 @@
 <script lang="ts">
   // The README's demo: one dictation into a chat, played through the real Bar (bar.html in a
   // frame the size of its window, sent the events the core sends). Timings follow the app's
-  // measured ones (docs/eval-results.md): words show as they are heard, each pause brings back
+  // measured ones (docs/evals.md): words show as they are heard, each pause brings back
   // the cleaned text, and the paste lands about a quarter second after the key goes up.
   // tools/media/record.py calls `window.promo.start()` and records until `done`.
   import { onMount } from 'svelte';

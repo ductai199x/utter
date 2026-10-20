@@ -1,6 +1,6 @@
 """Minimal fixes to gold passages before they are spoken: clear typos, proper nouns in lowercase,
 chat shorthand (the proofreading pass), then grammar errors (the grammar pass: Utter fixes grammar
-by default, docs/cleanup-spec.md rule 8, so a gold with a grammar error would teach and score
+by default, docs/cleanup.md rule 8, so a gold with a grammar error would teach and score
 keeping it). The writer's own choices (punctuation style, tone, fragments) are kept.
 
 The LLM proposes fixes as data (the exact wrong text and its replacement); code applies each only

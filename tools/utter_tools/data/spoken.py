@@ -205,7 +205,7 @@ def command_script(passage: str, rng: random.Random, llm: Chat, seed: int) -> Sc
         return None
     command = rng.choice(COMMANDS)
     if command in SENTENCE_COMMANDS:
-        # These retract the sentence before them, not everything (docs/cleanup-spec.md): a
+        # These retract the sentence before them, not everything (docs/cleanup.md): a
         # longer false start would be partly kept, and the passage would not be the gold.
         start = re.split(r"(?<=[.!?])\s+", start)[-1]
     start = start.rstrip(".!?") + "."

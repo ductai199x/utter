@@ -1,4 +1,4 @@
-//! The graphics card as the OS sees it, whatever its maker (docs/plan-vulkan.md): what first run
+//! The graphics card as the OS sees it, whatever its maker (docs/platforms.md): what first run
 //! checks, what picks the Vulkan device for llama-server and the WebGPU device for the speech
 //! model, so all three are the same card. NVIDIA's own driver answers more (CUDA's version,
 //! utter_runtime::gpu); this is for every card.

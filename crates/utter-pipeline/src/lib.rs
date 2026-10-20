@@ -111,7 +111,7 @@ type ModelLoad = Result<(Option<Cleaner>, Option<Speech>), String>;
 /// Which speech build a tier runs. On CUDA the 8-bit one for both: it transcribes the same as
 /// float16 and takes 0.66 GB less GPU memory, for about 5 ms more a clip (2026-10-11: cut
 /// memory as far as quality allows; small latency costs are fine). On Vulkan float16: WebGPU
-/// runs 8 bits 34 ms slower a clip, not 5 (docs/plan-vulkan.md); Metal runs the same WebGPU
+/// runs 8 bits 34 ms slower a clip, not 5 (docs/platforms.md); Metal runs the same WebGPU
 /// provider. On the CPU the 8-bit build, half the memory traffic.
 pub fn speech_for(tier: Tier) -> SpeechModel {
     speech_on(tier, utter_runtime::backend())
@@ -128,8 +128,8 @@ pub fn speech_on(_tier: Tier, backend: Backend) -> SpeechModel {
 }
 
 /// GPU memory a tier needs free to run, speech and cleanup together: on CUDA the peak measured
-/// end to end (docs/eval-results.md, 2026-10-11: 4,572 and 3,085 MiB), rounded up; on Vulkan
-/// the peak measured the same way on the 3090 Ti (docs/plan-vulkan.md, 2026-10-13: 5,690 and
+/// end to end (docs/evals.md, 2026-10-11: 4,572 and 3,085 MiB), rounded up; on Vulkan
+/// the peak measured the same way on the 3090 Ti (docs/platforms.md, 2026-10-13: 5,690 and
 /// 4,143 MiB, the float16 encoder included), until AMD and Intel cards are measured.
 pub fn gpu_need(tier: Tier) -> u64 {
     match (utter_runtime::backend(), tier) {
@@ -742,7 +742,7 @@ impl Pipeline {
     /// docs/ux/splash.md): "speech", "cleanup", then "microphone".
     pub fn start_reporting(cfg: PipelineConfig, mut stage: impl FnMut(&'static str)) -> Result<Self, PipelineError> {
         // Everything the loaders will read, read ahead in parallel: a cold start otherwise
-        // waits on their piecemeal reads (docs/eval-results.md, 2026-10-12).
+        // waits on their piecemeal reads (docs/evals.md, 2026-10-12).
         let files = components_for(cfg.tier)
             .into_iter()
             .filter_map(|id| utter_runtime::component(id).ok())
@@ -1118,7 +1118,13 @@ impl Engine {
 
     /// Pastes the last dictation's text (`paste`), or copies it.
     fn paste_last(&mut self, paste: bool, on_event: &mut impl FnMut(Event)) {
-        let text = self.last_text.clone().or_else(|| History::global().last_text());
+        // History is the truth when it is kept: deleting or clearing the newest entry must not leave it
+        // pasteable. With History off, the text of the dictation just made is all there is.
+        let text = if self.cfg.keep_history == KeepHistory::Off {
+            self.last_text.clone()
+        } else {
+            History::global().last_text()
+        };
         let Some(text) = text else {
             on_event(Event::Notice { text: "Nothing to paste yet".into(), ok: false });
             return;

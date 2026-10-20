@@ -1,4 +1,4 @@
-//! The speech encoder on LiteRT, for Android's GPU (docs/plan-android.md, "Speech on the
+//! The speech encoder on LiteRT, for Android's GPU (docs/android.md, "Speech encoder on the
 //! phone's GPU"): onnxruntime has no mobile GPU provider, LiteRT runs the encoder there in
 //! float16 at about 320 ms a 5 s clip on the test phone.
 //!

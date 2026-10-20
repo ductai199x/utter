@@ -15,7 +15,7 @@ pub mod logs;
 ///
 /// Development means a build running from a cargo `target` folder; the Python tools resolve
 /// the development folder too (`tools/utter_tools/config.py`). The two never share state, so a model
-/// or setting under development cannot reach the installed app. `docs/local-setup.md`
+/// or setting under development cannot reach the installed app. `docs/development.md`
 /// describes the layout. On Android the app gives its own files folder ([`set_data_dir`]).
 pub fn data_dir() -> PathBuf {
     if let Some(dir) = DATA_DIR.get() {

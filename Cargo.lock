@@ -5253,7 +5253,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utter-app"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "gdkx11",
  "gtk",
@@ -5276,7 +5276,7 @@ dependencies = [
 
 [[package]]
 name = "utter-asr"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "libloading 0.9.0",
  "ndarray",
@@ -5293,7 +5293,7 @@ dependencies = [
 
 [[package]]
 name = "utter-audio"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "audioadapter-buffers",
  "cpal",
@@ -5305,7 +5305,7 @@ dependencies = [
 
 [[package]]
 name = "utter-cli"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap",
@@ -5325,7 +5325,7 @@ dependencies = [
 
 [[package]]
 name = "utter-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -5333,7 +5333,7 @@ dependencies = [
 
 [[package]]
 name = "utter-llm"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "libc",
  "serde",
@@ -5348,7 +5348,7 @@ dependencies = [
 
 [[package]]
 name = "utter-mobile"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "hound",
@@ -5369,7 +5369,7 @@ dependencies = [
 
 [[package]]
 name = "utter-pipeline"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "hound",
  "serde",
@@ -5390,7 +5390,7 @@ dependencies = [
 
 [[package]]
 name = "utter-platform"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "arboard",
  "ash",
@@ -5408,7 +5408,7 @@ dependencies = [
 
 [[package]]
 name = "utter-runtime"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "flate2",
  "globset",

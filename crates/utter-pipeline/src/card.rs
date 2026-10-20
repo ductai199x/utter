@@ -1,6 +1,6 @@
 //! The graphics card Utter runs on, as first run, Settings and the problem screens describe it,
 //! whatever the backend (utter_runtime::backend): NVIDIA's driver answers on CUDA, DXGI on
-//! Vulkan (docs/plan-vulkan.md).
+//! Vulkan (docs/platforms.md).
 
 use utter_runtime::Backend;
 

@@ -1,6 +1,6 @@
 //! Speech recognition for Utter.
 //!
-//! The model is chosen by measurement (DESIGN.md section 6, docs/eval-results.md): English
+//! The model is chosen by measurement (DESIGN.md section 6, docs/evals.md): English
 //! runs parakeet-ultra's weights, exported to ONNX, in [`ParakeetTdt`].
 
 pub mod boost;
@@ -37,7 +37,7 @@ pub const MODEL_COMPONENT: &str = "parakeet-ultra-onnx-fp16";
 
 /// The speech model's two builds, both on the GPU (2026-10-11: everything on the GPU),
 /// with the same transcripts on the eval clips. GPU memory after load and 240 utterances, the
-/// 10 longest eval clips among them, with each build's settings (docs/eval-results.md):
+/// 10 longest eval clips among them, with each build's settings (docs/evals.md):
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpeechModel {
     /// The encoder in float16: about 2.0 GB, 21-23 ms of encoder a clip. Kept for comparisons.
@@ -66,7 +66,7 @@ impl SpeechModel {
     /// float16 weights go outside the memory pool, which would round their 1.2 GB up to 2 GB;
     /// the 8-bit ones stay in it, where the rounding leaves room the activations then use. On the
     /// Vulkan backend the encoder runs on WebGPU, which runs float16 faster than 8 bits
-    /// (docs/plan-vulkan.md); utter_pipeline::speech_for picks Fp16 there.
+    /// (docs/platforms.md); utter_pipeline::speech_for picks Fp16 there.
     pub fn options(self) -> ParakeetOptions {
         let encoder = match utter_runtime::backend() {
             utter_runtime::Backend::Cuda => Device::Cuda,
