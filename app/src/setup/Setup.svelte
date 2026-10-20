@@ -410,8 +410,7 @@
           <h1>{checkTitle}</h1>
           <p class="lede">
             {#if mode === 'first'}
-              Hold a key, speak, and clean text appears where you type. Everything runs on this computer; nothing you
-              say leaves it.
+              Hold a key, speak, and clean text appears where you type.
             {:else if checks && mode === 'model'}
               {gb(checks.downloadBytes)} GB to download. Dictation keeps the current model until it is done.
             {:else if checks && mode === 'update'}
