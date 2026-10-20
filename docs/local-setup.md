@@ -53,7 +53,7 @@ On Linux (FLAME), where Utter has no runtime components yet: `UTTER_CLI` points 
 Linux build of `utter-cli`, `UTTER_LLAMA_SERVER` at a llama-server built at the runtime's tag
 (b11535), and `UTTER_LLAMA_BUILD` the export at that llama.cpp tree.
 
-The README's pictures (docs/media) come from the app's own pages: with `npm run dev` serving
+The README's pictures (media) come from the app's own pages: with `npm run dev` serving
 them, `uv run --with playwright --with pillow python tools/media/record.py` drives the installed
 Edge, records app/promo.html (the real Bar playing one dictation) into demo.gif and takes the
 windows' screenshots on the pages' stand-in data, light and dark.

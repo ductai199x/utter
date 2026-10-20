@@ -31,8 +31,8 @@ pub enum Tier {
     /// the GPU (2026-10-11: about 2.5 GB, a little more is fine).
     Light,
     /// Gemma 3 1B fully fine-tuned on the same data (2 epochs, lr 2e-5; docs/plan-android.md):
-    /// the phone's model, and on a computer without a graphics card the fastest (
-    /// 2026-10-18). About 6 points behind Light on real speech; 1.5 s a cleanup on the phone's
+    /// the phone's model, and on a computer without a graphics card the fastest
+    /// (2026-10-18). About 6 points behind Light on real speech; 1.5 s a cleanup on the phone's
     /// CPU where Light takes 2.7 s.
     Mini,
     /// Gemma 4 26B-A4B, prompted: about 15 GB of GPU memory. Never offered: the fine-tuned E4B

@@ -134,7 +134,7 @@ permission while System Settings still showed it on**. Utter is therefore signed
 certificate ("Utter Homebrew Signing", SHA-1 `E411284D...C2`, to 2036; `packaging/macos/sign.sh`):
 the requirement becomes "app.utter signed by this certificate", and grants survived updates,
 reinstalls and the in-app updater (measured on 26.7 and 27.0.1). The keys are backed up in
-`a cloud drive\Utter signing keys.zip` (password in Tai's password manager) and in
+an encrypted zip in a cloud drive (password in the maintainer's password manager) and in
 `%USERPROFILE%\.utter-signing\`. Losing them means every user grants the permissions again.
 
 Entitlements (`app/src-tauri/macos/Utter.entitlements`), with the hardened runtime:

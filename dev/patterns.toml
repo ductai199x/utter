@@ -1,0 +1,100 @@
+# What must not reach the public branch (main), and what must not appear anywhere public. Read by
+# dev/release.py (see dev/README.md). Specific strings that would themselves leak (a hostname, an
+# address) go in dev/patterns.local.toml instead: git-ignored, same format.
+
+# The URL private links on main are rewritten to (docs live on dev).
+dev_url = "https://github.com/ductai199x/utter/blob/dev/"
+
+# Only on dev: dropped when publishing to main. A trailing slash is a folder.
+private = ["docs/", "DESIGN.md", "CLAUDE.md", ".claude/", "dev/"]
+
+# Never scanned: this tooling (its examples are on purpose) and lock files (URLs only).
+skip = ["dev/patterns.toml", "dev/release.py", "*.lock", "app/package-lock.json"]
+
+# scope "all": nothing public may contain it, private files included (dev is public too).
+# scope "main": allowed on dev, never on main.
+# allow: a line matching any of these is let through. bad / ok: examples the self-test checks.
+
+[[rule]]
+name = "user-path"
+scope = "all"
+why = "a path inside someone's home folder or on their drives: write <data folder>, %LOCALAPPDATA%, ~ or <repo>"
+regex = '''(?ix)
+    \b[A-Z]:[\\/]+Users[\\/]+(?![<%${.]|(?:Public|you|user|name)\b)[^\\/\s'"`)]+
+  | \b[A-Z]:[\\/]+(?:utter|Dropbox|chess)\b
+  | /(?:c|d)/(?:Users|utter|Dropbox)\b
+  | /mnt/[cd]/
+  | /Users/(?![<$%{]|Shared\b)[A-Za-z0-9._-]+/
+  | /home/(?![<$%{]|tester\b|linuxbrew\b|runner\b|ubuntu\b)[A-Za-z0-9._-]+/
+'''
+bad = ['C:\Users\Alex\AppData\Local\Utter_dev', 'D:\utter\target', '/d/utter/x', '/c/Users/Alex/.x', '/Users/alex/Library', '/home/alex/.config', 'C:/Users/Alex/y']
+ok = ['%LOCALAPPDATA%\Utter_dev', 'C:\Users\<you>\x', '~/.utter-signing', '/home/tester/x', '/Users/<you>/x', '<repo>\target', '/opt/homebrew/bin/brew']
+
+[[rule]]
+name = "private-network"
+scope = "all"
+why = "an address on a private network or a VPN: a name for the role instead (the Mac, the test server)"
+regex = '''(?<![\w.=<>~-])(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b|(?<![\w.=<>~-])100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b|\.ts\.net\b'''
+allow = ['"version"\s*:']
+bad = ['http://192.168.12.1:8765', 'ssh 10.0.0.2', '100.101.2.3', 'box.tailnet.ts.net']
+ok = ['127.0.0.1', 'nvidia-curand==10.3.7.77', 'Windows 10.0.26100', 'version 1.100.2.3', '8.8.8.8']
+
+[[rule]]
+name = "email"
+scope = "all"
+why = "an email address: none belongs in the repository except the examples allowed below"
+regex = '''[\w.+-]+@[\w-]+(?:\.[\w-]+)+'''
+allow = ['@\dx\.(?:png|jpe?g|webp)', 'john\.smith@gmail\.com', 'noreply@anthropic\.com', '@users\.noreply\.github\.com', 'git@github\.com', '[\w.+-]+@example\.(?:com|org)']
+bad = ['write to alex@university.edu', 'alex.smith@gmail.com']
+ok = ['john.smith@gmail.com', 'a@b', 'git@github.com:x/y.git', 'Co-Authored-By: Claude <noreply@anthropic.com>']
+
+[[rule]]
+name = "secret"
+scope = "all"
+why = "a credential"
+regex = '''-----BEGIN [A-Z ]*PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9]{30,}|\bhf_[A-Za-z0-9]{30,}|\bAKIA[0-9A-Z]{16}|\bsk-[A-Za-z0-9]{32,}'''
+bad = ['-----BEGIN OPENSSH PRIVATE KEY-----', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789']
+ok = ['a public key', 'hf_hub_download', 'sk-short']
+
+[[rule]]
+name = "personal-name"
+scope = "main"
+why = "the maintainer is named only where attribution needs the full name (authors, publisher, license, dataset cards)"
+regex = '''\bTai\b(?! Duc Nguyen)|\bNguyen,? Tai\b'''
+bad = ["Tai's call", "(Tai, 2026-10-11: everything on the GPU)", 'Nguyen, Tai']
+ok = ['Tai Duc Nguyen', 'authors = ["Tai Duc Nguyen"]', 'tail', 'Taipei']
+
+[[rule]]
+name = "private-infra"
+scope = "main"
+why = "a private cluster, institution or other project: say what it is (a GPU cluster) instead"
+regex = '''(?-i:\bFLAME\b)|(?i:\b(?:URCF|flamecluster|Drexel|Sidecoach|chess[- ](?:coaching|project)|Dropbox|Tailscale)\b)'''
+bad = ['vLLM on FLAME', 'the chess project', 'Drexel University', 'a Dropbox folder']
+ok = ['a flame graph', 'a GPU cluster']
+
+# Mechanical rewrites `release.py fix` applies (to every scanned file); idempotent.
+[[fix]]
+regex = '''C:\\Users\\Tai\\AppData\\Local\\(Utter_dev|Utter)'''
+replace = '''%LOCALAPPDATA%\\\1'''
+note = "the data folders"
+
+[[fix]]
+regex = '''C:\\Users\\Tai\\\.utter-signing\\?'''
+replace = '''%USERPROFILE%\\.utter-signing\\'''
+note = "where the signing keys live while working"
+
+[[fix]]
+regex = '''C:\\Users\\Tai\\\.cache\\huggingface\\hub'''
+replace = '''%USERPROFILE%\\.cache\\huggingface\\hub'''
+note = "the shared model cache"
+
+[[fix]]
+regex = '''D:\\chess-coaching-companion'''
+replace = '''the sibling project'''
+note = "another project's folder"
+
+[[fix]]
+regex = '''\(Tai, (\d{4}-\d\d-\d\d)'''
+replace = '''(\1'''
+scope = "main"
+note = "a decision's date without the name (docs keep the name)"

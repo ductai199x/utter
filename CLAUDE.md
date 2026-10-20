@@ -24,3 +24,8 @@ architecture or scope; it is the source of truth.
 - Python is only for `tools/` (eval, datasets, benchmarks), managed with uv. It is never
   shipped.
 - LF line endings everywhere.
+
+## Branches
+
+- Work on `dev`; it carries the docs, `DESIGN.md`, this file and `dev/`. `main` is public and gets only what `dev/release.py publish` builds, **only when Tai says so**. Never commit to `main` or push it otherwise.
+- Keep paths on his machine, private addresses, emails and other setup details out of every file, even on dev (both branches are public). Use `%LOCALAPPDATA%`, `<repo>` and the like. Run `release.py scan` before committing anything with paths or hostnames. Details: `dev/README.md`.

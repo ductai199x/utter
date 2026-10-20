@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/demo.gif" width="880" alt="Holding Right Ctrl and saying 'hey sarah um yes I can take the release review on thursday no wait friday at ten'. The Bar at the bottom of the screen shows the words as they are heard, the correction is applied, and on release 'Hey Sarah, yes, I can take the release review on Friday at 10.' appears in the chat box.">
+  <img src="media/demo.gif" width="880" alt="Holding Right Ctrl and saying 'hey sarah um yes I can take the release review on thursday no wait friday at ten'. The Bar at the bottom of the screen shows the words as they are heard, the correction is applied, and on release 'Hey Sarah, yes, I can take the release review on Friday at 10.' appears in the chat box.">
 </p>
 
 Talk the way you talk. Say "um", change your mind halfway through a sentence, list things off.
@@ -65,16 +65,16 @@ go, and nothing you say ever leaves your machine.
   <tr>
     <td width="50%" valign="top">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/media/history-dark.png">
-        <img src="docs/media/history-light.png" alt="History: every dictation, searchable, with what Utter heard and what it changed">
+        <source media="(prefers-color-scheme: dark)" srcset="media/history-dark.png">
+        <img src="media/history-light.png" alt="History: every dictation, searchable, with what Utter heard and what it changed">
       </picture>
       <p><b>History.</b> Every dictation, searchable by what was typed or what was heard, with
       cleanup's changes marked word by word. On your computer only, kept as long as you choose.</p>
     </td>
     <td width="50%" valign="top">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/media/rules-dark.png">
-        <img src="docs/media/rules-light.png" alt="Paste rules: how each app pastes, with a one-click fix for an app where the last paste did not land">
+        <source media="(prefers-color-scheme: dark)" srcset="media/rules-dark.png">
+        <img src="media/rules-light.png" alt="Paste rules: how each app pastes, with a one-click fix for an app where the last paste did not land">
       </picture>
       <p><b>Paste rules.</b> Terminals, Office and remote desktops each paste their own way,
       and Utter knows them. When a paste does not land, Utter notices, keeps the text on the
@@ -84,8 +84,8 @@ go, and nothing you say ever leaves your machine.
   <tr>
     <td width="50%" valign="top">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/media/setup-dark.png">
-        <img src="docs/media/setup-light.png" alt="First run: choose a model, with the one that fits your graphics card recommended">
+        <source media="(prefers-color-scheme: dark)" srcset="media/setup-dark.png">
+        <img src="media/setup-light.png" alt="First run: choose a model, with the one that fits your graphics card recommended">
       </picture>
       <p><b>First run.</b> Utter checks your computer, recommends the model that fits your
       graphics card, tests your microphone, downloads what it needs, and ends with a test
@@ -93,8 +93,8 @@ go, and nothing you say ever leaves your machine.
     </td>
     <td width="50%" valign="top">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="docs/media/shortcuts-dark.png">
-        <img src="docs/media/shortcuts-light.png" alt="Shortcuts: choose the key you hold to dictate">
+        <source media="(prefers-color-scheme: dark)" srcset="media/shortcuts-dark.png">
+        <img src="media/shortcuts-light.png" alt="Shortcuts: choose the key you hold to dictate">
       </picture>
       <p><b>Your key.</b> Hold Right Ctrl, or the key of your choice, to dictate; double-tap for
       hands-free; Esc cancels. Alt+Shift+Z pastes the last dictation again.</p>
@@ -104,7 +104,7 @@ go, and nothing you say ever leaves your machine.
 
 ## Measured, not claimed
 
-<img src="docs/media/latency.svg" width="880" alt="After the key goes up: the last words are recognized in 48-71 ms, the dictation is cleaned in 131-158 ms and pasted in 47-61 ms, 231-260 ms in all.">
+<img src="media/latency.svg" width="880" alt="After the key goes up: the last words are recognized in 48-71 ms, the dictation is cleaned in 131-158 ms and pasted in 47-61 ms, 231-260 ms in all.">
 
 On the development machine (RTX 3090 Ti), in the app itself. Every figure comes from
 [docs/eval-results.md](docs/eval-results.md), where the method and the raw numbers live.
@@ -378,7 +378,8 @@ crates/
   utter-cli         benches and tools: transcribe, clean, dictate, e2e-bench, llm-bench
 app/                Tauri 2 shell (src-tauri/) and the Svelte 5 windows (src/)
 tools/              Python, never shipped: eval, training, datasets, benchmarks, media
-docs/               UX specs, eval results, research notes, local setup
+media/              the README's pictures
+docs/               UX specs, eval results, research notes (on the dev branch)
 ```
 
 </details>
