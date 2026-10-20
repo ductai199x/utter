@@ -1,7 +1,7 @@
 # The splash
 
 What shows while Utter gets ready after a person starts it: the models load, and without it
-nothing on screen says anything is happening. Status for 0.1.10: **built**
+nothing on screen says anything is happening. Status for 0.1.11: **built**
 (`app/src/splash`, `app/src-tauri/src/splash.rs`).
 
 The requirements come from the splash Tai shaped in a sibling project (a chess coaching

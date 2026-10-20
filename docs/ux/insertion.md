@@ -1,7 +1,7 @@
 # Putting text in
 
 How a finished dictation gets into the app the person is in, and what happens when it cannot.
-Status: **built** (0.1.10) on Windows, Linux and macOS; the measurements below are Windows
+Status: **built** (0.1.11) on Windows, Linux and macOS; the measurements below are Windows
 only. The mechanism is DESIGN.md section 4, step 8; the rules around it (never lost, spacing,
 confirming, paste last, paste rules) were set by Tai on 2026-10-11, after looking at how Wispr
 Flow does it.

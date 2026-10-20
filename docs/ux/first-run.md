@@ -1,7 +1,7 @@
 # First run
 
 What a person sees the first time Utter starts, from the installer to their first dictation,
-and what the same window does later for updates, repairs and start failures. Status for 0.1.10:
+and what the same window does later for updates, repairs and start failures. Status for 0.1.11:
 **built** (`app/src/setup`, `app/src-tauri/src/setup.rs`, `app/src-tauri/src/problem.rs`). It
 replaces `utter-cli setup` for everyone but developers.
 

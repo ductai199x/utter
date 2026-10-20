@@ -1,7 +1,7 @@
 # The Home window
 
 Where a person changes how Utter works and looks back at what it did: History, Dictionary and
-Settings, in one window. Status: **built** (0.1.10). History has its own spec
+Settings, in one window. Status: **built** (0.1.11). History has its own spec
 ([history.md](history.md)); this one covers the frame and the Dictionary and Settings sections.
 Paste rules, which Settings opens in a second window, are in [insertion.md](insertion.md).
 

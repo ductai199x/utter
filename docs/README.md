@@ -1,6 +1,6 @@
 # Utter's docs
 
-Which doc answers what. The docs describe Utter 0.1.10 (2026-10-20) and live on the `dev`
+Which doc answers what. The docs describe Utter 0.1.11 (2026-10-20) and live on the `dev`
 branch. [DESIGN.md](../DESIGN.md) is the source of truth for scope, architecture and
 decisions; everything here gives the detail behind it.
 

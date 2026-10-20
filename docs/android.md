@@ -5,7 +5,7 @@ focused app, with speech and cleanup running on the phone. The spec of what the 
 [ux/android.md](ux/android.md). This file holds the status, the architecture, the measurements
 and the decisions behind it.
 
-## Status (2026-10-20, Utter 0.1.10 on the desktop)
+## Status (2026-10-20, Utter 0.1.11 on the desktop)
 
 **The Android app is a work in progress. It runs on the emulator only. It has not been run on the
 phone.** It is not released and has no installer.

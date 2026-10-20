@@ -1,7 +1,7 @@
 # The Bar
 
 The small floating pill that shows Utter is listening. It is the only part of Utter most
-people see in a day, so every state, motion and pixel here is deliberate. Status for 0.1.10:
+people see in a day, so every state, motion and pixel here is deliberate. Status for 0.1.11:
 **built** (`app/src/bar`, `app/src-tauri/src/main.rs`, `crates/utter-platform/src/overlay.rs`).
 The checks at the end say what is shown by code, tests or measurements, and what is still
 unverified. Sound cues were considered and dropped (2026-10-20): the Bar has no sounds.

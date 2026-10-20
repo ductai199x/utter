@@ -8,7 +8,7 @@ This file is the source of truth for scope, architecture and decisions. A change
 architecture or scope changes this file in the same commit. The docs it links to are indexed in
 [docs/README.md](docs/README.md).
 
-**Status (0.1.10, 2026-10-20).** Released and in use:
+**Status (0.1.11, 2026-10-20).** Released and in use:
 
 | | Ships |
 |---|---|

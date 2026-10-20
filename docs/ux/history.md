@@ -1,7 +1,7 @@
 # History
 
 Every dictation, kept on this computer, findable and copyable: the first section of the Home
-window ([home.md](home.md)). Status: **built** (0.1.10).
+window ([home.md](home.md)). Status: **built** (0.1.11).
 
 Design reference (Tai, 2026-10-11): UniClipboard was studied for its UX, not copied:
 keyboard-first browsing, search that answers as you type with a live count, a list beside the

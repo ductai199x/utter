@@ -1,7 +1,7 @@
 # Developing, testing and releasing Utter
 
 How to set up a development machine, run and test Utter, test it on other operating systems, and
-ship a release. Checked against the code at version 0.1.10 (2026-10-20). Architecture and scope are
+ship a release. Checked against the code at version 0.1.11 (2026-10-20). Architecture and scope are
 in [DESIGN.md](../DESIGN.md); what each platform does and why is in [platforms.md](platforms.md);
 the eval method and numbers are in [evals.md](evals.md).
 

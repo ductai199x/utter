@@ -2,7 +2,7 @@
 
 Windows, Linux and macOS, and the GPU backends Utter runs on (CUDA, Vulkan, Metal, the
 processor): what is supported, how each OS is integrated, what was measured, and what is still
-open. True for **Utter 0.1.10** (2026-10-20). How to build, test in VMs, rent a Mac and release
+open. True for **Utter 0.1.11** (2026-10-20). How to build, test in VMs, rent a Mac and release
 is in [development.md](development.md); the architecture and its principles are in
 [DESIGN.md](../DESIGN.md).
 

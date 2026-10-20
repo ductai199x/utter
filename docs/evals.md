@@ -1,6 +1,6 @@
 # Evals
 
-How Utter is measured, the current numbers, and a dated log of every run. True for Utter 0.1.10
+How Utter is measured, the current numbers, and a dated log of every run. True for Utter 0.1.11
 (2026-10-20). Every figure carries its date and setup; a figure is only as current as its date.
 
 Unless an entry says otherwise, figures come from the development machine (RTX 3090 Ti, Ryzen 9

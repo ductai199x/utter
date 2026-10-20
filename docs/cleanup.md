@@ -3,7 +3,7 @@
 The cleanup model turns what the speech model heard into what the speaker meant to type. This
 file is the reference for it: the rules, how a dictation reaches it in the app, the models and
 how they are trained, how they are evaluated, the use cases, and what is next. True for Utter
-0.1.10 (2026-10-20). Numbers live in [evals.md](evals.md); this file states only the current
+0.1.11 (2026-10-20). Numbers live in [evals.md](evals.md); this file states only the current
 headline figures, with their dates.
 
 A change of cleanup behavior changes section 1 first, then the data, then the model.
