@@ -231,10 +231,12 @@ echo 'eval "$(/opt/homebrew/bin/brew shellenv zsh)"' >> ~/.zprofile
 eval "$(/opt/homebrew/bin/brew shellenv zsh)"
 ```
 
-**2. Install Utter:**
+**2. Install Utter.** Run these three lines; the middle one tells Homebrew you trust Utter, which
+it asks for any app that is not in its own catalog:
 
 ```bash
 brew tap ductai199x/utter https://github.com/ductai199x/utter
+brew trust --cask ductai199x/utter/utter
 brew install --cask utter
 ```
 

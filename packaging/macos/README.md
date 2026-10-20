@@ -4,6 +4,7 @@ Utter ships on macOS through Homebrew, from this repository as its own tap (no s
 
 ```bash
 brew tap ductai199x/utter https://github.com/ductai199x/utter
+brew trust --cask ductai199x/utter/utter
 brew install --cask utter
 ```
 
