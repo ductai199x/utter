@@ -38,6 +38,11 @@ copy in your backups; a fresh clone has only the generic rules.
 - Known and accepted: the attribution `Tai Duc Nguyen` (authors, publisher, licence), the GitHub
   handle in URLs, benchmark hardware model names, the `Utter_dev` data folder name.
 
+`release.py history --as main|dev [--repo PATH] [-v]` scans every blob and commit message ever
+reachable, not just the tip. History was rewritten once on 2026-10-20 (git-filter-repo, with a
+dev variant that keeps the private paths and a main variant that drops them); if a new rule is
+added later, run `history` first and rewrite again the same way.
+
 ## Releases
 
 Build installers from `main` after a publish, so what ships is what is public. A change to
