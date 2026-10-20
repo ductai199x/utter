@@ -6,7 +6,7 @@
   import { cubicOut } from 'svelte/easing';
   import { fly } from 'svelte/transition';
   import '../lib/chips.css';
-  import { commandKey } from '../lib/keys';
+  import { commandKey, isWindows } from '../lib/keys';
   import {
     KEEP_LABELS,
     WITH_CHOICES,
@@ -241,13 +241,15 @@
               <p class="none">No open app matches.</p>
             {/if}
           </div>
-          <button class="browse" onclick={() => fileEl?.click()}>
-            <svg viewBox="0 0 20 20" aria-hidden="true"
-              ><path d="M3.5 6A1.5 1.5 0 0 1 5 4.5h3.2l1.6 1.8H15A1.5 1.5 0 0 1 16.5 7.8v6.7A1.5 1.5 0 0 1 15 16H5a1.5 1.5 0 0 1-1.5-1.5z" /></svg
-            >
-            Choose a program…
-          </button>
-          <input type="file" accept=".exe" bind:this={fileEl} onchange={chooseFile} hidden />
+          {#if isWindows}
+            <button class="browse" onclick={() => fileEl?.click()}>
+              <svg viewBox="0 0 20 20" aria-hidden="true"
+                ><path d="M3.5 6A1.5 1.5 0 0 1 5 4.5h3.2l1.6 1.8H15A1.5 1.5 0 0 1 16.5 7.8v6.7A1.5 1.5 0 0 1 15 16H5a1.5 1.5 0 0 1-1.5-1.5z" /></svg
+              >
+              Choose a program…
+            </button>
+            <input type="file" accept=".exe" bind:this={fileEl} onchange={chooseFile} hidden />
+          {/if}
         </div>
       {/if}
     </div>

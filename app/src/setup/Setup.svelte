@@ -446,7 +446,7 @@
           </ul>
           {#if checks?.noGpu}
             <p class="panel">
-              Utter needs a graphics card: NVIDIA, AMD or Intel.
+              Utter could not read this computer's graphics card or memory. It runs on an NVIDIA, AMD or Intel graphics card, or on the processor with 8 GB of memory or more.
             </p>
           {/if}
           {#if mode === 'first'}<Privacy compact />{/if}

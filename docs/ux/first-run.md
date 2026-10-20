@@ -69,7 +69,7 @@ driver to version 580 or newer, then check again.", "Free up 6.0 GB on the drive
 folder>."), and Continue is replaced by **Check again**. Only keyboard access missing: the
 button is **Allow** (a password dialog on Linux, System Settings on macOS); Utter checks again
 and, on macOS, restarts into this step once the permission applies. No usable adapter at all:
-"None found", the panel "Utter needs a graphics card: NVIDIA, AMD or Intel." and **Quit**.
+"None found", the panel "Utter could not read this computer's graphics card or memory. It runs on an NVIDIA, AMD or Intel graphics card, or on the processor with 8 GB of memory or more." and **Quit**.
 
 ### 2. Choose your model
 

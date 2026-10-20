@@ -105,9 +105,9 @@ shortcut is shown beside each):
 | **Paste last dictation** | Alt+Shift+Z | Ctrl+Cmd+V | pastes the last dictation into the window that has the focus now, by its paste rule |
 | **Copy last dictation** | Alt+Shift+X | Ctrl+Cmd+C | puts the last dictation on the clipboard, without pasting |
 
-- "The last dictation" is the newest one with text, inserted or not. It is held in memory and,
-  after a restart, taken from History (the newest entry with text). With History off it lives
-  only until Utter quits.
+- "The last dictation" is the newest History entry with text, inserted or not, so deleting it
+  (or clearing History) removes it from paste last too. With History off it is held in memory
+  and lives only until Utter quits.
 - The shortcut waits (up to 1 s) for its own modifier keys to be let go before sending paste
   keys, so the app does not see Ctrl+Alt+Shift+V.
 - Paste last into an administrator window, or with no window in front, falls back as above
@@ -220,9 +220,8 @@ Ctrl+V, and the clipboard back after 0.5 s."
   open right now, asked for each time it opens), then **Dictated into** (most used first), each
   with its program name and dictation count; apps that already have a rule say "Has a rule" and
   cannot be picked, so a new rule is never made over a default. Enter picks the first free
-  match. **Choose a program...** at the bottom picks a program file: only its file name is
-  kept. The new row flashes once in the table. The picker's file filter is `.exe`, which fits
-  Windows only; on Linux and macOS only the lists above it are useful.
+  match. **Choose a program...** at the bottom (Windows only) picks a program file: only its file name is
+  kept. The new row flashes once in the table. On Linux and macOS only the lists above it are shown.
 - Both the Settings section and the window edit settings.toml and follow each other live.
 - Esc closes the picker, then a filter menu, then clears the search.
 

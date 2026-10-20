@@ -33,7 +33,7 @@ second launch brings Home back.
 |---|---|---|
 | Windows | 10 or 11, 64-bit | NSIS installer, per user, no administrator |
 | Linux | glibc 2.39: Ubuntu 24.04+, Debian 13, Mint 22, Fedora 40+ | packages built on Ubuntu 24.04 (`packaging/linux/build.sh`) |
-| macOS | 14 (Sonoma) or newer, arm64 | the cask (`depends_on macos: ">= :sonoma"`, `arch: :arm64`); the bundle itself says 13.0 (`tauri.macos.conf.json`) |
+| macOS | 26 (tested on 26 and 27), arm64; older versions may work | the cask installs on 14 (Sonoma) or newer (`depends_on macos: ">= :sonoma"`, `arch: :arm64`), and the bundle says 14.0 (`tauri.macos.conf.json`); nothing older than 26 was run |
 | NVIDIA driver | 580 or newer (CUDA 13.0: `MIN_DRIVER_CUDA = 13_000`) | first run's check |
 | Vulkan driver | any that offers a non-software device | `utter_platform::gpu::vulkan_available`; no version check |
 | Disk | about 10 GB | README |
@@ -413,8 +413,7 @@ clips), and AT-SPI in Firefox, Chromium, Electron and Qt apps beyond Konsole.
 - Speech on CoreML against WebGPU.
 - The Bar as a non-activating `NSPanel` (it is a plain window; behaviour over full-screen apps
   and on several displays not checked).
-- The bundle's `minimumSystemVersion` (13.0) and the cask's floor (14) disagree; only 26 and 27
-  were run.
+- Only macOS 26 and 27 were run; the installers allow 14 or newer, and older versions may work.
 
 ## 7. Decisions log
 

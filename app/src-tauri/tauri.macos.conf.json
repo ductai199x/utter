@@ -4,7 +4,7 @@
     "targets": ["app"],
     "category": "Utility",
     "macOS": {
-      "minimumSystemVersion": "13.0",
+      "minimumSystemVersion": "14.0",
       "signingIdentity": "-"
     }
   }

@@ -203,7 +203,7 @@ behind it.
 **What you need:** about 10 GB of free disk, an internet connection for the first setup (Utter
 downloads its models once, then works offline), a microphone, and one of:
 
-- a Mac with Apple Silicon (M1 or newer) on macOS 14 or newer;
+- a Mac with Apple Silicon (M1 or newer) on macOS 26 (older versions may work);
 - an NVIDIA graphics card with 4 GB of memory (6 GB for Quality) and driver 580 or newer;
 - an AMD or Intel graphics card through Vulkan, as a preview: 6 GB of memory (8 GB for Quality);
 - no graphics card: Utter runs on the processor, with its Light and Extra light models (8 GB of

@@ -1118,7 +1118,13 @@ impl Engine {
 
     /// Pastes the last dictation's text (`paste`), or copies it.
     fn paste_last(&mut self, paste: bool, on_event: &mut impl FnMut(Event)) {
-        let text = self.last_text.clone().or_else(|| History::global().last_text());
+        // History is the truth when it is kept: deleting or clearing the newest entry must not leave it
+        // pasteable. With History off, the text of the dictation just made is all there is.
+        let text = if self.cfg.keep_history == KeepHistory::Off {
+            self.last_text.clone()
+        } else {
+            History::global().last_text()
+        };
         let Some(text) = text else {
             on_event(Event::Notice { text: "Nothing to paste yet".into(), ok: false });
             return;

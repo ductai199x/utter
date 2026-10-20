@@ -45,18 +45,6 @@ the rules are in the weights.
    what grammar needs.
 4. **Translate.** English only today.
 
-### Where the repo disagrees with these rules
-
-Two files predate the grammar decision (rule 10) and still say grammar is kept. Neither reaches
-a person's dictation, but both mislead a reader:
-
-- [prompts/cleanup.md](../crates/utter-llm/prompts/cleanup.md), the long rules prompt, is sent
-  only to the prompted 26B (the Reference tier, eval tools only). It says "me and him" and
-  "ain't" stay, and it writes every list numbered.
-- [cleanup_cases.jsonl](../crates/utter-pipeline/tests/fixtures/cleanup_cases.jsonl), 112
-  hand-written cases, expects "Me and him went" and "Ain't nobody" unchanged. Today it serves
-  only the gate's test (section 2), which compares words, not grammar. It is not an eval.
-
 ## 2. How a dictation becomes text
 
 All of this is in [session.rs](../crates/utter-pipeline/src/session.rs),

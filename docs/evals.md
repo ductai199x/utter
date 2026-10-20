@@ -64,7 +64,7 @@ after `utter-data check`); see [cleanup.md](cleanup.md).
 GigaSpeech, LibriSpeech test-other, VoiceArena Monsoon (Indian English), URGENT24 (noise and
 reverberation), VoxPopuli. Vietnamese: Bud500, FLEURS, GigaSpeech2, ViMD (63 dialects).
 
-**Curated cleanup cases** (`crates/utter-pipeline/tests/fixtures/cleanup_cases.jsonl`, 112):
+**Curated cleanup cases** (`crates/utter-pipeline/tests/fixtures/cleanup_cases.jsonl`, 112; the grammar cases were brought in line with rule 10 on 2026-10-20):
 fillers, corrections, lists, spoken formatting, numbers, clean text, dictated questions, code.
 They were the first cleanup bench (2026-10-09); today only a unit test reads them (`cargo test
 -p utter-pipeline`: the gate never skips a case whose cleanup changes words). `tools/tests`

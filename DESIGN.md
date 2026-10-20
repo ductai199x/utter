@@ -12,7 +12,7 @@ architecture or scope changes this file in the same commit. The docs it links to
 
 | | Ships |
 |---|---|
-| Operating systems | Windows 10 and 11 (64-bit); Linux on GNOME and KDE, Wayland and X11 (Ubuntu 24.04+, Debian 13, Mint 22 from the `.deb`; Fedora 40+ and others from the AppImage); macOS 14+ on Apple Silicon |
+| Operating systems | Windows 10 and 11 (64-bit); Linux on GNOME and KDE, Wayland and X11 (Ubuntu 24.04+, Debian 13, Mint 22 from the `.deb`; Fedora 40+ and others from the AppImage); macOS 26 on Apple Silicon (older versions may work) |
 | Backends | NVIDIA through CUDA; AMD and Intel through Vulkan (preview, not yet measured on a real AMD or Intel card); Apple's GPU through Metal; the processor alone |
 | Models | Quality (Gemma 4 E4B fine-tuned, the default with a GPU), Light (Gemma 4 E2B fine-tuned), Extra light (Gemma 3 1B fine-tuned, for the processor); speech is parakeet-ultra on every tier |
 | Language | English |
@@ -87,8 +87,8 @@ is a separate Kotlin app around the same Rust core.
 
 Planned in the 2026-10-09 draft and not started: snippets, whisper mode (noise suppression,
 gain, a lower voice threshold), the notetaker (system audio, speakers, summaries, an MCP
-server), IDE file tagging, dictionary learning from the person's corrections, Stats, sound
-cues, moving and docking the Bar, pausing media while dictating, audio playback in History,
+server), IDE file tagging, dictionary learning from the person's corrections, Stats,
+moving and docking the Bar, pausing media while dictating, audio playback in History,
 more than one key per action and mouse buttons as keys. They stay possible; none is scheduled.
 
 ### 2.4 Out of scope
@@ -244,7 +244,7 @@ Ti with a Ryzen 9 9900X on Windows 11.
 
 | Step | Budget | Measured | Date, setup |
 |---|---|---|---|
-| Key down → Bar visible | one frame | not measured as its own span | |
+| Key down → Bar visible | 120 ms grace, then one frame (a chord must not flash the Bar) | not measured as its own span | |
 | Key up → last segment transcribed | 60 / 120 ms | 48-71 ms | 2026-10-12, in the app, Quality, CUDA, 3 dictations of a 5.7 s recording |
 | Key up → cleanup done | | 131-158 ms | same run |
 | Paste (clipboard, keys, restore scheduled) | | 47-61 ms | same run |
@@ -261,8 +261,7 @@ Ti with a Ryzen 9 9900X on Windows 11.
 
 Where a budget is missed, the decision about what to change is written in section 14 with the
 measurement:
-- Quality on macOS misses the 400 ms budget on an M2 (0.8-1.2 s); Light meets it. Not yet
-  decided.
+- Quality on macOS runs 0.8-1.2 s on an M2, over the 400 ms budget; accepted (2026-10-20): Light meets it, and Quality is the quality tier.
 - The processor has no budget: Quality is not offered there (its cleanup takes seconds), and
   Extra light exists for it (2026-10-18).
 - The old rows "gate skips the LLM" (120 / 250 ms) and "Command Mode rewrite" (700 ms / 1.5 s)
@@ -406,7 +405,7 @@ Each item is an acceptance check in the surface's spec.
 - Light and dark themes follow the OS. Text respects the OS scale. The Bar stays sharp at every
   DPI.
 - Keyboard first in the Home window.
-- No sounds yet (planned as optional start, stop and error cues).
+- No sounds: dropped (2026-10-20); the Bar and its text say enough.
 
 ### 8.3 Design process
 
@@ -585,3 +584,7 @@ sections or to the doc with the detail.
 | 2026-10-19 | This repository is Utter's Homebrew tap: `Casks/utter.rb` at the root, written by `packaging/macos/cask.sh`, so `brew tap ductai199x/utter https://github.com/ductai199x/utter` then `brew install --cask utter` work with no second repository. | 13, [docs/development.md](docs/development.md) |
 | 2026-10-20 | In-app updates: while "Check for updates" is on (the default), Utter asks GitHub for the latest release's `latest.json` once a day and only offers a newer version, in Settings and the tray; nothing downloads or installs until the person clicks Update; the download is checked against the updater key in the app. Windows runs the new installer, an AppImage replaces itself, a `.deb` installs through one pkexec prompt, macOS replaces Utter.app signed with the same certificate. Shipped in 0.1.10. | 2.1, 10, [docs/development.md](docs/development.md) |
 | 2026-10-20 | Work happens on `dev`; `main` is the public tree, published from `dev` by `dev/release.py` after a privacy scan. Docs and this file live on `dev`. | 13, [dev/README.md](dev/README.md) |
+| 2026-10-20 | Sound cues are dropped from the Bar spec. | 8.2, [docs/ux/bar.md](docs/ux/bar.md) |
+| 2026-10-20 | macOS is stated as 26 (tested on 26 and 27) with older versions possibly working; the cask and bundle allow 14 or newer. Quality at 0.8-1.2 s on an M2 is accepted. | 2, [docs/platforms.md](docs/platforms.md) |
+| 2026-10-20 | The Bar appears 120 ms after key down, not at once, so a chord (Right Ctrl + C) or a stray tap never flashes it; recording starts at key down. Paste last follows History (deleting an entry removes it). | 4.1, 8.1, [docs/ux/bar.md](docs/ux/bar.md) |
+| 2026-10-20 | The Reference tier's long prompt (`prompts/cleanup.md`) and the curated fixture follow the cleanup rules as decided: grammar fixed, bullets for lists and numbers for steps. (Eval runs of the prompted 26B before this date used the old prompt.) | 6.2, [docs/cleanup.md](docs/cleanup.md) |

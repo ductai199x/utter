@@ -1,5 +1,4 @@
-//! macOS: the platform layer through the system's own frameworks (docs/platforms.md,
-//! phase 2). Compile-checked in CI; not yet run on a Mac.
+//! macOS: the platform layer through the system's own frameworks (docs/platforms.md).
 //!
 //! - Keys: one listen-only event tap (CoreGraphics) for every subscriber, the hotkey and the
 //!   paste-last shortcuts, as linux_input does with evdev. It takes the Input Monitoring

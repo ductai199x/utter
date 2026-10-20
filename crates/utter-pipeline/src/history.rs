@@ -412,6 +412,18 @@ mod tests {
     }
 
     #[test]
+    fn last_text_follows_deletes_and_clear() {
+        let h = temp("last-text");
+        h.add(entry("first", "slack.exe", true)).unwrap();
+        let second = h.add(entry("second", "slack.exe", true)).unwrap();
+        assert_eq!(h.last_text().as_deref(), Some("second"));
+        h.delete(second.id).unwrap();
+        assert_eq!(h.last_text().as_deref(), Some("first"));
+        h.clear().unwrap();
+        assert_eq!(h.last_text(), None);
+    }
+
+    #[test]
     fn search_ignores_case_and_accents_and_reads_what_was_heard() {
         let h = temp("search");
         h.add(entry("Meet at the Café", "slack.exe", true)).unwrap();

@@ -2,9 +2,9 @@
 
 The small floating pill that shows Utter is listening. It is the only part of Utter most
 people see in a day, so every state, motion and pixel here is deliberate. Status for 0.1.10:
-**built** (`app/src/bar`, `app/src-tauri/src/main.rs`, `crates/utter-platform/src/overlay.rs`),
-except the sound cues, which are not built. The checks at the end say what is shown by code,
-tests or measurements, and what is still unverified.
+**built** (`app/src/bar`, `app/src-tauri/src/main.rs`, `crates/utter-platform/src/overlay.rs`).
+The checks at the end say what is shown by code, tests or measurements, and what is still
+unverified. Sound cues were considered and dropped (2026-10-20): the Bar has no sounds.
 
 ## What it is for
 
@@ -54,9 +54,7 @@ paste yet" from the tray or the shortcuts (docs/ux/insertion.md), "Microphone co
 "Microphone disconnected", "No microphone: connect one, or choose one in Settings". A check
 means it did what was asked; an amber dot and amber text mean it did not.
 
-A tap that is cancelled quickly (a chord such as Right Ctrl + C, or a stray tap) must not
-flash a Bar: the cancel can arrive before the pill is visible, and it should simply never
-show. See "Known gap" below.
+A tap that is cancelled quickly (a chord such as Right Ctrl + C, or a stray tap) must not flash a Bar. The window is shown 120 ms after key down (`BAR_GRACE` in `app/src-tauri/src/main.rs`); a cancel before that means it never appears. Recording starts at key down regardless, and a double-tap's hands-free Bar shows at once.
 
 ## Geometry (logical pixels; scaled by the monitor's DPI)
 
@@ -124,10 +122,7 @@ white and black alike.
 
 ## Sound
 
-**Not built.** The spec: two short, quiet cues, on by default, with a setting to turn them
-off: a soft rising tick (25 ms) when listening starts, a soft falling tick when the text is
-pasted. No sound on cancel or error (the error text says enough). Played from memory, never
-decoded on the hot path. There is no sound code and no setting for it in 0.1.10.
+Utter makes no sound: no cue at start, stop, cancel or error, and no setting for one. The error text says enough, and the Bar already shows every state. (Dropped 2026-10-20.)
 
 ## Focus and input rules (non-negotiable)
 
@@ -148,7 +143,7 @@ decoded on the hot path. There is no sound code and no setting for it in 0.1.10.
 
 | From | To | Budget | Measured |
 |---|---|---|---|
-| key down | Bar's first visible frame | under 16 ms p50, 33 ms p99 | not measured |
+| key down | Bar's first visible frame | 120 ms grace (`BAR_GRACE`) plus under 16 ms, so a chord never shows it | not measured |
 | a level change | the waveform drawing it | one frame | by design (level every 16 ms, drawn each frame); not measured |
 | a segment transcribed | its words visible | one frame | not measured |
 | paste sent | Done check visible | one frame | not measured |
@@ -156,16 +151,6 @@ decoded on the hot path. There is no sound code and no setting for it in 0.1.10.
 The measured pipeline times for a dictation (key up to text in the app, 231-260 ms with the
 CPU-thread setting in use; 2026-10-12, Quality, RTX 3090 Ti) are in docs/evals.md. They do not
 include the Bar.
-
-## Known gap
-
-The core shows the Bar at once on key down (`Event::Listening`), and a chord or a short tap
-cancels it afterwards (`Event::Cancelled`, then the 160 ms exit). The pill has an enter
-transition of 120 ms, so a quick chord can show a partly visible pill that then fades. The
-spec above (never shown for a cancel inside the entrance) is not met: the fix is to delay the
-page's entrance, or the window's show, by the 150 ms hold that decides between a tap and a
-dictation (`min_hold` in `crates/utter-platform/src/hotkey.rs`), without delaying the first
-frame of a real dictation.
 
 ## Acceptance checks
 
@@ -175,15 +160,14 @@ source; "unverified" means no test or measurement in the repo shows it.
 
 | # | Check | Status |
 |---|---|---|
-| 1 | Pressing Right Ctrl shows the Bar within one frame; it never steals the focus (the caret in the target app keeps blinking; typing after the dictation goes to the target) | Focus: code (no-activate styles, `focusable: false`); within one frame: unverified |
+| 1 | Pressing Right Ctrl shows the Bar 120 ms later (one frame after the grace); it never steals the focus (the caret in the target app keeps blinking; typing after the dictation goes to the target) | Focus: code (no-activate styles, `focusable: false`); the timing: unverified |
 | 2 | Clicking where the Bar is clicks the app under it | Code (`set_ignore_cursor_events`); unverified on screen |
 | 3 | The waveform moves with the voice and rests still at 3 px in silence; no stutter during transcription work | Code; the CPU-thread work in docs/evals.md (2026-10-12) removed microphone gaps; the waveform itself unverified |
 | 4 | Live words appear while speaking; words already shown never jump | Code (committed and preview text, laid out at the target width); unverified on screen |
-| 5 | Right Ctrl + C copies and the Bar never appears | Copy: met (the chord cancels, test in `hotkey.rs`). "Never appears": **not met**, see Known gap |
+| 5 | Right Ctrl + C copies and the Bar never appears | Copy: met (the chord cancels, test in `hotkey.rs`). "Never appears": code (`BAR_GRACE` delays the show past a quick cancel); unverified on screen |
 | 6 | Esc cancels with no check, no sound | Met in code and in `hotkey.rs` tests (Esc is a cancel; no sound exists) |
 | 7 | A long dictation wraps into up to 5 lines, the newest at the bottom; older lines scroll off the top under a fade | Code (`MAX_LINES`, mask); unverified on screen |
 | 8 | Done shows the check briefly and hides; nothing lingers | Code (400 ms hold, 160 ms exit, then the window hides); unverified on screen |
 | 9 | An error line shows when the text could not be pasted (target closed or changed) | Code (lines in the table above); the original wording "Focus moved: text kept in History" is replaced by "Copied: press Ctrl+V to paste" |
 | 10 | Text is crisp at every scale; the pill's edge is anti-aliased, no seams or halos on white | Unverified |
 | 11 | The text under the Done check is exactly the text that was pasted | Met in code (`Event::Final` and the insert use the same `text`) |
-| 12 | Sound cues play and can be turned off | **Not built** |
