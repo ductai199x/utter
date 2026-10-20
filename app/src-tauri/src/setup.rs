@@ -415,7 +415,9 @@ fn gb(bytes: u64) -> String {
 
 /// What the keyboard check and problem ask for (problem.rs too).
 pub const KEYBOARD_FIX: &str = if cfg!(target_os = "macos") {
-    "Utter needs Accessibility, to hear the dictation key and paste for you. Allow asks macOS: open System Settings and turn Utter on."
+    // macOS 27 renamed Accessibility in Privacy & Security to "Device Control and Data Access";
+    // the words name neither, so they hold on both: macOS's own prompt names its pane.
+    "Utter needs permission to hear the dictation key and paste for you. Allow asks macOS: open System Settings and turn Utter on."
 } else {
     "Utter needs this to hear the dictation key and paste for you. Allow asks for your password once."
 };
