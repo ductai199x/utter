@@ -24,7 +24,7 @@
     terms.map((t, i) => ({ t, i })).filter(({ t }) => !filter || t.toLowerCase().includes(filter)),
   );
 
-  /** Focuses the add field (Ctrl+F on this section). */
+  /** Focuses the add field (Cmd+F or Ctrl+F on this section). */
   export function focusAdd() {
     addInput?.focus();
   }

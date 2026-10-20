@@ -6,6 +6,7 @@
   import { cubicOut } from 'svelte/easing';
   import { fly } from 'svelte/transition';
   import '../lib/chips.css';
+  import { commandKey } from '../lib/keys';
   import {
     KEEP_LABELS,
     WITH_LABELS,
@@ -153,7 +154,7 @@
       if (picker) picker = false;
       else if (menu) menu = null;
       else if (search) search = '';
-    } else if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+    } else if (commandKey(e) && e.key.toLowerCase() === 'f') {
       e.preventDefault();
       searchEl?.focus();
       searchEl?.select();

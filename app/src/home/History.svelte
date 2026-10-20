@@ -5,6 +5,7 @@
   import { cubicOut } from 'svelte/easing';
   import { fade, fly } from 'svelte/transition';
   import AnimatedMark from '../lib/AnimatedMark.svelte';
+  import { commandKey } from '../lib/keys';
   import '../lib/chips.css';
   import {
     historyChanges,
@@ -278,13 +279,13 @@
       }
       return;
     }
-    if ((e.ctrlKey && e.key.toLowerCase() === 'f') || (e.key === '/' && !typing(e))) {
+    if ((commandKey(e) && e.key.toLowerCase() === 'f') || (e.key === '/' && !typing(e))) {
       e.preventDefault();
       searchEl?.focus();
       searchEl?.select();
       return;
     }
-    if (e.ctrlKey && e.key.toLowerCase() === 'z' && undo && !typing(e)) {
+    if (commandKey(e) && e.key.toLowerCase() === 'z' && undo && !typing(e)) {
       e.preventDefault();
       void restore();
       return;
@@ -613,16 +614,17 @@
           <button class="action" onclick={() => void remove()}>Delete <kbd>D</kbd></button>
         </span>
       </footer>
+    {:else if undo}
+      <!-- Before the welcome: deleting the last dictation showed the welcome, and no Undo. -->
+      <footer class="actions">
+        <span></span>
+        <span class="undo">Deleted. <button class="link" onclick={() => void restore()}>Undo</button></span>
+      </footer>
     {:else if page && page.total === 0 && !historyOff}
       <div class="welcome" in:fade={{ duration: 200 }}>
         <div class="welcome-mark"><AnimatedMark size={132} color="var(--home-accent)" /></div>
         <p>Hold <kbd>{keyName}</kbd> and speak in any app.<br />Your dictations show up here.</p>
       </div>
-    {:else if undo}
-      <footer class="actions">
-        <span></span>
-        <span class="undo">Deleted. <button class="link" onclick={() => void restore()}>Undo</button></span>
-      </footer>
     {/if}
   </section>
 </div>
