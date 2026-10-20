@@ -228,6 +228,66 @@ def cmd_publish(cfg: dict, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_history(cfg: dict, args: argparse.Namespace) -> int:
+    """Scan every blob and commit message ever reachable in a repository (default: this one).
+
+    --as main: what a public history must not contain (private paths count as hits themselves);
+    --as dev: what no public branch may contain."""
+    repo = Path(args.repo or ROOT)
+
+    def run(*a: str, input: bytes | None = None) -> bytes:
+        r = subprocess.run(["git", "-C", str(repo), *a], input=input, capture_output=True)
+        if r.returncode:
+            sys.exit(f"git {' '.join(a)}: {r.stderr.decode(errors='replace').strip()}")
+        return r.stdout
+
+    seen: dict[str, str] = {}
+    for line in run("rev-list", "--objects", "--all").decode(errors="replace").splitlines():
+        sha, _, path = line.partition(" ")
+        if path:
+            seen.setdefault(sha, path)
+    types = run("cat-file", "--batch-check", input="".join(s + "\n" for s in seen).encode()).decode().splitlines()
+    blob_shas = [t.split()[0] for t in types if t.split()[1] == "blob"]
+    r = subprocess.run(["git", "-C", str(repo), "cat-file", "--batch"], input="".join(s + "\n" for s in blob_shas).encode(), capture_output=True)
+    data, pos, total, by_rule = r.stdout, 0, 0, {}
+    for sha in blob_shas:
+        end = data.index(b"\n", pos)
+        size = int(data[pos:end].split()[2])
+        body = data[end + 1 : end + 1 + size]
+        pos = end + 1 + size + 1
+        path = seen[sha]
+        if args.mode == "main" and private(path, cfg):
+            total += 1
+            by_rule["private-path"] = by_rule.get("private-path", 0) + 1
+            if args.verbose:
+                print(f"{path} (blob {sha[:9]}): [private-path]")
+            continue
+        text = text_of(body)
+        if text is None or skipped(path, cfg):
+            continue
+        for n, rule, line in hits(path, text, cfg):
+            total += 1
+            by_rule[rule] = by_rule.get(rule, 0) + 1
+            if args.verbose:
+                print(f"{path}:{n} (blob {sha[:9]}): [{rule}] {line}")
+    msgs = run("log", "--all", "--format=%H%x00%B%x01").decode(errors="replace").split("\x01")
+    for item in filter(str.strip, msgs):
+        sha, _, msg = item.strip().partition("\0")
+        for rule in cfg["rule"]:
+            if rule["scope"] == "main" and args.mode == "dev":
+                continue
+            m = rule["_re"].search(msg)
+            if m and not any(a.search(msg) for a in rule["_allow"]):
+                total += 1
+                by_rule[f"message:{rule['name']}"] = by_rule.get(f"message:{rule['name']}", 0) + 1
+                if args.verbose:
+                    print(f"commit {sha[:9]}: [{rule['name']}] {m.group(0)!r}")
+    for k, n in sorted(by_rule.items()):
+        print(f"{n:5d}  {k}", file=sys.stderr)
+    print("clean" if not total else f"{total} hits across {len(blob_shas)} blobs", file=sys.stderr)
+    return 1 if total else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -237,9 +297,16 @@ def main() -> int:
     pub.add_argument("--dry-run", action="store_true")
     pub.add_argument("--push", action="store_true")
     pub.add_argument("-m", "--message")
+    hist = sub.add_parser("history")
+    hist.add_argument("--repo")
+    hist.add_argument("--as", dest="mode", choices=["dev", "main"], default="main")
+    hist.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
     cfg = load()
-    return {"selftest": cmd_selftest, "scan": cmd_scan, "fix": cmd_fix}.get(args.cmd, lambda c: cmd_publish(c, args))(cfg)
+    simple = {"selftest": cmd_selftest, "scan": cmd_scan, "fix": cmd_fix}
+    if args.cmd in simple:
+        return simple[args.cmd](cfg)
+    return (cmd_history if args.cmd == "history" else cmd_publish)(cfg, args)
 
 
 if __name__ == "__main__":

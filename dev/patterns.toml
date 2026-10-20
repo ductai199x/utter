@@ -35,9 +35,9 @@ name = "private-network"
 scope = "all"
 why = "an address on a private network or a VPN: a name for the role instead (the Mac, the test server)"
 regex = '''(?<![\w.=<>~-])(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b|(?<![\w.=<>~-])100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b|\.ts\.net\b'''
-allow = ['"version"\s*:']
+allow = ['"version"\s*:', 'curand\s+\d']
 bad = ['http://192.168.12.1:8765', 'ssh 10.0.0.2', '100.101.2.3', 'box.tailnet.ts.net']
-ok = ['127.0.0.1', 'nvidia-curand==10.3.7.77', 'Windows 10.0.26100', 'version 1.100.2.3', '8.8.8.8']
+ok = ['127.0.0.1', 'nvidia-curand==10.3.7.77', 'Windows 10.0.26100', 'version 1.100.2.3', '8.8.8.8', 'curand 10.4.4.72 from PyPI', '"version": "10.4.4.72"']
 
 [[rule]]
 name = "email"
