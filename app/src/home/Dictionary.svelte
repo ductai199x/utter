@@ -134,7 +134,7 @@
       file.name.toLowerCase().endsWith('.csv') ? (l.split(',')[0] ?? '').replace(/^"|"$/g, '') : l,
     );
     const { added, existing } = addTerms(lines);
-    say(`Added ${added} ${added === 1 ? 'word' : 'words'}${existing.length ? ` (${existing.length} were already here)` : ''}`);
+    say(`Added ${added} ${added === 1 ? 'word' : 'words'}${existing.length ? ` (${existing.length} already here)` : ''}`);
     (e.currentTarget as HTMLInputElement).value = '';
   }
 
