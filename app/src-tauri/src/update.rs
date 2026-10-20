@@ -5,9 +5,10 @@
 //! person clicks Update. The download is checked against the updater key built into the app
 //! (tauri.conf.json, plugins.updater.pubkey) before it runs.
 //!
-//! Windows (the installer) and Linux's AppImage update in place; macOS replaces Utter.app, signed
-//! with the same certificate, so its permissions stay. A .deb belongs to the system's package
-//! manager: Utter says the version is out and links to the release instead.
+//! Each install takes its own kind of file (packaging/latest-json.sh names them per installer):
+//! Windows runs the new installer, an AppImage writes the new one over itself, a .deb installs
+//! the new .deb through the system's password prompt (pkexec), and macOS replaces Utter.app,
+//! signed with the same certificate, so its permissions stay.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -22,8 +23,6 @@ const FIRST_CHECK: Duration = Duration::from_secs(60);
 const EVERY: Duration = Duration::from_secs(24 * 3600);
 /// How often the background thread looks whether a check is due (and at the setting).
 const LOOK: Duration = Duration::from_secs(600);
-/// Where a person who cannot update in place (a .deb) gets the new version.
-pub const RELEASES: &str = "https://github.com/ductai199x/utter/releases/latest";
 
 /// Where an update stands, for Settings and the tray.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -36,12 +35,12 @@ pub enum Status {
     Current {
         version: String,
     },
-    /// `version` is out; `manual`: it cannot be installed in place (a .deb), only downloaded.
+    /// `version` is out; `password`: installing it asks for the system password (a .deb).
     #[serde(rename_all = "camelCase")]
     Available {
         version: String,
         notes: Option<String>,
-        manual: bool,
+        password: bool,
     },
     /// Bytes downloaded, of `total` when the server says.
     Downloading {
@@ -62,9 +61,10 @@ pub struct Updates {
     checked: Mutex<Option<Instant>>,
 }
 
-/// Whether this copy can replace itself: not a .deb, whose files the package manager owns.
-fn in_place() -> bool {
-    !cfg!(target_os = "linux") || std::env::var_os("APPIMAGE").is_some_and(|p| !p.is_empty())
+/// Whether this copy was installed from the .deb (Linux, not the AppImage): its update asks
+/// for the system password.
+fn from_deb() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("APPIMAGE").is_none_or(|p| p.is_empty())
 }
 
 fn set(app: &AppHandle, status: Status) {
@@ -124,7 +124,7 @@ pub async fn check(app: &AppHandle, by_hand: bool) {
         Ok(Some(update)) => {
             tracing::info!(version = %update.version, "a new version of Utter is out");
             let next =
-                Status::Available { version: update.version.clone(), notes: update.body.clone(), manual: !in_place() };
+                Status::Available { version: update.version.clone(), notes: update.body.clone(), password: from_deb() };
             *app.state::<Updates>().pending.lock().expect("update lock") = Some(update);
             set(app, next);
         }
@@ -151,9 +151,6 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     let Some(update) = app.state::<Updates>().pending.lock().expect("update lock").clone() else {
         return Err("no update to install".into());
     };
-    if !in_place() {
-        return utter_platform::shell::open(std::path::Path::new(RELEASES)).map_err(|e| e.to_string());
-    }
     set(app, Status::Downloading { done: 0, total: None });
     let mut done = 0u64;
     let mut shown = Instant::now() - Duration::from_secs(1);

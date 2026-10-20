@@ -82,9 +82,9 @@
       case 'current':
         return `You have the latest version (${update.version}).`;
       case 'available':
-        return update.manual
-          ? `Utter ${update.version} is out. Download it from GitHub and install it like this one.`
-          : `Utter ${update.version} is ready to install. Your models and settings stay.`;
+        return `Utter ${update.version} is ready to install. Your models and settings stay.${
+          update.password ? ' Your password is asked once.' : ''
+        }`;
       case 'downloading':
         return update.total
           ? `Downloading... ${Math.floor((update.done / update.total) * 100)}%`
@@ -548,7 +548,7 @@
         </div>
         <span class="row-actions">
           {#if update.phase === 'available'}
-            <button class="primary" onclick={() => void updateInstall()}>{update.manual ? 'Download' : 'Update'}</button>
+            <button class="primary" onclick={() => void updateInstall()}>Update</button>
           {:else if update.phase !== 'downloading' && update.phase !== 'installing'}
             <button class="link" disabled={update.phase === 'checking'} onclick={() => void updateCheck()}>Check now</button>
           {/if}
