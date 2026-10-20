@@ -16,7 +16,7 @@
 # Windows and macOS have one each and get both names.
 set -euo pipefail
 version=${1:?usage: latest-json.sh VERSION DIR [URL_BASE]}
-dir=${2:?dir}
+dir=$(cd "${2:?dir}" && pwd)
 base=${3:-https://github.com/ductai199x/utter/releases/download/v$version}
 key=${UTTER_UPDATER_KEY:-$HOME/.utter-signing/updater.key}
 pass=$(cat "${UTTER_UPDATER_KEY_PASS:-$HOME/.utter-signing/updater.pass}")
@@ -31,7 +31,7 @@ add() { # FILE PLATFORM...
     local sig
     sig=$(cat "$dir/$file.sig")
     for platform in "$@"; do
-        entries+="$([ -n "$entries" ] && echo ,)\"$platform\":{\"signature\":\"$sig\",\"url\":\"$base/$file\"}"
+        entries+="${entries:+,}\"$platform\":{\"signature\":\"$sig\",\"url\":\"$base/$file\"}"
     done
 }
 add "Utter_${version}_x64-setup.exe" windows-x86_64-nsis windows-x86_64
