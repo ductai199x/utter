@@ -1,4 +1,4 @@
-// Utter's mark (breath-lines, the maintainer's pick 2026-10-11): a voice, a ribbon with one soft rise,
+// Utter's mark (breath-lines, chosen 2026-10-11): a voice, a ribbon with one soft rise,
 // that lays itself down into three lines of text. Drawn on a 64-unit grid with round caps, so
 // it is crisp at 16 px and every stroke can animate.
 

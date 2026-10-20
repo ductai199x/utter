@@ -1,10 +1,10 @@
 # Every push and pull request: the whole workspace, the app included, on the three desktops
-# Utter runs on (docs/plan-cross-platform.md). macOS is checked here first: no Mac runs it yet.
+# Utter runs on. macOS is checked here first: no Mac runs it yet.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 concurrency:

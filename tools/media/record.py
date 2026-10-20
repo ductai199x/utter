@@ -5,7 +5,7 @@ With the app's pages served (`npm run dev` in app/, port 1430), from the reposit
     uv run --with playwright --with pillow python tools/media/record.py
 
 It drives the installed Microsoft Edge (Playwright's msedge channel: no browser download) and
-writes docs/media/:
+writes media/:
 - demo.gif: promo.html, one dictation through the real Bar, recorded at its real timings;
 - history-*.png, shortcuts-*.png, rules-*.png, setup-*.png: the windows on the pages' stand-in
   data (core.ts), in the light and the dark theme, each framed on the same 16:10 backdrop.
@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from playwright.sync_api import Page, sync_playwright
 
 PAGES = "http://localhost:1430"
-OUT = Path(__file__).resolve().parents[2] / "docs" / "media"
+OUT = Path(__file__).resolve().parents[2] / "media"
 # The GIF: Edge's frames kept at most this often (25 a second), on a palette this big.
 FRAME_MS = 40
 COLORS = 256

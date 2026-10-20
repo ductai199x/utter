@@ -3,7 +3,7 @@
 #
 # 1. libwayland and libdrm come from the system it runs on, never the build machine: they go
 #    with the system's Mesa, which the AppImage never carries. With older ones inside, WebKit
-#    could not make its EGL display under Fedora 44's Mesa and the window stayed empty (the
+#    could not make its EGL display under Fedora 44's Mesa and the window stayed empty (a
 #    sibling project, 2026-10-14). linuxdeploy as Tauri runs it takes no exclusions, so they are
 #    removed from the AppDir and the image packed again.
 # 2. The runtime in front of the image is swapped for AppImage's static type2 runtime: Tauri's

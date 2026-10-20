@@ -18,8 +18,8 @@ Utter is signed with its own certificate ("Utter Homebrew Signing", SHA-1
 the Accessibility and Microphone permissions to the signing certificate, so they survive every
 update; an ad-hoc signature lost them at each update while System Settings still showed the
 switch on (measured on macOS 26.7, 2026-10-19). Every release must be signed with this same
-certificate. Its key is kept outside the repository (`%USERPROFILE%\.utter-signing\` on the
-development PC: `utter.p12` and the PEM files); losing it means every user grants the
+certificate. Its key is kept outside the repository, in the maintainer's backups
+(`utter.p12` and the PEM files); losing it means every user grants the
 permissions again once.
 
 To sign on a Mac, import `utter.p12` into a keychain of its own, then `sign.sh` (it reads the
@@ -43,7 +43,7 @@ To test a cask before publishing: `cask.sh ... VERSION dist file://$PWD/dist`, c
 `Casks/utter.rb` into a local tap (`brew tap-new --no-git you/local`), and
 `brew install --cask you/local/utter`. Do not commit that `Casks/utter.rb` (its URL is a file).
 
-How to rent, set up, drive and test on a Mac, and every macOS lesson so far: [docs/macos-testing.md](../../docs/macos-testing.md).
+How to rent, set up, drive and test on a Mac, and every macOS lesson so far: [docs/macos-testing.md](https://github.com/ductai199x/utter/blob/dev/docs/macos-testing.md).
 
 `dev-setup.sh` prepares a Mac for development (Xcode tools, Homebrew, Rust, Node, BlackHole as
 a virtual microphone for replayed speech).
