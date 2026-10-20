@@ -30,6 +30,7 @@ tracing-subscriber.workspace = true
 # reads the features from this line, not from a target section).
 tauri = { version = "2.12.2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-single-instance = "2.5.2"
+tauri-plugin-updater = "2"
 
 # The Bar's window type on Linux (main.rs, Bar::new).
 [target.'cfg(target_os = "linux")'.dependencies]

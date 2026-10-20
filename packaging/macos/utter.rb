@@ -14,6 +14,9 @@ cask "utter" do
   depends_on macos: ">= :sonoma"
   depends_on arch: :arm64
 
+  # Utter updates itself, when the person clicks Update (in Settings); brew upgrade works too.
+  auto_updates true
+
   app "Utter.app"
 
   # Utter is signed with its own certificate, not an Apple Developer ID, so Gatekeeper would

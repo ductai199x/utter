@@ -62,6 +62,10 @@ debug_log = false
 # said. They help find out why something went wrong. false writes none and deletes them.
 keep_logs = true
 
+# Check GitHub for a new version of Utter once a day. Nothing is downloaded or installed until
+# you click Update. false never checks.
+check_updates = true
+
 # How dictations are pasted, per app (docs/ux/insertion.md). Utter's defaults cover common
 # terminals, Office and remote desktops; an entry here replaces the default for that program.
 # with: \"ctrl-v\", \"ctrl-shift-v\", \"shift-insert\" or \"type\"
@@ -94,6 +98,8 @@ pub struct Settings {
     pub debug_log: bool,
     /// Keep Utter's own logs (utter_core::logs); off writes none and deletes them.
     pub keep_logs: bool,
+    /// Check for a new version once a day (crate users: the app's update.rs); it only offers.
+    pub check_updates: bool,
     /// The person's paste rules: each replaces Utter's default for its program.
     pub paste: Vec<PasteOverride>,
 }
@@ -392,6 +398,7 @@ impl Default for Settings {
             keep_history: KeepHistory::Forever,
             debug_log: false,
             keep_logs: true,
+            check_updates: true,
             paste: Vec::new(),
         }
     }
@@ -463,6 +470,7 @@ impl Settings {
         set(&mut doc, "keep_history", word(&self.keep_history).into());
         set(&mut doc, "debug_log", self.debug_log.into());
         set(&mut doc, "keep_logs", self.keep_logs.into());
+        set(&mut doc, "check_updates", self.check_updates.into());
         // The paste rules are tables at the end of the file; with none, no entries (the
         // commented example stays).
         if self.paste.is_empty() {
@@ -582,6 +590,7 @@ mod tests {
             keep_history: KeepHistory::Days30,
             debug_log: true,
             keep_logs: false,
+            check_updates: false,
             paste: vec![PasteOverride {
                 app: "mintty.exe".into(),
                 with: PasteWith::CtrlShiftV,

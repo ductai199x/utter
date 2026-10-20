@@ -22,6 +22,7 @@ mod home;
 mod problem;
 mod setup;
 mod splash;
+mod update;
 
 /// The Bar window's size in logical pixels (tauri.conf.json): room for the largest pill plus
 /// its shadow.
@@ -490,6 +491,30 @@ fn set_tray_status(app: &AppHandle, text: &str) {
     });
 }
 
+/// The tray's menu, kept to add and remove the update item.
+struct TrayMenu(Menu<tauri::Wry>);
+
+/// The tray menu's update item: "Update to Utter X..." while a newer version is offered, under
+/// Open Utter; gone otherwise. It opens Settings at the update, which the person starts there.
+pub fn set_tray_update(app: &AppHandle, status: &update::Status) {
+    let label = match status {
+        update::Status::Available { version, .. } => Some(format!("Update to Utter {version}...")),
+        _ => None,
+    };
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(menu) = handle.try_state::<TrayMenu>() else { return };
+        if let Some(old) = menu.0.get("update") {
+            let _ = menu.0.remove(&old);
+        }
+        if let Some(label) = label
+            && let Ok(item) = MenuItem::with_id(&handle, "update", label, true, None::<&str>)
+        {
+            let _ = menu.0.insert(&item, 1);
+        }
+    });
+}
+
 /// When the process started: startup is measured from here, the wait a person sees.
 static LAUNCHED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -576,6 +601,8 @@ fn main() {
         .manage(setup::MicCheck::default())
         .manage(setup::Downloading::default())
         .manage(setup::LastProblem::default())
+        .manage(update::Updates::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             home::home_state,
             home::home_quit,
@@ -596,6 +623,9 @@ fn main() {
             setup::setup_check,
             setup::setup_allow_input,
             setup::setup_restart_if_granted,
+            update::update_status,
+            update::update_check,
+            update::update_install,
             setup::setup_microphones,
             setup::setup_mic_start,
             setup::setup_mic_stop,
@@ -650,6 +680,8 @@ fn main() {
             let quit = MenuItem::with_id(app, "quit", "Quit Utter", true, None::<&str>)?;
             let line = || PredefinedMenuItem::separator(app);
             let menu = Menu::with_items(app, &[&open, &line()?, &paste, &copy, &retry, &line()?, &quit])?;
+            app.manage(TrayMenu(menu.clone()));
+            update::start(app.handle());
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("an app icon"))
                 .tooltip("Utter: loading...")
@@ -661,6 +693,10 @@ fn main() {
                     "copy-last" => send_command(app, utter_pipeline::Command::CopyLast),
                     "retry-last" => send_command(app, utter_pipeline::Command::RetryLast),
                     "quit" => app.exit(0),
+                    "update" => {
+                        home::show_launched(app);
+                        let _ = app.emit_to("home", "show-update", ());
+                    }
                     _ => {}
                 })
                 .build(app)?;

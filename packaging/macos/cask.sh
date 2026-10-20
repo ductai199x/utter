@@ -17,6 +17,8 @@ repo=$(cd "$here/../.." && pwd)
 mkdir -p "$out" "$repo/Casks"
 zip="Utter-$version-macos-arm64.zip"
 rm -f "$out/$zip"
+# The in-app update replaces Utter.app with this archive (packaging/latest-json.sh signs it).
+tar -czf "$out/Utter-$version-macos-arm64.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
 # ditto keeps the bundle's symlinks, extended attributes and signature intact.
 ditto -c -k --keepParent "$app" "$out/$zip"
 sha=$(shasum -a 256 "$out/$zip" | cut -d' ' -f1)

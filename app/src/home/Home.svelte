@@ -13,6 +13,7 @@
   import {
     homeState,
     onApplied,
+    onShowUpdate,
     onState,
     saveSettings,
     type Applied,
@@ -98,6 +99,13 @@
     window.addEventListener('focus', refresh);
     const offs = [
       onState(take),
+      // The tray's "Update to Utter X...": Settings, at the update row (Settings.svelte).
+      onShowUpdate(() => {
+        try {
+          sessionStorage.setItem('utter-show-update', '1');
+        } catch {}
+        go('settings');
+      }),
       onApplied((a) => {
         applied = { ...applied, [a.what]: a };
         if (a.status === 'ok') {

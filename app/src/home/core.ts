@@ -32,6 +32,7 @@ export interface Settings {
   keep_history: KeepHistory;
   debug_log: boolean;
   keep_logs: boolean;
+  check_updates: boolean;
   paste: PasteOverride[];
 }
 
@@ -109,6 +110,7 @@ const mock: HomeState = {
     keep_history: 'forever',
     debug_log: false,
     keep_logs: true,
+    check_updates: true,
     paste: [],
   },
   error: null,
@@ -258,6 +260,28 @@ export const historyClear = () => {
 };
 export const onHistoryChanged = (f: () => void): Promise<UnlistenFn> =>
   inTauri ? listen('history-changed', () => f()) : Promise.resolve(() => {});
+
+// New versions of Utter (update.rs) -----------------------------------------------------------
+
+/** Where an update stands: offered only; nothing installs until the person clicks Update. */
+export type UpdateStatus =
+  | { phase: 'idle' }
+  | { phase: 'checking' }
+  | { phase: 'current'; version: string }
+  | { phase: 'available'; version: string; notes: string | null; manual: boolean }
+  | { phase: 'downloading'; done: number; total: number | null }
+  | { phase: 'installing' }
+  | { phase: 'failed'; error: string };
+
+export const updateStatus = (): Promise<UpdateStatus> =>
+  inTauri ? invoke<UpdateStatus>('update_status') : Promise.resolve({ phase: 'idle' });
+export const updateCheck = (): Promise<void> => (inTauri ? invoke<void>('update_check') : Promise.resolve());
+export const updateInstall = (): Promise<void> => (inTauri ? invoke<void>('update_install') : Promise.resolve());
+export const onUpdateStatus = (f: (s: UpdateStatus) => void): Promise<UnlistenFn> =>
+  inTauri ? listen<UpdateStatus>('update-status', (e) => f(e.payload)) : Promise.resolve(() => {});
+/** The tray's "Update to Utter X..." item: Home shows Settings at the update. */
+export const onShowUpdate = (f: () => void): Promise<UnlistenFn> =>
+  inTauri ? listen('show-update', () => f()) : Promise.resolve(() => {});
 
 // Paste rules (docs/ux/insertion.md) ---------------------------------------------------------
 
