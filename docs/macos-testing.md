@@ -192,3 +192,28 @@ Utter.app`), wait 60 s for the first check, then Update from the menu bar menu o
 the new version (`plutil -extract CFBundleShortVersionString raw .../Info.plist`), the signature
 (`codesign -dr -`), and that dictation works without a prompt. Afterwards put the real release
 back: a machine left on a test version higher than the next real one is never offered it.
+
+## 11. Gotchas
+
+The Mac-generic ones (SSH keys, screen sharing, cliclick, prompts, BlackHole) are in the
+`vm-testing` skill's `references/gotchas.md`, "A remote Mac". Utter-specific:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| "Could not start: EP library is already registered under WebGpuExecutionProvider" | onnxruntime's Mac build has WebGPU built in | the Mac downloads no WebGPU plugin (`runtime_for`, `utter-asr` runtime) |
+| llama-server: `Library not loaded: @rpath/libggml-rpc.0.dylib`, then "Some of Utter's files are damaged" | the component's extract list left it out | `**/libggml-rpc*.dylib` in components.json |
+| the microphone step stays at "Nothing heard yet", no prompt | the entitlement was missing (above) | `Utter.entitlements` |
+| setup froze for 27 s at the microphone step | a sync Tauri command opened the microphone on the UI thread while macOS asked | async commands for anything that can wait on the person |
+| "Nothing heard yet" shows during macOS's microphone question | the timer started before the microphone opened | it starts once the microphone is open |
+| Allow added Utter to neither Accessibility nor Input Monitoring | asking for both at once | ask for Accessibility only; it covers reading keys |
+| keyboard access stays "Not allowed" after the switch is on | macOS applies it to a new process only | Utter restarts itself when the switch turns on |
+| macOS's permission prompt stays on screen after the switch is on | Utter opened the pane on top of macOS's own prompt | the first Allow leaves it to the prompt |
+| quitting Utter leaves llama-server (4 GB) running | no parent-death signal on macOS | a watcher shell ends it within seconds |
+| switching models kills the new server, the old one comes back | the leftover sweep ended this Utter's own servers | sweep only servers whose parent is not this Utter |
+| opening Utter while it runs shows nothing | macOS sends the running copy a reopen event | handle `RunEvent::Reopen` |
+| a window opens at every sign-in | macOS's session restore starts a second copy beside the login item | a plain start within 30 s of a sign-in start shows nothing |
+| "Utter can run in the background" at every start | the LaunchAgent was rewritten each start | write it only when it changes |
+| Utter could not start with no microphone at all | macOS names a default input that no longer exists ("bad object") | treat it as no microphone |
+| the download bar froze at 0 for 108 s offline | 60 s connect timeout, tried twice | 15 s to connect |
+| Esc, paste-last and copy-last "did nothing" in a test | cliclick's events never reach Utter's event tap | test with `mac.py hold` (real CGEvents) before calling it a bug |
+| tests show Utter 0.1.9 while the build is 0.1.11 | the version came from Cargo, not the app | the app's package version |
