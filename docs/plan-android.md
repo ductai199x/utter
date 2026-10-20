@@ -1,6 +1,6 @@
 # Plan: Utter on Android (the test phone), 2026-10-13
 
-Goal: the desktop experience on Tai's the test phone (the phone's chip, 16 GB): hold, speak, and clean
+Goal: the desktop experience on the test phone (16 GB): hold, speak, and clean
 text appears in the focused app, fully on the phone, with the same models (Parakeet, Utter's
 cleanup v2). Nothing is built until step 1 has measured each stage on the phone: no public
 number exists for these models on the phone's chip, and the desktop budget (key up to text 231-260 ms)
@@ -8,15 +8,15 @@ cannot be assumed.
 
 ## What is known (2026-10-13)
 
-- **the phone's chip's GPU is weak for compute** (Imagination PowerVR, replacing Mali): Geekbench GPU
-  compute about half the G4's, Vulkan drivers still maturing ([Android Authority][aa],
-  [Notebookcheck][nbc]). The GPU is the least likely home for either model.
-- **Tensor's TPU is open to apps** through the Tensor ML SDK, in beta with LiteRT, on the Pixel
-  10 series ([Google][tensor-sdk]). LiteRT-LM runs Gemma 4 E2B officially (52 tokens/s decode,
-  3,808 tokens/s prefill on an S26 Ultra GPU; no Pixel number published) ([model card][e2b]).
+- **The phone's GPU is weak for compute**: Geekbench GPU compute about half the previous
+  generation's, Vulkan drivers still maturing. The GPU is the least
+  likely home for either model.
+- **The phone's TPU is open to apps** through the vendor's ML SDK, in beta with LiteRT
+  ([vendor docs][tensor-sdk]). LiteRT-LM runs Gemma 4 E2B officially (52 tokens/s decode,
+  3,808 tokens/s prefill on an S26 Ultra GPU; no number published for this phone) ([model card][e2b]).
   Our cleanup models are Gemma 4 E2B and E4B fine-tunes, so converting them is plausible.
 - **llama.cpp on the phone's CPU** works for GGUF as-is (the Q4_0 repack uses Arm's int8
-  matrix instructions); no the phone's chip figure exists.
+  matrix instructions); no figure for its chip exists.
 - **Parakeet on Android** runs in sherpa-onnx's int8 builds (APKs published, no latency
   figures) ([sherpa-onnx][sherpa]); onnxruntime's Android build runs our own export on the CPU.
 - **Gemini Nano** (ML Kit Prompt API, best on Google's own phones) cannot load our cleanup model: public
@@ -28,7 +28,7 @@ cannot be assumed.
     keeps Gboard, but inserts through accessibility actions, needs a Play Store policy
     declaration, and OEMs sometimes drop the connection ([Wispr Flow docs][wispr]).
 
-## Measured on the test phone (2026-10-13)
+## Measured on the the test phone (2026-10-13)
 
 Tai's phone as he uses it: warm, other apps open, plugged in with the screen on. Cleanups are
 paced 10 s apart as real dictations are; llama.cpp b11535 built for arm64 (Armv9.2 with int8
@@ -255,7 +255,7 @@ backend is Apache-licensed.
 ## Decided (Tai, 2026-10-13)
 
 1. **Insertion: the bubble**, with a keyboard as the fallback if accessibility insertion proves
-   unreliable on the Pixel.
+   unreliable on the phone.
 2. **The Rust core is shared through JNI**; Kotlin owns the UI, audio capture and insertion.
 3. **A smaller cleanup model for the phone** is on the table (Tai): the measurements above size it.
 

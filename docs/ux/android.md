@@ -71,7 +71,7 @@ One screen at a time, each with a single action:
    unless the person chooses otherwise. Pausable; resumes after a restart.
 5. **Try it**: a text field on this screen to dictate into, the bubble shown next to it.
 
-## Performance (measured on the test phone, docs/plan-android.md)
+## Performance (measured on the the test phone, docs/plan-android.md)
 
 - The speech model runs on the GPU (about 330 ms for 5 s of speech), the cleanup model on the
   CPU (about 1.5 s for a sentence). Both stay loaded while the service runs, so a dictation
@@ -90,6 +90,6 @@ One screen at a time, each with a single action:
       is restored.
 - [ ] Dragging off the bubble cancels: nothing inserted, nothing kept.
 - [ ] No sound is ever played; the microphone is open only while listening.
-- [ ] Release to text p50 at or under 2 s on the test phone, measured in the app.
+- [ ] Release to text p50 at or under 2 s on the the test phone, measured in the app.
 - [ ] The service survives the app being swiped away and the phone sleeping, and the bubble
       comes back on the next focused field.
