@@ -562,7 +562,7 @@ fn download(
     let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
     let have = if have < file.size { have } else { 0 };
     let agent: ureq::Agent =
-        ureq::Agent::config_builder().timeout_connect(Some(STALL)).timeout_recv_response(Some(STALL)).build().into();
+        ureq::Agent::config_builder().timeout_connect(Some(CONNECT)).timeout_recv_response(Some(STALL)).build().into();
     let mut request = agent.get(&file.url);
     if have > 0 {
         request = request.header("Range", &format!("bytes={have}-"));
@@ -627,6 +627,11 @@ fn download(
     }
     fs::rename(&part, dest).map_err(io_err(dest))
 }
+
+/// How long connecting to the server may take: a healthy network connects in well under a
+/// second, and with 60 s (and a second address tried after the first) a network that drops
+/// packets showed a frozen "0.0 of 6.6 GB" for 108 s before saying anything (macOS, 2026-10-20).
+const CONNECT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// How long a download may go without a byte before it is an error.
 const STALL: std::time::Duration = std::time::Duration::from_secs(60);
