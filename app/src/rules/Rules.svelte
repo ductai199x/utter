@@ -9,6 +9,7 @@
   import { commandKey } from '../lib/keys';
   import {
     KEEP_LABELS,
+    WITH_CHOICES,
     WITH_LABELS,
     groupRules,
     homeState,
@@ -36,7 +37,7 @@
     ['default', 'Defaults'],
   ];
   const SOURCE_LABELS: Record<Source, string> = { default: 'Default', changed: 'Changed', yours: 'Yours' };
-  const WITHS = Object.entries(WITH_LABELS) as [PasteWith, string][];
+  const WITHS = WITH_CHOICES;
   const KEEPS = Object.entries(KEEP_LABELS) as [PasteKeep, string][];
 
   let settings = $state<Settings | null>(null);

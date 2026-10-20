@@ -298,10 +298,15 @@ export const openPasteRules = () =>
 export const WITH_LABELS: Record<PasteWith, string> = {
   // The primary paste keys: Cmd+V on a Mac.
   'ctrl-v': navigator.userAgent.includes('Macintosh') ? 'Cmd+V' : 'Ctrl+V',
-  'ctrl-shift-v': 'Ctrl+Shift+V',
+  // On a Mac this sends Cmd+Shift+V (insert/macos.rs).
+  'ctrl-shift-v': navigator.userAgent.includes('Macintosh') ? 'Cmd+Shift+V' : 'Ctrl+Shift+V',
   'shift-insert': 'Shift+Insert',
   type: 'Type it out',
 };
+/** The paste keys offered here: a Mac keyboard has no Insert key. */
+export const WITH_CHOICES = (Object.entries(WITH_LABELS) as [PasteWith, string][]).filter(
+  ([w]) => w !== 'shift-insert' || !navigator.userAgent.includes('Macintosh'),
+);
 export const KEEP_LABELS: Record<PasteKeep, string> = {
   normal: 'Normal',
   '3s': '3 seconds',
