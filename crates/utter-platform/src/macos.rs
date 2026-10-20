@@ -1,4 +1,4 @@
-//! macOS: the platform layer through the system's own frameworks (docs/plan-cross-platform.md,
+//! macOS: the platform layer through the system's own frameworks (docs/platforms.md,
 //! phase 2). Compile-checked in CI; not yet run on a Mac.
 //!
 //! - Keys: one listen-only event tap (CoreGraphics) for every subscriber, the hotkey and the

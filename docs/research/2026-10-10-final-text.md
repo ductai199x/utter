@@ -1,5 +1,8 @@
 # Research: how dictation becomes the text you meant (2026-10-10)
 
+> Reference research from 2026-10-10; what Utter does today is in [docs/cleanup.md](../cleanup.md).
+> Not maintained.
+
 Four research passes, run after Tai's first live test failed: the Bar showed raw words
 ("parenthesis four ex faster parenthesis") while a different, cleaned text was pasted, and the
 cleanup was built from a handful of hand-written examples. Sources are linked inline; [P] is a

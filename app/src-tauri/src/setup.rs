@@ -65,7 +65,7 @@ pub fn fallback_model() -> Option<utter_pipeline::settings::Model> {
     })
 }
 
-/// Which window opens at start (docs/ux/first-run.md, "When Utter starts: three paths").
+/// Which window opens at start (docs/ux/first-run.md, "When Utter starts: the paths").
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {

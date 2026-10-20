@@ -1,7 +1,7 @@
 # Utter
 
 Local voice dictation for Windows, Linux and macOS: hold a key, speak, and clean text appears
-in the focused app. A local answer to Wispr Flow. Read `DESIGN.md` before changing
+in the focused app. A local answer to Wispr Flow. Read `DESIGN.md` (and `docs/README.md`, the index of the rest) before changing
 architecture or scope; it is the source of truth.
 
 ## Priorities

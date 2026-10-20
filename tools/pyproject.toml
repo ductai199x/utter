@@ -45,7 +45,7 @@ runtime = [
     "onnx-asr[hub]>=0.12",
 ]
 
-# The speech models' official runtimes, for the accuracy bench (docs/model-survey.md).
+# The speech models' official runtimes, for the accuracy bench (docs/research/model-survey.md).
 models = [
     "torch>=2.14",
     "transformers>=5.19",

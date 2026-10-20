@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://github.com/ductai199x/utter/releases/latest"><b>Download for Windows or Linux</b></a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="docs/eval-results.md">Eval results</a> ·
+  <a href="docs/evals.md">Eval results</a> ·
   <a href="DESIGN.md">Design</a>
 </p>
 
@@ -107,7 +107,7 @@ go, and nothing you say ever leaves your machine.
 <img src="media/latency.svg" width="880" alt="After the key goes up: the last words are recognized in 48-71 ms, the dictation is cleaned in 131-158 ms and pasted in 47-61 ms, 231-260 ms in all.">
 
 On the development machine (RTX 3090 Ti), in the app itself. Every figure comes from
-[docs/eval-results.md](docs/eval-results.md), where the method and the raw numbers live.
+[docs/evals.md](docs/evals.md), where the method and the raw numbers live.
 
 | | |
 |---|---|
@@ -180,7 +180,7 @@ chat logs), spoken in seven ways (plain, with fillers, self-corrected, as comman
 far-back edits, with spoken punctuation, in broken grammar), voiced by text-to-speech and
 recognized by the same Parakeet the app runs. The answer key is known by construction. Every
 change to a model, prompt or setting is run against it and logged in
-[docs/eval-results.md](docs/eval-results.md), regressions included.
+[docs/evals.md](docs/evals.md), regressions included.
 
 **Reproducible from public data.** The models Utter ships are trained by one recipe on the
 published dataset, so anyone can rebuild them:
@@ -359,7 +359,7 @@ That installs the runtime components and models into the development data folder
 npx tauri dev
 ```
 
-[docs/local-setup.md](docs/local-setup.md) has the details: where data lives, the Python tools
+[docs/development.md](docs/development.md) has the details: where data lives, the Python tools
 (`utter-eval`, `utter-train`, `utter-data`, `utter-bench`, `utter-speech`) and every bench
 command.
 

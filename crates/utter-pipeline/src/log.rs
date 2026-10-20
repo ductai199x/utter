@@ -1,7 +1,7 @@
 //! The dictation log: one record per dictation, with every recognizer pass, every state of
 //! the Bar, the cleanup request and the result, each timed from key down, plus the audio.
 //! It stays on this machine (`<data dir>/dictations/`) and is what we read when a dictation
-//! goes wrong (docs/plan-final-text.md, "Logging").
+//! goes wrong (docs/development.md, "6. Where things are").
 
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};

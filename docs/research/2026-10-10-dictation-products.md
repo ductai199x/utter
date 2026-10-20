@@ -1,5 +1,8 @@
 # What dictation products do between transcript and text (2026-10-10)
 
+> Reference research from 2026-10-10; what Utter does today is in [docs/cleanup.md](../cleanup.md).
+> Not maintained.
+
 Survey of Wispr Flow (WF), Superwhisper (SW), Aqua Voice (AQ), Willow (WL), VoiceInk (VI, open
 source), MacWhisper, Monologue (MO), Dragon (DR), Apple, Google Docs/Gboard, Windows Voice
 Typing/Voice Access, from docs, changelogs, open-source prompts, GitHub issues and HN. Reddit,

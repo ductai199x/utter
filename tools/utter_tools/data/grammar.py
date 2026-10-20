@@ -1,6 +1,6 @@
 """Grammar errors for the "grammar" rendition kind: a correct passage is rewritten the way a
 speaker who makes grammar mistakes would say it, so the cleanup model learns to restore correct
-English (docs/cleanup-spec.md, rule 8; docs/plan-use-cases.md, recipe R2).
+English (docs/cleanup.md, rule 8; docs/cleanup.md, recipe R2).
 
 The method follows tagged corruption (Stahlberg & Kumar 2021, the C4_200M data): errors are
 requested by type, with the types drawn from a speaker profile (the first language and the

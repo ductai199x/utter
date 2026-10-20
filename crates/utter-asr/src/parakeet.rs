@@ -43,7 +43,7 @@ pub struct ParakeetOptions {
     /// The decoder and joint run once per emitted token and once per encoder frame: small
     /// graphs, where a GPU round trip costs more than the arithmetic. On the RTX 3090 Ti,
     /// warm, the CPU decodes in 12.6 ms p50 against 20.1 ms for the fused GPU step
-    /// (docs/eval-results.md, 2026-10-09), so the CPU is the default.
+    /// (docs/evals.md, 2026-10-09), so the CPU is the default.
     pub decoder: Device,
     /// TensorFloat-32 matrix math on the GPU: faster, slightly less precise.
     pub tf32: bool,
@@ -57,7 +57,7 @@ pub struct ParakeetOptions {
     /// spinning: one per core, spinning, won the speech bench back to back, but in the running
     /// app it starved everything else while the person spoke. The microphone's stream lost
     /// audio (26 gaps in three dictations, none after), and cleanup ran 15-20% slower; speech
-    /// itself got faster (2026-10-12, docs/eval-results.md).
+    /// itself got faster (2026-10-12, docs/evals.md).
     pub cpu_threads: usize,
     /// Let idle CPU worker threads spin-wait for the next call instead of sleeping.
     pub cpu_spinning: bool,

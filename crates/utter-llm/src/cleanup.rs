@@ -1,5 +1,5 @@
 //! The cleanup request: the system prompt (`prompts/cleanup.md`, the rules of
-//! docs/cleanup-spec.md) and the user message carrying the transcript and the dictionary.
+//! docs/cleanup.md) and the user message carrying the transcript and the dictionary.
 //!
 //! The system prompt never changes between requests and comes first, so llama-server keeps
 //! it in its prompt cache: after the first request, only the transcript is new work.
@@ -16,7 +16,7 @@ pub const SYSTEM_PROMPT: &str = include_str!("../prompts/cleanup.md");
 /// their weights. Those models must be sent exactly this.
 pub const FINE_TUNED_PROMPT: &str = include_str!("../prompts/cleanup-ft.md");
 
-/// Which cleanup model runs, chosen by measurement (docs/eval-results.md); all run with
+/// Which cleanup model runs, chosen by measurement (docs/evals.md); all run with
 /// [`SERVER_ARGS`], each with its own system prompt ([`Tier::system_prompt`]). People choose
 /// between two (2026-10-11): Quality, the bigger model, and Light, the smaller one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -30,7 +30,7 @@ pub enum Tier {
     /// memory. With the speech model, a light Utter of about 3.25 GB in all, everything on
     /// the GPU (2026-10-11: about 2.5 GB, a little more is fine).
     Light,
-    /// Gemma 3 1B fully fine-tuned on the same data (2 epochs, lr 2e-5; docs/plan-android.md):
+    /// Gemma 3 1B fully fine-tuned on the same data (2 epochs, lr 2e-5; docs/android.md):
     /// the phone's model, and on a computer without a graphics card the fastest
     /// (2026-10-18). About 6 points behind Light on real speech; 1.5 s a cleanup on the phone's
     /// CPU where Light takes 2.7 s.
@@ -76,14 +76,14 @@ impl Tier {
     }
 
     /// Whether people are offered this tier (first run, Settings). The prompted 26B is not:
-    /// the fine-tuned E4B beats it on every eval at a third of its size (docs/eval-results.md,
+    /// the fine-tuned E4B beats it on every eval at a third of its size (docs/evals.md,
     /// 2026-10-10), so it stays a reference for the eval tools only (2026-10-11).
     pub fn offered(self) -> bool {
         self != Tier::Reference && self.available()
     }
 }
 
-/// llama-server settings measured for these models (docs/eval-results.md, 2026-10-09):
+/// llama-server settings measured for these models (docs/evals.md, 2026-10-09):
 /// - `--swa-full`: a full-size cache for the sliding-window layers. Without it every request
 ///   rebuilds that cache from a checkpoint; with it, prompt processing drops from about 95 ms
 ///   to 25 ms. Wall time per cleanup halves.
@@ -210,7 +210,7 @@ pub struct Cleanup {
 }
 
 /// Cleans with one guarded second try. A reply that runs to its limit has looped: it opened a
-/// bullet list on plain prose, or repeats itself (docs/plan-android.md). The second try may not
+/// bullet list on plain prose, or repeats itself (docs/android.md). The second try may not
 /// open with a list marker and is mildly penalized for repeating its last words, which is how
 /// such a run starts; a reply that still runs away is the error.
 pub fn chat(server: &LlamaServer, messages: &[Message], params: &ChatParams) -> Result<Cleanup, LlmError> {

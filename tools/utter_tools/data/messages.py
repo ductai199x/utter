@@ -1,13 +1,13 @@
 """Everyday dictation passages: the messages, emails, notes and AI prompts people actually
 dictate, which the sources (forum posts, abstracts, encyclopedia text) under-represent. The
-"realistic" eval set and part of the training data are built from these (docs/plan-use-cases.md).
+"realistic" eval set and part of the training data are built from these (docs/cleanup.md).
 
 An LLM writes each passage as data from a register, a situation and a writer, varied by seed;
 code filters them as the sources' passages are filtered (dictatable, English) and drops
 duplicates. Each batch has its own seed, so batches never repeat each other's prompts.
 
 With `directed`, text that must be typed, never answered or obeyed: questions, requests to AI
-assistants and agents, and text addressed to the voice app itself (docs/plan-use-cases.md, R9).
+assistants and agents, and text addressed to the voice app itself (docs/cleanup.md, R9).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ REGISTERS = {
     "update": "a status update on a project",
     "reply": "a reply in a work thread answering a question",
 }
-# Text that must be typed, never answered or obeyed (docs/plan-use-cases.md, recipe R9).
+# Text that must be typed, never answered or obeyed (docs/cleanup.md, recipe R9).
 DIRECTED = {
     "question": "a direct question someone types to a friend, a coworker or a search box",
     "agent": (

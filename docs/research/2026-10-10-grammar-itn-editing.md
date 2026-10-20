@@ -1,5 +1,8 @@
 # Grammar, written forms, voice edits: literature and data (2026-10-10)
 
+> Reference research from 2026-10-10; what Utter does today is in [docs/cleanup.md](../cleanup.md).
+> Not maintained.
+
 What research and public data offer for the cleanup model's next skills. Condensed from a
 research agent's report. Licenses were checked on primary pages where reachable. Anything marked
 unverified was not checked.
@@ -10,7 +13,7 @@ unverified was not checked.
 - *Minimal* edits fix only what is wrong (CoNLL-2014, BEA-2019). *Fluency* edits rewrite until
   the text reads native (JFLEG; Sakaguchi et al., TACL 2016, https://aclanthology.org/Q16-1013/).
 - Fluency edits are where meaning drift appears.
-- Utter's rule (docs/cleanup-spec.md): fix everything ungrammatical, keep correct wording and
+- Utter's rule (docs/cleanup.md): fix everything ungrammatical, keep correct wording and
   register. That is minimal edits plus the fluency a native writer would need.
 
 **Metrics.**

@@ -11,7 +11,7 @@ Triton ships for Linux only.
 
 Output: <out>/adapter (the LoRA) and <out>/merged (the full model, for export_gguf.py).
 
-Its defaults are the recipe Quality and Light are trained with (docs/eval-results.md); utter-train
+Its defaults are the recipe Quality and Light are trained with (docs/evals.md); utter-train
 run starts it:  uv run --project envs/train torchrun --nproc-per-node N train_lora.py DATA OUT
 (the effective batch is N x batch x grad_accum).
 """
@@ -26,8 +26,8 @@ from pathlib import Path
 import typer
 
 # The models a cleanup model is trained from, pinned: E4B for Quality, E2B for Light (its GPU part
-# is half of E4B's: docs/eval-results.md), and Gemma 3's text-only 1B and 270M for the phone
-# (docs/plan-android.md). All are Google's unquantized QAT checkpoints.
+# is half of E4B's: docs/evals.md), and Gemma 3's text-only 1B and 270M for the phone
+# (docs/android.md). All are Google's unquantized QAT checkpoints.
 BASES = {
     "e4b": (
         "google/gemma-4-e4b-it-qat-q4_0-unquantized",
@@ -140,7 +140,7 @@ def main(
     full: bool = typer.Option(
         False,
         help="Train every weight instead of a LoRA (rank and alpha unused): what a small model "
-        "needs, as a LoRA leaves its pretrained habits in place (docs/plan-android.md).",
+        "needs, as a LoRA leaves its pretrained habits in place (docs/android.md).",
     ),
     checkpointing: bool = typer.Option(
         True,

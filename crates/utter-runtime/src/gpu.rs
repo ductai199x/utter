@@ -2,7 +2,7 @@
 //!
 //! Under light load (a speech pass every few hundred milliseconds) an NVIDIA GPU settles in
 //! P3, where the memory clock is half of P2's; the cleanup model's decoding is bound by memory
-//! bandwidth, so the request after key up takes twice as long (docs/eval-results.md). Busy work
+//! bandwidth, so the request after key up takes twice as long (docs/evals.md). Busy work
 //! to hold P2 costs power and, from another process, steals time slices from the work that
 //! matters. So the warmer runs one thread in a kernel that sleeps on the GPU (`nanosleep`, no
 //! memory traffic) while the key is down, and stops at key up: the clocks stay up for a second

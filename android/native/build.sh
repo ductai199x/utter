@@ -58,7 +58,7 @@ build_abi() {
     cargo build --manifest-path "$REPO/Cargo.toml" --release --target "$target" -p utter-mobile
   "$BIN/llvm-strip$EXE" -o "$OUT/$abi/libutter_mobile.so" "$REPO/target/$target/release/libutter_mobile.so"
 
-  # llama-server, as the phone benchmarks ran it (docs/plan-android.md).
+  # llama-server, as the phone benchmarks ran it (docs/android.md).
   local src build
   src=$(llama_source)
   build=$WORK/llama-$abi

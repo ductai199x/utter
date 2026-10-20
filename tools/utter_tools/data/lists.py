@@ -1,4 +1,4 @@
-"""Lists for the "list" rendition kind (docs/cleanup-spec.md, rule 4; docs/plan-use-cases.md,
+"""Lists for the "list" rendition kind (docs/cleanup.md, rule 4; docs/cleanup.md,
 recipe R3): spoken enumerations become bulleted lists, or numbered ones for steps, unless the
 user turns lists off.
 

@@ -209,7 +209,7 @@ impl LlamaServer {
         // server's own empty pass only delays ready.
         cmd.args(["--parallel", "1", "--no-webui", "--jinja", "--no-warmup"]);
         // On Vulkan, flash attention where the card does it well: on some Intel cards it slows
-        // prompt processing (docs/plan-vulkan.md), and llama.cpp knows which.
+        // prompt processing (docs/platforms.md), and llama.cpp knows which.
         let flash = match (opts.flash_attention, backend) {
             (false, _) => "off",
             (true, Backend::Cuda) => "on",
@@ -218,7 +218,7 @@ impl LlamaServer {
         cmd.args(["--flash-attn", flash]);
         if let Some(device) = &device {
             // Without it the Vulkan build splits the model across every GPU it sees, an
-            // integrated one too (docs/plan-vulkan.md).
+            // integrated one too (docs/platforms.md).
             cmd.args(["--device", device]);
         }
         cmd.args(&opts.extra_args);
@@ -357,7 +357,7 @@ impl LlamaServer {
     }
 
     /// One token, to keep the GPU and the server's threads from going idle: a request after
-    /// a few idle seconds takes more than twice as long (docs/eval-results.md). `messages`
+    /// a few idle seconds takes more than twice as long (docs/evals.md). `messages`
     /// should share the real request's system prompt, so the prompt cache keeps it.
     pub fn keep_warm(&self, messages: &[Message]) -> Result<Completion, LlmError> {
         self.complete_without_text(messages, 1)

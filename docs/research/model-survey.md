@@ -1,5 +1,14 @@
 # Model survey
 
+> **Reference research, checked live on 2026-10-09, before the models were chosen. Not maintained.**
+> What Utter ships today (0.1.10, `crates/utter-runtime/components.json`): speech recognition is
+> Parakeet Ultra (ONNX; 8-bit encoder on CUDA for both tiers, fp16 on Vulkan, int8 on
+> the processor), with Silero VAD 6.2.3 for segmenting. Cleanup is three fine-tuned models:
+> Quality (Gemma 4 E4B, v2), Light (Gemma 4 E2B, v2) and Extra light (Gemma 3 1B, v1), all Q4_0
+> GGUF, run by llama.cpp b11535.
+> The prompted Gemma 4 E4B QAT and 26B-A4B QAT components remain for evals and Command Mode.
+> Decisions and architecture: [DESIGN.md](../../DESIGN.md). Current numbers: [docs/evals.md](../evals.md).
+
 Checked live on 2026-10-09, from Hugging Face (model cards, the Hub API, the Open ASR
 Leaderboard's raw results) and GitHub. Nothing here is from memory. Re-run the survey before a
 model decision that is more than a few weeks old: this field moves monthly.
@@ -39,7 +48,7 @@ Cohere, Nemotron, Whisper), GGUF in C++ (NeMo-Speech.cpp for Nemotron, transcrib
 Cohere), vLLM (Linux only). The accuracy bench runs each model in its official runtime first.
 Only the winners get a native runtime inside the Rust core.
 
-Measured results and the choice made from them: `docs/eval-results.md`.
+Measured results and the choice made from them: [evals.md](../evals.md).
 
 ## Eval data (public, no recording needed)
 

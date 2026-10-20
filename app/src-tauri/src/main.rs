@@ -96,7 +96,7 @@ impl Bar {
     fn new(window: WebviewWindow) -> Self {
         // Windows places the Bar through utter_platform::overlay, by its HWND. Elsewhere Tauri
         // does (bar_bottom_center): on Linux the window runs under XWayland, where an X11 client
-        // may keep itself above others and place itself (docs/plan-cross-platform.md).
+        // may keep itself above others and place itself (docs/platforms.md).
         #[cfg(windows)]
         let hwnd = window.hwnd().ok().map(|h| h.0 as isize);
         #[cfg(not(windows))]

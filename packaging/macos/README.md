@@ -43,7 +43,7 @@ To test a cask before publishing: `cask.sh ... VERSION dist file://$PWD/dist`, c
 `Casks/utter.rb` into a local tap (`brew tap-new --no-git you/local`), and
 `brew install --cask you/local/utter`. Do not commit that `Casks/utter.rb` (its URL is a file).
 
-How to rent, set up, drive and test on a Mac, and every macOS lesson so far: [docs/macos-testing.md](../../docs/macos-testing.md).
+How to rent, set up, drive and test on a Mac, and every macOS lesson so far: [docs/development.md](../../docs/development.md).
 
 `dev-setup.sh` prepares a Mac for development (Xcode tools, Homebrew, Rust, Node, BlackHole as
 a virtual microphone for replayed speech).

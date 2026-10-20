@@ -1,6 +1,6 @@
 <script lang="ts">
   // The Settings section (docs/ux/home.md, docs/ux/insertion.md "Paste rules", docs/ux/history.md
-  // "Settings → History"). Every change saves at once through `save`; the core applies it on
+  // "Settings"). Every change saves at once through `save`; the core applies it on
   // the next dictation and reports back (`applied`).
   import { onMount, tick } from 'svelte';
   import Confirm from './Confirm.svelte';

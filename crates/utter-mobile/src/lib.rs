@@ -1,4 +1,4 @@
-//! Utter's core on Android (docs/plan-android.md, "Architecture"): the dictation session behind
+//! Utter's core on Android (docs/android.md, "Architecture"): the dictation session behind
 //! the app's few JNI calls ([`jni`]).
 //!
 //! The app hands over what happens on the bubble and the microphone's audio; everything that
@@ -247,7 +247,7 @@ impl Drop for Mobile {
     }
 }
 
-/// llama-server as the phone runs it (docs/plan-android.md, "A cleanup model for the phone"):
+/// llama-server as the phone runs it (docs/android.md, "The phone cleanup model"):
 /// the app's own build on the CPU, flash attention off, the desktop's drafting arguments.
 fn server_options(model: PathBuf, cfg: &Config) -> ServerOptions {
     let mut opts = ServerOptions::new(model);

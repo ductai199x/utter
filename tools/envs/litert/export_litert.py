@@ -1,5 +1,5 @@
 """Exports Parakeet's encoder (with the joint's encoder projection) to one LiteRT model for the
-phone's GPU (docs/plan-android.md, "Speech on the phone's GPU").
+phone's GPU (docs/android.md, "Speech encoder on the phone's GPU").
 
 The GPU runs fixed shapes, so the model holds one signature per input length (`frames_<T>`, T
 mel frames of 10 ms), all sharing the same weights. Each takes the clip's features padded to T,

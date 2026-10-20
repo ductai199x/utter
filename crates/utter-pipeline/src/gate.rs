@@ -1,7 +1,7 @@
 //! The cleanup gate (DESIGN.md section 4, step 6): does a transcript need the language model?
 //!
 //! The speech model already punctuates and capitalizes. A transcript with none of the things
-//! cleanup exists for (docs/cleanup-spec.md) goes straight to insertion, saving the model's
+//! cleanup exists for (docs/cleanup.md) goes straight to insertion, saving the model's
 //! 100-200 ms. The rules lean towards sending text to the model: a needless cleanup costs
 //! time, a skipped one leaves a filler or an uncorrected "2, no, 3" in the user's text.
 //! Measured against the curated cleanup cases in this module's tests.

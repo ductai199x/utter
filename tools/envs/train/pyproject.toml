@@ -16,7 +16,7 @@ dependencies = [
     "typer>=0.12",
 ]
 
-# Its own environment, kept on C: (docs/local-setup.md): training pins its own PyTorch and
+# Its own environment, kept on C: (docs/development.md): training pins its own PyTorch and
 # Transformers and must not constrain the eval tools.
 [[tool.uv.index]]
 name = "pytorch-cu130"

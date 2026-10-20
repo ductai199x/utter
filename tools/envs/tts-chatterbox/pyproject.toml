@@ -31,7 +31,7 @@ dependencies = [
     "soxr>=0.5",
 ]
 
-# Chatterbox pins torch 2.6.0, so it has its own environment, kept on C: (docs/local-setup.md).
+# Chatterbox pins torch 2.6.0, so it has its own environment, kept on C: (docs/development.md).
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"

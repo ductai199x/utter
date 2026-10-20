@@ -22,7 +22,7 @@ use crate::gate;
 use crate::log::{DictationLog, Entry};
 
 /// While listening, a recognizer pass at least this often keeps the GPU's clocks up
-/// (docs/eval-results.md, "Idle GPU").
+/// (docs/evals.md, "GPU clocks while the user speaks").
 const KEEPALIVE: Duration = Duration::from_millis(150);
 /// Whether keep-alive passes are worth their cost: on a GPU they hold its clocks up; on the
 /// processor they only took cores from the passes that matter and from the cleanup server.

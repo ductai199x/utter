@@ -1,5 +1,5 @@
-//! Cleanup while the user speaks (docs/plan-final-text.md, "One document, cleaned as you
-//! speak"). Each time a segment is transcribed, the dictation so far is sent for cleanup; the
+//! Cleanup while the user speaks (docs/cleanup.md, "How a dictation becomes text").
+//! Each time a segment is transcribed, the dictation so far is sent for cleanup; the
 //! Bar shows the cleaned text as soon as it is back, with the words not yet cleaned after it,
 //! marked provisional. At key up the final text is the cleanup of the whole dictation: already
 //! done if nothing new was heard since the last pause, so the paste does not wait for it.

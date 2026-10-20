@@ -1,9 +1,15 @@
 # Utter on Android: the bubble
 
 Dictation into any app on the phone, the way the Bar does it on the desktop: hold, speak, let
-go, and the cleaned text is in the field. Status: **spec, not built**. Decisions and
-measurements behind it: docs/plan-android.md. The implementation is reviewed against the checks
-at the end.
+go, and the cleaned text is in the field. Status (2026-10-20): **first version built in
+`android/`, run on the emulator only, not yet on the phone**. Architecture, measurements and
+decisions: [docs/android.md](../android.md). The implementation is reviewed against the checks at
+the end; none is met until it is measured on the phone.
+
+Built (emulator): the accessibility service, the bubble and the pill as overlays, the states
+below, haptics, insertion (set-text, then paste, then clipboard), the sensitive-field filter and
+the first-run screens. Not built: dragging the bubble and its per-app position, the model
+download in the first run, History on the phone.
 
 ## What it is for
 
@@ -29,7 +35,8 @@ when inserting.
 - A 48 dp circle with Utter's mark, at the right edge of the screen, vertically at 60% of the
   space above the keyboard. It appears when an editable field gains the focus and the keyboard
   is shown, and fades out (150 ms) when either goes.
-- Draggable along the screen edges; it remembers its edge and height per app.
+- Draggable along the screen edges; it remembers its edge and height per app. (Not built: today
+  it sits at the right edge at 60% of the space above the keyboard.)
 - Never takes the focus from the field and never moves the cursor.
 
 ## Dictating
@@ -71,16 +78,21 @@ One screen at a time, each with a single action:
    unless the person chooses otherwise. Pausable; resumes after a restart.
 5. **Try it**: a text field on this screen to dictate into, the bubble shown next to it.
 
-## Performance (measured on the the test phone, docs/plan-android.md)
+## Performance (docs/android.md, "Measurements")
 
-- The speech model runs on the GPU (about 330 ms for 5 s of speech), the cleanup model on the
-  CPU (about 1.5 s for a sentence). Both stay loaded while the service runs, so a dictation
-  never waits for a load; the first load after a restart takes about 9 s and happens in the
-  background.
+- Measured on the test phone outside the app: the speech encoder on the GPU takes 310-373 ms
+  for 5 s of speech (run as a foreground service, 2026-10-15); the cleanup model (Gemma 3 1B,
+  `utter-mini`) takes 1.49 s p50, 1.98 s p95 on the CPU (2026-10-15). Both stay loaded while the
+  service runs, so a dictation never waits for a load; the encoder's load took 8.1-9.1 s with
+  LiteRT's cache built (15.8 s the first time) and happens in the background.
 - Release to text, target: 2 s for a sentence at p50, with the live words in the pill from the
-  first pause.
+  first pause. Not yet measured in the app on the phone. On the emulator's CPU, which is not
+  the phone, the app took 1.7-2.8 s.
 
 ## Checks
+
+Status of each check: unverified on the phone; the emulator runs show the behavior but no check
+below is marked met.
 
 - [ ] The bubble appears within 200 ms of a text field gaining the focus with the keyboard up,
       and never in a password, PIN or card field.
@@ -90,6 +102,6 @@ One screen at a time, each with a single action:
       is restored.
 - [ ] Dragging off the bubble cancels: nothing inserted, nothing kept.
 - [ ] No sound is ever played; the microphone is open only while listening.
-- [ ] Release to text p50 at or under 2 s on the the test phone, measured in the app.
+- [ ] Release to text p50 at or under 2 s on the test phone, measured in the app.
 - [ ] The service survives the app being swiped away and the phone sleeping, and the bubble
       comes back on the next focused field.

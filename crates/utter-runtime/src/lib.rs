@@ -300,7 +300,7 @@ impl Component {
 ///
 /// First the biggest file's first range is timed: at memory speed the start is warm, and
 /// nothing more is read (reading 7 GB from the cache again cost a warm start 0.3-0.6 s).
-/// Measured (docs/eval-results.md, 2026-10-12): cold launch to ready 7.3 s -> 5.6-6.0 s, bound
+/// Measured (docs/evals.md, 2026-10-12): cold launch to ready 7.3 s -> 5.6-6.0 s, bound
 /// by the disk (under 2 GB/s for these files on this machine, whatever the method: one
 /// stream, eight, or the OS's own PrefetchVirtualMemory).
 pub fn read_ahead(files: Vec<PathBuf>) {
